@@ -11,6 +11,36 @@ class BarraNavegacion extends StatelessWidget {
     required this.onCambio,
   });
 
+  static const _nombres = [
+    'Cerca',
+    'Encuentros',
+    'Me Gusta',
+    'Chat',
+    'Perfil',
+  ];
+
+  static const _iconos = [
+    Icons.fmd_good_outlined,
+    Icons.switch_account_outlined,
+    Icons.favorite_outline,
+    Icons.chat_outlined,
+    Icons.person_outline,
+  ];
+
+  Widget _item(int i) {
+    final seleccionado = indiceActual == i;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(_iconos[i], size: 26,
+            color: seleccionado ? Colors.white : Colors.grey),
+        if (!seleccionado)
+          Text(_nombres[i],
+              style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
@@ -24,12 +54,12 @@ class BarraNavegacion extends StatelessWidget {
       animationCurve: Curves.easeInOut,
       animationDuration: const Duration(milliseconds: 300),
       height: 60,
-      items: <Widget>[
-        Icon(Icons.fmd_good_outlined, size: 26, color: indiceActual == 0 ? Colors.white : Colors.grey),
-        Icon(Icons.switch_account_outlined, size: 26, color: indiceActual == 1 ? Colors.white : Colors.grey),
-        Icon(Icons.favorite_outline, size: 26, color: indiceActual == 2 ? Colors.white : Colors.grey),
-        Icon(Icons.chat_outlined, size: 26, color: indiceActual == 3 ? Colors.white : Colors.grey),
-        Icon(Icons.person_outline, size: 26, color: indiceActual == 4 ? Colors.white : Colors.grey),
+      items: [
+        _item(0),
+        _item(1),
+        _item(2),
+        _item(3),
+        _item(4),
       ],
     );
   }
