@@ -10,7 +10,7 @@ class EncabezadoPagina extends StatelessWidget {
     final primario = Theme.of(context).colorScheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(24, 44, 16, 8),
       child: Row(
         children: [
           Image.asset('assets/images/flumi_logo.png', height: 36),

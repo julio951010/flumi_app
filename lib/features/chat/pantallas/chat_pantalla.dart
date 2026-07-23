@@ -49,15 +49,13 @@ class _ChatPantallaState extends State<ChatPantalla> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Chat')),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<List<Mensaje>>(
-              stream: widget.repositorio.observarConversacion(
-                widget.otroUsuarioId, widget.miId,
-              ),
+    return Column(
+      children: [
+        Expanded(
+          child: StreamBuilder<List<Mensaje>>(
+            stream: widget.repositorio.observarConversacion(
+              widget.otroUsuarioId, widget.miId,
+            ),
               builder: (context, snapshot) {
                 final mensajes = snapshot.data ?? [];
                 if (mensajes.isEmpty) {
@@ -109,7 +107,6 @@ class _ChatPantallaState extends State<ChatPantalla> {
             ),
           ),
         ],
-      ),
-    );
+      );
   }
 }
