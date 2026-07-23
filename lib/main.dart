@@ -38,7 +38,11 @@ void main() async {
 
   database = AppDatabase();
 
-  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
+  await Supabase.initialize(
+    url: supabaseUrl,
+    publishableKey: supabaseAnonKey,
+    authCallbackUrlHostname: 'callback',
+  );
 
   authService = AuthService();
 
