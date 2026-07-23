@@ -457,7 +457,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     final nombre = _nombresPaginas[_indice];
 
     final pantallas = <Widget>[
-      const Center(child: Text('Cerca — Fase 3')),
+      const Center(child: Text('Cerca de ti')),
       const Center(child: Text('Encuentros — Fase 3')),
       MatchesPantalla(repositorio: matchesRepositorio),
       ChatPantalla(
