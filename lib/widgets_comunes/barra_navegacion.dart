@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 
 class BarraNavegacion extends StatelessWidget {
   final int indiceActual;
@@ -12,30 +13,22 @@ class BarraNavegacion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NavigationBar(
-      selectedIndex: indiceActual,
-      onDestinationSelected: onCambio,
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.explore_outlined),
-          selectedIcon: Icon(Icons.explore),
-          label: 'Descubrir',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.favorite_outline),
-          selectedIcon: Icon(Icons.favorite),
-          label: 'Matches',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.chat_outlined),
-          selectedIcon: Icon(Icons.chat),
-          label: 'Chat',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.person_outline),
-          selectedIcon: Icon(Icons.person),
-          label: 'Perfil',
-        ),
+    final primario = Theme.of(context).colorScheme.primary;
+
+    return CurvedNavigationBar(
+      index: indiceActual,
+      onTap: onCambio,
+      color: Colors.white,
+      buttonBackgroundColor: primario,
+      backgroundColor: Colors.transparent,
+      animationCurve: Curves.easeInOut,
+      animationDuration: const Duration(milliseconds: 300),
+      height: 60,
+      items: <Widget>[
+        Icon(Icons.explore_outlined, size: 26, color: indiceActual == 0 ? Colors.white : Colors.grey),
+        Icon(Icons.favorite_outline, size: 26, color: indiceActual == 1 ? Colors.white : Colors.grey),
+        Icon(Icons.chat_outlined, size: 26, color: indiceActual == 2 ? Colors.white : Colors.grey),
+        Icon(Icons.person_outline, size: 26, color: indiceActual == 3 ? Colors.white : Colors.grey),
       ],
     );
   }
