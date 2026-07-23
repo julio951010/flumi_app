@@ -1,7 +1,10 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import '../../auth/auth_service.dart';
+import '../../legal/pantallas/terminos_pantalla.dart';
+import '../../legal/pantallas/politicas_pantalla.dart';
 
 class RegistroPantalla extends StatefulWidget {
   final AuthService authService;
@@ -180,10 +183,10 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Text.rich(
-                                TextSpan(
+                              child: RichText(
+                                text: TextSpan(
                                   style: TextStyle(
-                                    color: primario,
+                                    color: primario.withOpacity(0.85),
                                     fontSize: 13,
                                   ),
                                   children: [
@@ -191,20 +194,42 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                                     TextSpan(
                                       text: 'términos y condiciones',
                                       style: TextStyle(
+                                        color: primario,
                                         decoration:
                                             TextDecoration.underline,
+                                        fontWeight: FontWeight.w600,
                                       ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const TerminosPantalla(),
+                                            ),
+                                          );
+                                        },
                                     ),
                                     const TextSpan(text: ' y '),
                                     TextSpan(
                                       text: 'políticas de privacidad',
                                       style: TextStyle(
+                                        color: primario,
                                         decoration:
                                             TextDecoration.underline,
+                                        fontWeight: FontWeight.w600,
                                       ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const PoliticasPantalla(),
+                                            ),
+                                          );
+                                        },
                                     ),
                                   ],
-                                ),
+                               ),
                               ),
                             ),
                           ],
