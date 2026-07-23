@@ -13,6 +13,7 @@ import 'features/auth/pantallas/login_pantalla.dart';
 import 'features/auth/pantallas/olvide_contrasena_pantalla.dart';
 import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
 import 'features/auth/pantallas/registro_pantalla.dart';
+import 'features/auth/pantallas/restablecer_contrasena_pantalla.dart';
 import 'features/chat/chat_repositorio.dart';
 import 'features/chat/pantallas/chat_pantalla.dart';
 import 'features/matches/matches_repositorio.dart';
@@ -38,11 +39,7 @@ void main() async {
 
   database = AppDatabase();
 
-  await Supabase.initialize(
-    url: supabaseUrl,
-    publishableKey: supabaseAnonKey,
-    authCallbackUrlHostname: 'callback',
-  );
+  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
 
   authService = AuthService();
 
@@ -92,6 +89,7 @@ class _InicioRouterState extends State<_InicioRouter>
   bool _listo = false;
   bool _onboardingCompletado = false;
   bool? _autenticado;
+  bool _recoveryMode = false;
 
   // Transición splash -> contenido, en dos fases SEPARADAS y
   // SECUENCIALES (no la misma controller repartida con Interval):
@@ -145,7 +143,13 @@ class _InicioRouterState extends State<_InicioRouter>
   void _iniciar() {
     _autenticado = authService.estaAutenticado;
     authService.estadoStream.listen((estado) {
-      if (mounted) setState(() => _autenticado = estado.session != null);
+      if (!mounted) return;
+      setState(() {
+        _autenticado = estado.session != null;
+        if (estado.event == AuthChangeEvent.passwordRecovery) {
+          _recoveryMode = true;
+        }
+      });
     });
 
     // Esperar a que los procesos necesarios terminen,
@@ -176,7 +180,7 @@ class _InicioRouterState extends State<_InicioRouter>
     // estamos en la app autenticada: así, si el usuario cierra sesión,
     // reaparecen sin haber perdido el ritmo de su animación interna.
     final mostrarAguaYLogo =
-        !_listo || (_onboardingCompletado && _autenticado == false);
+        !_listo || (_onboardingCompletado && (_autenticado == false || _recoveryMode));
 
     return Scaffold(
       body: Container(
@@ -274,7 +278,7 @@ class _InicioRouterState extends State<_InicioRouter>
                       child: child,
                     ),
                   );
-                  if (_autenticado == false) {
+                  if (_autenticado == false || _recoveryMode) {
                     content = Positioned(
                       top: headerHeight + 20,
                       left: 0,
@@ -313,6 +317,14 @@ class _InicioRouterState extends State<_InicioRouter>
     }
     if (!_autenticado!) {
       return const _AuthWrapper();
+    }
+    if (_recoveryMode) {
+      return RestablecerContrasenaPantalla(
+        authService: authService,
+        onCompletado: () {
+          setState(() => _recoveryMode = false);
+        },
+      );
     }
     return IndicadorConexion(child: const _NavegacionPrincipal());
   }

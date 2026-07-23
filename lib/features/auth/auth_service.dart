@@ -36,4 +36,8 @@ class AuthService {
   Future<void> restablecerContrasena(String email) {
     return _auth.resetPasswordForEmail(email);
   }
+
+  Future<void> actualizarPassword(String nuevaPassword) {
+    return _auth.updateUser(UserAttributes(password: nuevaPassword));
+  }
 }
