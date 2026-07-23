@@ -45,7 +45,7 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
       if (!mounted) return;
 
       if (respuesta.session == null) {
-        widget.onCodigoVerificacion?.call();
+        widget.onLogin();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
