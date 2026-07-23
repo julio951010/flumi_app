@@ -1,0 +1,235 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'core/base_datos_local/database.dart';
+import 'core/constantes/constantes.dart';
+import 'core/estilos/tema.dart';
+import 'core/servicios/connectivity_service.dart';
+import 'core/servicios/sync_service.dart';
+import 'features/auth/auth_service.dart';
+import 'features/auth/pantallas/login_pantalla.dart';
+import 'features/auth/pantallas/registro_pantalla.dart';
+import 'features/chat/chat_repositorio.dart';
+import 'features/chat/pantallas/chat_pantalla.dart';
+import 'features/matches/matches_repositorio.dart';
+import 'features/matches/pantallas/matches_pantalla.dart';
+import 'features/onboarding/onboarding_servicio.dart';
+import 'features/onboarding/pantallas/onboarding_pantalla.dart';
+import 'features/perfiles/perfil_repositorio.dart';
+import 'features/perfiles/pantallas/perfil_pantalla.dart';
+import 'widgets_comunes/animacion_agua.dart';
+import 'widgets_comunes/barra_navegacion.dart';
+import 'widgets_comunes/indicador_conexion.dart';
+
+late final AppDatabase database;
+late final SyncService syncService;
+late final AuthService authService;
+late final PerfilRepositorio perfilRepositorio;
+late final MatchesRepositorio matchesRepositorio;
+late final ChatRepositorio chatRepositorio;
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  database = AppDatabase();
+
+  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
+
+  authService = AuthService();
+
+  syncService = SyncService(database);
+
+  await ConnectivityService.instancia.iniciar();
+  ConnectivityService.instancia.stream.listen((estado) {
+    if (estado == EstadoConexion.conectado) {
+      syncService.sincronizarTodo();
+    }
+  });
+
+  perfilRepositorio = PerfilRepositorio(database);
+  matchesRepositorio = MatchesRepositorio(database);
+  chatRepositorio = ChatRepositorio(database);
+
+  runApp(const FlumiApp());
+}
+
+class FlumiApp extends StatelessWidget {
+  const FlumiApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: appNombre,
+      debugShowCheckedModeBanner: false,
+      theme: FlumiTema.tema,
+      home: const _InicioRouter(),
+    );
+  }
+}
+
+class _InicioRouter extends StatefulWidget {
+  const _InicioRouter();
+
+  @override
+  State<_InicioRouter> createState() => _InicioRouterState();
+}
+
+class _InicioRouterState extends State<_InicioRouter> {
+  bool _listo = false;
+  bool _onboardingCompletado = false;
+  bool? _autenticado;
+
+  @override
+  void initState() {
+    super.initState();
+    _iniciar();
+  }
+
+  void _iniciar() {
+    _autenticado = authService.estaAutenticado;
+    authService.estadoStream.listen((estado) {
+      if (mounted) setState(() => _autenticado = estado.session != null);
+    });
+
+    OnboardingServicio.estaCompletado().then((v) {
+      if (mounted) setState(() => _onboardingCompletado = v);
+    });
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _listo = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final mostrarAnimacion = !_listo || // splash
+        (_listo && _onboardingCompletado); // auth pages
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFB3D9FF), Color(0xFFD6EAFF), Color(0xFFF2F8FF)],
+          ),
+        ),
+        child: Stack(
+        children: [
+          if (mostrarAnimacion)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: screenHeight * 0.35,
+              child: const AnimacionAgua(),
+            ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _buildContenido(),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  Widget _buildContenido() {
+    if (!_listo) {
+      return Center(
+        key: const ValueKey('splash'),
+        child: Image.asset(
+          'assets/images/flumi_logo_down.png',
+          width: 120,
+          height: 120,
+        ),
+      );
+    }
+
+    if (!_onboardingCompletado) {
+      return OnboardingPantalla(
+        key: const ValueKey('onboarding'),
+        onCompletado: () => setState(() => _onboardingCompletado = true),
+      );
+    }
+
+    if (_autenticado == null || (_autenticado! && authService.usuarioActual == null)) {
+      return const Center(
+        key: ValueKey('loading'),
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (!_autenticado!) {
+      return const _AuthWrapper(key: ValueKey('auth'));
+    }
+
+    return IndicadorConexion(
+      key: const ValueKey('app'),
+      child: const _NavegacionPrincipal(),
+    );
+  }
+}
+
+class _AuthWrapper extends StatefulWidget {
+  const _AuthWrapper({super.key});
+
+  @override
+  State<_AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<_AuthWrapper> {
+  bool _mostrarRegistro = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_mostrarRegistro) {
+      return RegistroPantalla(
+        authService: authService,
+        onLogin: () => setState(() => _mostrarRegistro = false),
+        onExito: () {},
+      );
+    }
+
+    return LoginPantalla(
+      authService: authService,
+      onRegistro: () => setState(() => _mostrarRegistro = true),
+      onExito: () {},
+    );
+  }
+}
+
+class _NavegacionPrincipal extends StatefulWidget {
+  const _NavegacionPrincipal();
+
+  @override
+  State<_NavegacionPrincipal> createState() => _NavegacionPrincipalState();
+}
+
+class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
+  int _indice = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final miId = authService.usuarioActual!.id;
+
+    final pantallas = <Widget>[
+      const Center(child: Text('Descubrir — Fase 3')),
+      MatchesPantalla(repositorio: matchesRepositorio),
+      ChatPantalla(
+        repositorio: chatRepositorio,
+        otroUsuarioId: '',
+        miId: miId,
+      ),
+      PerfilPantalla(repositorio: perfilRepositorio),
+    ];
+
+    return Scaffold(
+      body: pantallas[_indice],
+      bottomNavigationBar: BarraNavegacion(
+        indiceActual: _indice,
+        onCambio: (i) => setState(() => _indice = i),
+      ),
+    );
+  }
+}

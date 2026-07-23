@@ -1,0 +1,38 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# Archivos generados (Isar, build_runner)
+*.g.dart
+*.freezed.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android
+android/local.properties
+android/**/gradle-wrapper.jar
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Pods/
+
+# Isar (base de datos local, nunca debe subirse a git)
+*.isar
+*.isar.lock
+
+# Secretos — claves de Supabase, APIs, etc.
+.env
+lib/core/constantes/config.dart
