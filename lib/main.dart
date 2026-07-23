@@ -26,6 +26,7 @@ import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
 import 'widgets_comunes/indicador_conexion.dart';
 import 'widgets_comunes/logo_flotante.dart';
+import 'widgets_comunes/encabezado_pagina.dart';
 
 late final AppDatabase database;
 late final SyncService syncService;
@@ -441,10 +442,19 @@ class _NavegacionPrincipal extends StatefulWidget {
 class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   int _indice = 1;
 
+  static const _nombresPaginas = [
+    'Cerca',
+    'Encuentros',
+    'Me Gusta',
+    'Chat',
+    'Perfil',
+  ];
+
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
     final miId = authService.usuarioActual!.id;
+    final nombre = _nombresPaginas[_indice];
 
     final pantallas = <Widget>[
       const Center(child: Text('Cerca — Fase 3')),
@@ -462,7 +472,12 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
       extendBody: true,
       body: Stack(
         children: [
-          pantallas[_indice],
+          Column(
+            children: [
+              EncabezadoPagina(titulo: nombre),
+              Expanded(child: pantallas[_indice]),
+            ],
+          ),
           Positioned(
             bottom: 0,
             left: 0,
