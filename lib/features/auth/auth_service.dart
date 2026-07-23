@@ -20,11 +20,20 @@ class AuthService {
   Future<AuthResponse> registrar({
     required String email,
     required String password,
+    String? nombre,
   }) {
-    return _auth.signUp(email: email, password: password);
+    return _auth.signUp(
+      email: email,
+      password: password,
+      data: nombre != null ? {'nombre': nombre} : null,
+    );
   }
 
   Future<void> cerrarSesion() {
     return _auth.signOut();
+  }
+
+  Future<void> restablecerContrasena(String email) {
+    return _auth.resetPasswordForEmail(email);
   }
 }

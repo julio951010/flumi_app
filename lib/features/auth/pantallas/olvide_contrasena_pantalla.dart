@@ -1,69 +1,47 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/auth_service.dart';
 
-class LoginPantalla extends StatefulWidget {
+class OlvideContrasenaPantalla extends StatefulWidget {
   final AuthService authService;
-  final VoidCallback onRegistro;
-  final VoidCallback onOlvide;
-  final VoidCallback onExito;
+  final VoidCallback onLogin;
 
-  const LoginPantalla({
+  const OlvideContrasenaPantalla({
     super.key,
     required this.authService,
-    required this.onRegistro,
-    required this.onOlvide,
-    required this.onExito,
+    required this.onLogin,
   });
 
   @override
-  State<LoginPantalla> createState() => _LoginPantallaState();
+  State<OlvideContrasenaPantalla> createState() =>
+      _OlvideContrasenaPantallaState();
 }
 
-class _LoginPantallaState extends State<LoginPantalla> {
+class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
   final _emailCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _cargando = false;
-  bool _verPassword = false;
-  bool _recordar = false;
 
   @override
-  void initState() {
-    super.initState();
-    _cargarRecordado();
+  void dispose() {
+    _emailCtrl.dispose();
+    super.dispose();
   }
 
-  Future<void> _cargarRecordado() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email_recordado') ?? '';
-    if (email.isNotEmpty) {
-      setState(() {
-        _emailCtrl.text = email;
-        _recordar = true;
-      });
-    }
-  }
-
-  Future<void> _iniciarSesion() async {
+  Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      await widget.authService.iniciarSesion(
-        email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
+      await widget.authService.restablecerContrasena(_emailCtrl.text.trim());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Revisa tu correo para restablecer la contraseña.',
+          ),
+        ),
       );
-
-      final prefs = await SharedPreferences.getInstance();
-      if (_recordar) {
-        await prefs.setString('email_recordado', _emailCtrl.text.trim());
-      } else {
-        await prefs.remove('email_recordado');
-      }
-
-      widget.onExito();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -72,13 +50,6 @@ class _LoginPantallaState extends State<LoginPantalla> {
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
-  }
-
-  @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
   }
 
   @override
@@ -111,7 +82,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Iniciar Sesión',
+                        'Recuperar Contraseña',
                         style: TextStyle(
                           color: primario,
                           fontSize: 24,
@@ -119,8 +90,14 @@ class _LoginPantallaState extends State<LoginPantalla> {
                           letterSpacing: 1,
                         ),
                       ),
-                      const SizedBox(height: 28),
-                      _CampoAuth(
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.',
+                        style: TextStyle(fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      _CampoOlvide(
                         label: 'Correo electrónico',
                         icono: Icons.email_outlined,
                         tipo: TextInputType.emailAddress,
@@ -128,73 +105,12 @@ class _LoginPantallaState extends State<LoginPantalla> {
                         esOscuro: esOscuro,
                         colorPrimario: primario,
                       ),
-                      const SizedBox(height: 14),
-                      _CampoAuth(
-                        label: 'Contraseña',
-                        icono: Icons.lock_outlined,
-                        tipo: TextInputType.text,
-                        controlador: _passwordCtrl,
-                        esOscuro: esOscuro,
-                        esPassword: true,
-                        verPassword: _verPassword,
-                        onCambioVisibilidad: () =>
-                            setState(() => _verPassword = !_verPassword),
-                        colorPrimario: primario,
-                      ),
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTap: () => setState(() => _recordar = !_recordar),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: Checkbox(
-                                value: _recordar,
-                                onChanged: (v) =>
-                                    setState(() => _recordar = v!),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                visualDensity: VisualDensity.compact,
-                                side: BorderSide(color: primario),
-                                fillColor: WidgetStateProperty.all(
-                                  primario,
-                                ),
-                                checkColor: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Recordar contraseña',
-                            style: TextStyle(
-                              color: primario,
-                              fontSize: 13,
-                            ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: GestureDetector(
-                          onTap: widget.onOlvide,
-                            child: Text(
-                              '¿Olvidaste tu contraseña?',
-                              style: TextStyle(
-                                color: primario,
-                                fontSize: 13,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
                         height: 48,
                         child: ElevatedButton(
-                          onPressed: _cargando ? null : _iniciarSesion,
+                          onPressed: _cargando ? null : _enviar,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primario,
                             foregroundColor: Colors.white,
@@ -213,7 +129,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                   ),
                                 )
                               : const Text(
-                                  'Iniciar Sesión',
+                                  'Enviar',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 16,
@@ -223,20 +139,19 @@ class _LoginPantallaState extends State<LoginPantalla> {
                       ),
                       const SizedBox(height: 20),
                       GestureDetector(
-                        onTap: widget.onRegistro,
+                        onTap: widget.onLogin,
                         child: Text.rich(
                           TextSpan(
-                            text: '¿No tienes cuenta? ',
+                            text: 'Volver a ',
                             style: TextStyle(
                               color: primario.withOpacity(0.85),
                               fontSize: 14,
                             ),
                             children: [
                               TextSpan(
-                                text: 'Regístrate',
+                                text: 'Iniciar Sesión',
                                 style: TextStyle(
                                   color: primario,
-                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   decoration: TextDecoration.underline,
                                 ),
@@ -257,27 +172,21 @@ class _LoginPantallaState extends State<LoginPantalla> {
   }
 }
 
-class _CampoAuth extends StatelessWidget {
+class _CampoOlvide extends StatelessWidget {
   final String label;
   final IconData icono;
   final TextInputType tipo;
   final TextEditingController? controlador;
   final bool esOscuro;
-  final bool esPassword;
-  final bool verPassword;
-  final VoidCallback? onCambioVisibilidad;
   final Color colorPrimario;
 
-  const _CampoAuth({
+  const _CampoOlvide({
     required this.label,
     required this.icono,
     required this.tipo,
     this.controlador,
     required this.esOscuro,
     required this.colorPrimario,
-    this.esPassword = false,
-    this.verPassword = false,
-    this.onCambioVisibilidad,
   });
 
   @override
@@ -287,7 +196,6 @@ class _CampoAuth extends StatelessWidget {
       child: TextFormField(
         controller: controlador,
         keyboardType: tipo,
-        obscureText: esPassword && !verPassword,
         style: TextStyle(
           color: esOscuro ? Colors.white : Colors.black87,
           fontSize: 15,
@@ -305,20 +213,6 @@ class _CampoAuth extends StatelessWidget {
             color: colorPrimario.withOpacity(0.7),
             size: 20,
           ),
-          suffixIcon: esPassword
-              ? IconButton(
-                  icon: Icon(
-                    verPassword
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: esOscuro ? Colors.white70 : Colors.black45,
-                    size: 20,
-                  ),
-                  onPressed: onCambioVisibilidad,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                )
-              : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(

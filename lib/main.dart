@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,6 +10,8 @@ import 'core/servicios/connectivity_service.dart';
 import 'core/servicios/sync_service.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/pantallas/login_pantalla.dart';
+import 'features/auth/pantallas/olvide_contrasena_pantalla.dart';
+import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
 import 'features/auth/pantallas/registro_pantalla.dart';
 import 'features/chat/chat_repositorio.dart';
 import 'features/chat/pantallas/chat_pantalla.dart';
@@ -20,6 +24,7 @@ import 'features/perfiles/pantallas/perfil_pantalla.dart';
 import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
 import 'widgets_comunes/indicador_conexion.dart';
+import 'widgets_comunes/logo_flotante.dart';
 
 late final AppDatabase database;
 late final SyncService syncService;
@@ -76,57 +81,60 @@ class _InicioRouter extends StatefulWidget {
 
 class _InicioRouterState extends State<_InicioRouter>
     with TickerProviderStateMixin {
+  static const _alturaAguaSplash = 0.35;
+  static const _alturaAguaHeader = 0.25;
+  static const _logoSize = 130.0;
+
   bool _listo = false;
   bool _onboardingCompletado = false;
   bool? _autenticado;
-  late AnimationController _logoFlotar;
-  late Animation<double> _logoFlotarAnim;
-  late AnimationController _transCtrl;
-  late Animation<double> _logoSubirAnim;
-  late Animation<double> _formAparecerAnim;
+
+  // Transición splash -> contenido, en dos fases SEPARADAS y
+  // SECUENCIALES (no la misma controller repartida con Interval):
+  // 1) _transCtrl mueve el logo hacia el header y baja el agua.
+  // 2) Solo cuando (1) termina, arranca _formCtrl y recién ahí
+  //    aparece el formulario. La flotación propia del logo vive
+  //    dentro de LogoFlotante (independiente, como AnimacionAgua).
+  late final AnimationController _transCtrl;
+  late final Animation<double> _logoPosicionAnim;
+  late final Animation<double> _aguaAlturaAnim;
+
+  late final AnimationController _formCtrl;
+  late final Animation<double> _formAparecerAnim;
 
   @override
   void initState() {
     super.initState();
-    _logoFlotar = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2500),
-    );
-    _logoFlotarAnim = Tween<double>(begin: -6, end: 6).animate(
-      CurvedAnimation(parent: _logoFlotar, curve: Curves.easeInOutSine),
-    );
-    _logoFlotar
-      ..forward()
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          _logoFlotar.reverse();
-        } else if (status == AnimationStatus.dismissed) {
-          _logoFlotar.forward();
-        }
-      });
-    _logoFlotar.addListener(() => setState(() {}));
 
     _transCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 800),
     );
-    _logoSubirAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _transCtrl, curve: Curves.easeInOut),
+    _logoPosicionAnim = CurvedAnimation(
+      parent: _transCtrl,
+      curve: Curves.easeInOutCubic,
     );
-    _formAparecerAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _transCtrl,
-        curve: const Interval(0.55, 1.0, curve: Curves.easeOutBack),
-      ),
+    _aguaAlturaAnim = Tween<double>(
+      begin: _alturaAguaSplash,
+      end: _alturaAguaHeader,
+    ).animate(_logoPosicionAnim);
+
+    _formCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
     );
-    _transCtrl.addListener(() => setState(() {}));
+    _formAparecerAnim = CurvedAnimation(
+      parent: _formCtrl,
+      curve: Curves.easeOutCubic,
+    );
+
     _iniciar();
   }
 
   @override
   void dispose() {
-    _logoFlotar.dispose();
     _transCtrl.dispose();
+    _formCtrl.dispose();
     super.dispose();
   }
 
@@ -136,13 +144,21 @@ class _InicioRouterState extends State<_InicioRouter>
       if (mounted) setState(() => _autenticado = estado.session != null);
     });
 
-    OnboardingServicio.estaCompletado().then((v) {
-      if (mounted) setState(() => _onboardingCompletado = v);
-    });
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() => _listo = true);
-        _transCtrl.forward();
+    // Esperar a que los procesos necesarios terminen,
+    // con un mínimo visual para que el splash se vea.
+    Future.wait([
+      OnboardingServicio.estaCompletado(),
+      Future.delayed(const Duration(milliseconds: 1500)),
+    ]).then((resultados) async {
+      if (!mounted) return;
+      _onboardingCompletado = resultados[0] as bool;
+      setState(() => _listo = true);
+
+      await _transCtrl.forward();
+      if (!mounted) return;
+
+      if (_onboardingCompletado) {
+        await _formCtrl.forward();
       }
     });
   }
@@ -150,47 +166,17 @@ class _InicioRouterState extends State<_InicioRouter>
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
-    final mostrarAnimacion =
-        !_listo || (_listo && _onboardingCompletado && _autenticado == false);
+    final headerHeight = screenHeight * 0.08 + _logoSize + 28;
 
-    final float = _logoFlotarAnim.value;
-    final progress = _logoSubirAnim.value;
-
-    // Splash separado (garantiza que se vea)
-    if (!_listo) {
-      return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFB3D9FF), Color(0xFFD6EAFF), Color(0xFFF2F8FF)],
-            ),
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                height: screenHeight * 0.35,
-                child: const AnimacionAgua(),
-              ),
-              Center(
-                child: Transform.translate(
-                  offset: Offset(0, float),
-                  child: Image.asset(
-                    'assets/images/flumi_logo_down.png',
-                    width: 100, height: 100,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    // El agua y el logo se ocultan (pero NUNCA se desmontan) cuando ya
+    // estamos en la app autenticada: así, si el usuario cierra sesión,
+    // reaparecen sin haber perdido el ritmo de su animación interna.
+    final mostrarAguaYLogo =
+        !_listo || (_onboardingCompletado && _autenticado == false);
 
     return Scaffold(
       body: Container(
+        height: screenHeight,
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -200,44 +186,116 @@ class _InicioRouterState extends State<_InicioRouter>
         ),
         child: Stack(
           children: [
-            if (mostrarAnimacion)
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                height: screenHeight * 0.35,
-                child: const AnimacionAgua(),
+            // Onboarding: aparece en CUANTO termina el splash,
+            // simultáneamente con la transición del logo y el agua
+            // que ocurre por detrás.
+            if (_listo && !_onboardingCompletado)
+              OnboardingPantalla(
+                onCompletado: () {
+                  setState(() => _onboardingCompletado = true);
+                  _formCtrl.forward();
+                },
               ),
-            // Logo en parte superior
-            if (_onboardingCompletado)
-              Positioned(
-                top: screenHeight * 0.08 + float * (1 - progress),
-                left: 0, right: 0,
-                child: Center(
-                  child: Image.asset(
-                    'assets/images/flumi_logo_down.png',
-                    width: 100, height: 100,
+
+            // Agua: tres capas superpuestas con distinto color y altura
+            // para dar profundidad al efecto de agua.
+            AnimatedBuilder(
+              animation: _aguaAlturaAnim,
+              builder: (context, child) => Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: screenHeight * _aguaAlturaAnim.value,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: mostrarAguaYLogo ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    child: child!,
                   ),
                 ),
               ),
-            // Onboarding
-            if (!_onboardingCompletado)
-              OnboardingPantalla(
-                onCompletado: () =>
-                    setState(() => _onboardingCompletado = true),
+              child: const AnimacionAgua(),
+            ),
+
+            // Segunda capa de agua (más clara, un poco más baja)
+            AnimatedBuilder(
+              animation: _aguaAlturaAnim,
+              builder: (context, child) => Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: screenHeight * _aguaAlturaAnim.value * 0.85,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: mostrarAguaYLogo ? 0.7 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    child: child!,
+                  ),
+                ),
               ),
-            // Auth pages: aparecen desde abajo
-            if (_onboardingCompletado && !_transCtrl.isCompleted)
+              child: AnimacionAgua(color: const Color(0xff4A7AC9)),
+            ),
+
+            // Tercera capa de agua (la más clara, la más baja)
+            AnimatedBuilder(
+              animation: _aguaAlturaAnim,
+              builder: (context, child) => Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: screenHeight * _aguaAlturaAnim.value * 0.7,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: mostrarAguaYLogo ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    child: child!,
+                  ),
+                ),
+              ),
+              child: AnimacionAgua(color: const Color(0xff5A8AD8)),
+            ),
+
+            // Auth/app: se revela con _formAparecerAnim.
+            // Cuando es formulario de auth, se posiciona debajo de la
+            // cabecera y puede hacer scroll si excede el espacio.
+            if (_listo && _onboardingCompletado)
               AnimatedBuilder(
-                animation: _transCtrl,
-                builder: (context, _) {
-                  final formP = _formAparecerAnim.value;
-                  return Transform.translate(
-                    offset: Offset(0, screenHeight * (1 - formP)),
-                    child: Opacity(opacity: formP.clamp(0.0, 1.0), child: _buildPaginaAuth()),
+                animation: _formAparecerAnim,
+                builder: (context, child) {
+                  final t = _formAparecerAnim.value.clamp(0.0, 1.0);
+                  Widget content = Opacity(
+                    opacity: t,
+                    child: Transform.translate(
+                      offset: Offset(0, 24 * (1 - t)),
+                      child: child,
+                    ),
                   );
+                  if (_autenticado == false) {
+                    content = Positioned(
+                      top: headerHeight + 20,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: SingleChildScrollView(child: content),
+                    );
+                  }
+                  return content;
                 },
+                child: _buildPaginaAuth(),
               ),
-            if (_onboardingCompletado && _transCtrl.isCompleted)
-              _buildPaginaAuth(),
+
+            // Logo
+            AnimatedBuilder(
+              animation: _logoPosicionAnim,
+              builder: (context, _) => LogoFlotante(
+                progreso: _logoPosicionAnim.value,
+                topCentro: (screenHeight - _logoSize) / 2 - screenHeight * 0.10,
+                topHeader: screenHeight * 0.08,
+                tamano: _logoSize,
+                visible: mostrarAguaYLogo,
+                subtitulo: appTagline,
+              ),
+            ),
           ],
         ),
       ),
@@ -256,6 +314,8 @@ class _InicioRouterState extends State<_InicioRouter>
   }
 }
 
+enum _AuthPage { login, registro, olvideContrasena, codigoVerificacion }
+
 class _AuthWrapper extends StatefulWidget {
   const _AuthWrapper({super.key});
 
@@ -263,23 +323,94 @@ class _AuthWrapper extends StatefulWidget {
   State<_AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _AuthWrapperState extends State<_AuthWrapper> {
-  bool _mostrarRegistro = false;
+class _AuthWrapperState extends State<_AuthWrapper>
+    with SingleTickerProviderStateMixin {
+  _AuthPage _paginaActual = _AuthPage.login;
+  _AuthPage _paginaAnterior = _AuthPage.login;
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Widget _buildForm(_AuthPage pagina) {
+    switch (pagina) {
+      case _AuthPage.login:
+        return LoginPantalla(
+          authService: authService,
+          onRegistro: () => _alternar(_AuthPage.registro),
+          onOlvide: () => _alternar(_AuthPage.olvideContrasena),
+          onExito: () {},
+        );
+      case _AuthPage.registro:
+        return RegistroPantalla(
+          authService: authService,
+          onLogin: () => _alternar(_AuthPage.login),
+          onExito: () {},
+          onCodigoVerificacion: () =>
+              _alternar(_AuthPage.codigoVerificacion),
+        );
+      case _AuthPage.olvideContrasena:
+        return OlvideContrasenaPantalla(
+          authService: authService,
+          onLogin: () => _alternar(_AuthPage.login),
+        );
+      case _AuthPage.codigoVerificacion:
+        return CodigoVerificacionPantalla(
+          onLogin: () => _alternar(_AuthPage.login),
+          onRegistro: () => _alternar(_AuthPage.registro),
+        );
+    }
+  }
+
+  void _alternar(_AuthPage destino) {
+    if (_ctrl.isAnimating) return;
+    _paginaAnterior = _paginaActual;
+    _paginaActual = destino;
+    _ctrl.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (_mostrarRegistro) {
-      return RegistroPantalla(
-        authService: authService,
-        onLogin: () => setState(() => _mostrarRegistro = false),
-        onExito: () {},
-      );
-    }
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) {
+        final valor = _ctrl.value;
+        if (!_ctrl.isAnimating) {
+          return _buildForm(_paginaActual);
+        }
 
-    return LoginPantalla(
-      authService: authService,
-      onRegistro: () => setState(() => _mostrarRegistro = true),
-      onExito: () {},
+        final angulo = valor * pi;
+        final mostrarAntiguo = valor <= 0.5;
+        final formulario = _buildForm(
+          mostrarAntiguo ? _paginaAnterior : _paginaActual,
+        );
+
+        return Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.001)
+            ..rotateY(angulo),
+          child: mostrarAntiguo
+              ? formulario
+              : Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()..rotateY(pi),
+                  child: formulario,
+                ),
+        );
+      },
     );
   }
 }
