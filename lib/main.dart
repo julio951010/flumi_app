@@ -443,7 +443,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   int _indice = 1;
 
   static const _nombresPaginas = [
-    'Cerca',
+    'Cerca de ti',
     'Encuentros',
     'Me Gusta',
     'Chat',
