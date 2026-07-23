@@ -20,7 +20,7 @@ class BarraNavegacion extends StatelessWidget {
       onTap: onCambio,
       color: Colors.white,
       buttonBackgroundColor: primario,
-      backgroundColor: Colors.transparent,
+      backgroundColor: primario,
       animationCurve: Curves.easeInOut,
       animationDuration: const Duration(milliseconds: 300),
       height: 60,
