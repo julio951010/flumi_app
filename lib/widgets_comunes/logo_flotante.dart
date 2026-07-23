@@ -109,7 +109,7 @@ class _LogoFlotanteState extends State<LogoFlotante>
                         child: Text(
                           widget.subtitulo!,
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 18,
                             fontWeight: FontWeight.w300,
                             letterSpacing: 1.2,
