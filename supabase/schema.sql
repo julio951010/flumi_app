@@ -13,13 +13,14 @@ create extension if not exists "uuid-ossp";
 create table public.profiles (
   id                    uuid primary key references auth.users(id) on delete cascade,
   nombre                text not null,
-  fecha_nacimiento      date not null,  -- validado server-side, no solo "edad"
+  fecha_nacimiento      date,              -- nullable hasta el onboarding
   biografia             text default '',
   fotos_urls            text[] default '{}',
   preferencia_edad_min  int default 18,
   preferencia_edad_max  int default 99,
-  genero                text not null check (genero in ('hombre','mujer','otro')),
-  busca_genero          text not null,
+  genero                text               -- nullable hasta el onboarding
+                        check (genero in ('hombre','mujer','otro')),
+  busca_genero          text default 'otro',
   ubicacion             geography(Point, 4326),  -- PostGIS: lon/lat
   verificado_status     boolean default false,
   score_popularidad     int default 0,
@@ -27,7 +28,8 @@ create table public.profiles (
   creado_en             timestamptz default now(),
 
   constraint edad_minima check (
-    fecha_nacimiento <= (current_date - interval '18 years')
+    fecha_nacimiento is null
+    or fecha_nacimiento <= (current_date - interval '18 years')
   )
 );
 
@@ -142,6 +144,29 @@ create policy "usuario_gestiona_sus_bloqueos"
   on public.blocks for all
   using (auth.uid() = bloqueador_id)
   with check (auth.uid() = bloqueador_id);
+
+-- ============================================================
+-- TRIGGER: crear perfil automáticamente al registrarse
+-- ============================================================
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = ''
+as $$
+begin
+  insert into public.profiles (id, nombre)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'nombre', split_part(new.email, '@', 1))
+  );
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row
+  execute function public.handle_new_user();
 
 -- ============================================================
 -- FUNCIÓN: perfiles cercanos (usada por el feed de descubrimiento)
