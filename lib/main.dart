@@ -458,23 +458,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     ];
 
     return Scaffold(
-      extendBody: true,
       body: pantallas[_indice],
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              primario,
-              primario.withOpacity(0),
-            ],
-          ),
-        ),
-        child: BarraNavegacion(
-          indiceActual: _indice,
-          onCambio: (i) => setState(() => _indice = i),
-        ),
+      bottomNavigationBar: BarraNavegacion(
+        indiceActual: _indice,
+        onCambio: (i) => setState(() => _indice = i),
       ),
     );
   }
