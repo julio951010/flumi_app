@@ -25,10 +25,11 @@ class BarraNavegacion extends StatelessWidget {
       animationDuration: const Duration(milliseconds: 300),
       height: 60,
       items: <Widget>[
-        Icon(Icons.explore_outlined, size: 26, color: indiceActual == 0 ? Colors.white : Colors.grey),
-        Icon(Icons.favorite_outline, size: 26, color: indiceActual == 1 ? Colors.white : Colors.grey),
-        Icon(Icons.chat_outlined, size: 26, color: indiceActual == 2 ? Colors.white : Colors.grey),
-        Icon(Icons.person_outline, size: 26, color: indiceActual == 3 ? Colors.white : Colors.grey),
+        Icon(Icons.near_me_outlined, size: 26, color: indiceActual == 0 ? Colors.white : Colors.grey),
+        Icon(Icons.explore_outlined, size: 26, color: indiceActual == 1 ? Colors.white : Colors.grey),
+        Icon(Icons.favorite_outline, size: 26, color: indiceActual == 2 ? Colors.white : Colors.grey),
+        Icon(Icons.chat_outlined, size: 26, color: indiceActual == 3 ? Colors.white : Colors.grey),
+        Icon(Icons.person_outline, size: 26, color: indiceActual == 4 ? Colors.white : Colors.grey),
       ],
     );
   }

@@ -447,7 +447,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     final miId = authService.usuarioActual!.id;
 
     final pantallas = <Widget>[
-      const Center(child: Text('Descubrir — Fase 3')),
+      const Center(child: Text('Cerca — Fase 3')),
+      const Center(child: Text('Encuentros — Fase 3')),
       MatchesPantalla(repositorio: matchesRepositorio),
       ChatPantalla(
         repositorio: chatRepositorio,
