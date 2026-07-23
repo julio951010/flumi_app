@@ -466,7 +466,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
             bottom: 0,
             left: 0,
             right: 0,
-            height: 80,
+            height: 60,
             child: Container(color: primario),
           ),
         ],
