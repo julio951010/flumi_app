@@ -45,14 +45,13 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
       if (!mounted) return;
 
       if (respuesta.session == null) {
+        widget.onCodigoVerificacion?.call();
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Revisa tu correo para confirmar la cuenta.'),
           ),
         );
-        widget.onExito();
-      } else {
-        widget.onExito();
       }
     } catch (e) {
       if (!mounted) return;
