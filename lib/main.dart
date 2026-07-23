@@ -439,7 +439,7 @@ class _NavegacionPrincipal extends StatefulWidget {
 }
 
 class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
-  int _indice = 0;
+  int _indice = 1;
 
   @override
   Widget build(BuildContext context) {
