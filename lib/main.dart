@@ -458,7 +458,19 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     ];
 
     return Scaffold(
-      body: pantallas[_indice],
+      extendBody: true,
+      body: Stack(
+        children: [
+          pantallas[_indice],
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 80,
+            child: Container(color: primario),
+          ),
+        ],
+      ),
       bottomNavigationBar: BarraNavegacion(
         indiceActual: _indice,
         onCambio: (i) => setState(() => _indice = i),
