@@ -4,10 +4,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/constantes/constantes.dart';
+import '../../core/servicios/connectivity_service.dart';
 
 class ChatRepositorio {
   final AppDatabase _db;
   StreamSubscription? _realtimeSub;
+  StreamSubscription? _connectivitySub;
 
   ChatRepositorio(this._db);
 
@@ -46,9 +48,16 @@ class ChatRepositorio {
 
   void suscribirseARealtime(String userId) {
     _realtimeSub?.cancel();
+    if (!ConnectivityService.instancia.hayConexion) {
+      _realtimeSub = null;
+      _escucharReconexion(userId);
+      return;
+    }
+
     _realtimeSub = Supabase.instance.client
         .from(tablaMessages)
         .stream(primaryKey: ['id'])
+        .handleError((_) {})
         .listen((cambios) async {
       for (final cambio in cambios) {
         final dbId = cambio['id'] as String?;
@@ -71,7 +80,22 @@ class ChatRepositorio {
     });
   }
 
+  void _escucharReconexion(String userId) {
+    _connectivitySub?.cancel();
+    _connectivitySub =
+        ConnectivityService.instancia.stream.listen((estado) {
+      if (estado == EstadoConexion.conectado) {
+        _connectivitySub?.cancel();
+        _connectivitySub = null;
+        suscribirseARealtime(userId);
+      }
+    });
+  }
+
   void cancelarRealtime() {
     _realtimeSub?.cancel();
+    _realtimeSub = null;
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
   }
 }
