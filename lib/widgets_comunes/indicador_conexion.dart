@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/servicios/connectivity_service.dart';
+import '../core/servicios/notificacion_servicio.dart';
 
 class IndicadorConexion extends StatefulWidget {
   final Widget child;
@@ -18,29 +19,27 @@ class _IndicadorConexionState extends State<IndicadorConexion> {
     super.initState();
     _conectado = ConnectivityService.instancia.hayConexion;
     ConnectivityService.instancia.stream.listen((estado) {
-      if (mounted) {
-        setState(() => _conectado = estado == EstadoConexion.conectado);
+      if (!mounted) return;
+      final ahora = estado == EstadoConexion.conectado;
+      if (ahora == _conectado) return;
+      setState(() => _conectado = ahora);
+
+      if (!ahora) {
+        NotificacionServicio.advertencia(
+          context,
+          'Sin conexión — los cambios se sincronizarán después',
+        );
+      } else {
+        NotificacionServicio.exito(
+          context,
+          'Conexión restablecida',
+        );
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        if (!_conectado)
-          Container(
-            width: double.infinity,
-            color: Colors.orange,
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: const Text(
-              'Sin conexión — los cambios se sincronizarán después',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 12),
-            ),
-          ),
-        Expanded(child: widget.child),
-      ],
-    );
+    return widget.child;
   }
 }
