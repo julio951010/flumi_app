@@ -191,10 +191,7 @@ class _BotonCerrarSesion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: OutlinedButton.icon(
+    return OutlinedButton.icon(
         onPressed: () async {
           final confirmado = await showDialog<bool>(
             context: context,
@@ -218,7 +215,6 @@ class _BotonCerrarSesion extends StatelessWidget {
           side: BorderSide(color: Colors.red[400]!),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
-      ),
     );
   }
 }
