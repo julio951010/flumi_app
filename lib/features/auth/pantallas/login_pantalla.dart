@@ -303,9 +303,7 @@ class _CampoAuth extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: TextFormField(
+    return TextFormField(
         controller: controlador,
         keyboardType: tipo,
         obscureText: esPassword && !verPassword,
@@ -358,7 +356,6 @@ class _CampoAuth extends StatelessWidget {
             vertical: 14,
           ),
         ),
-      ),
-    );
+      );
   }
 }
