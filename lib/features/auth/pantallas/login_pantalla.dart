@@ -40,9 +40,11 @@ class _LoginPantallaState extends State<LoginPantalla> {
   Future<void> _cargarRecordado() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email_recordado') ?? '';
+    final password = prefs.getString('password_recordado') ?? '';
     if (email.isNotEmpty) {
       setState(() {
         _emailCtrl.text = email;
+        _passwordCtrl.text = password;
         _recordar = true;
       });
     }
@@ -60,8 +62,10 @@ class _LoginPantallaState extends State<LoginPantalla> {
       final prefs = await SharedPreferences.getInstance();
       if (_recordar) {
         await prefs.setString('email_recordado', _emailCtrl.text.trim());
+        await prefs.setString('password_recordado', _passwordCtrl.text);
       } else {
         await prefs.remove('email_recordado');
+        await prefs.remove('password_recordado');
       }
 
       widget.onExito();
