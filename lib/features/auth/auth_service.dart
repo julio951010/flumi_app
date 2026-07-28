@@ -13,6 +13,11 @@ class ErrorServidorException implements Exception {
   String toString() => 'No se pudo conectar con el servidor. Intenta de nuevo más tarde.';
 }
 
+class CredencialesInvalidasException implements Exception {
+  @override
+  String toString() => 'Credenciales inválidas. Verifica tus datos e intenta de nuevo.';
+}
+
 class AuthService {
   final GoTrueClient _auth;
 
@@ -72,6 +77,19 @@ class AuthService {
       throw ErrorServidorException();
     } on HttpException {
       throw ErrorServidorException();
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('invalid login') ||
+          msg.contains('invalid credentials') ||
+          msg.contains('email not confirmed') ||
+          msg.contains('user not found') ||
+          msg.contains('wrong password')) {
+        throw CredencialesInvalidasException();
+      }
+      if (msg.contains('user already registered')) {
+        throw Exception('El correo ya está registrado. ¿Quieres iniciar sesión?');
+      }
+      rethrow;
     } catch (e) {
       if (e.toString().contains('SocketException') ||
           e.toString().contains('Failed host lookup') ||

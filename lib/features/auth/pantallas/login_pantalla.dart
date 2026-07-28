@@ -88,12 +88,15 @@ class _LoginPantallaState extends State<LoginPantalla> {
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
     final esOscuro = Theme.of(context).brightness == Brightness.dark;
+    final ancho = MediaQuery.of(context).size.width;
+    final maxCardWidth = ancho > 600 ? 480.0 : 380.0;
+    final horizontalMargin = ancho > 600 ? 48.0 : 24.0;
 
     return Center(
       child: SingleChildScrollView(
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 24),
-          constraints: const BoxConstraints(maxWidth: 380),
+          margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
+          constraints: BoxConstraints(maxWidth: maxCardWidth),
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withOpacity(0.5)),
             borderRadius: BorderRadius.circular(15),
@@ -110,6 +113,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                 ),
                 child: Form(
                   key: _formKey,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
