@@ -77,6 +77,8 @@ class AuthService {
       throw ErrorServidorException();
     } on HttpException {
       throw ErrorServidorException();
+    } on AuthRetryableFetchException {
+      throw ErrorServidorException();
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();
       if (msg.contains('invalid login') ||
