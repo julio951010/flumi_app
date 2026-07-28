@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import '../../auth/auth_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 
 class RestablecerContrasenaPantalla extends StatefulWidget {
   final AuthService authService;
@@ -40,17 +41,14 @@ class _RestablecerContrasenaPantallaState
     try {
       await widget.authService.actualizarPassword(_passwordCtrl.text);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Contraseña actualizada correctamente.'),
-        ),
+      NotificacionServicio.exito(
+        context,
+        'Contraseña actualizada correctamente.',
       );
       widget.onCompletado();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      NotificacionServicio.alerta(context, e.toString());
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -60,12 +58,15 @@ class _RestablecerContrasenaPantallaState
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
     final esOscuro = Theme.of(context).brightness == Brightness.dark;
+    final ancho = MediaQuery.of(context).size.width;
+    final maxCardWidth = ancho > 600 ? 480.0 : 380.0;
+    final horizontalMargin = ancho > 600 ? 48.0 : 24.0;
 
     return Center(
       child: SingleChildScrollView(
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 24),
-          constraints: const BoxConstraints(maxWidth: 380),
+          margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
+          constraints: BoxConstraints(maxWidth: maxCardWidth),
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withOpacity(0.5)),
             borderRadius: BorderRadius.circular(15),
@@ -82,6 +83,7 @@ class _RestablecerContrasenaPantallaState
                 ),
                 child: Form(
                   key: _formKey,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -111,6 +113,11 @@ class _RestablecerContrasenaPantallaState
                         onCambioVisibilidad: () =>
                             setState(() => _verPassword = !_verPassword),
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Ingresa una contraseña';
+                          if (v.length < 6) return 'Mínimo 6 caracteres';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       _CampoRestablecer(
@@ -124,9 +131,8 @@ class _RestablecerContrasenaPantallaState
                             setState(() => _verConfirmar = !_verConfirmar),
                         colorPrimario: primario,
                         validator: (v) {
-                          if (v != _passwordCtrl.text) {
-                            return 'Las contraseñas no coinciden';
-                          }
+                          if (v == null || v.isEmpty) return 'Confirma tu contraseña';
+                          if (v != _passwordCtrl.text) return 'Las contraseñas no coinciden';
                           return null;
                         },
                       ),
@@ -199,19 +205,10 @@ class _CampoRestablecer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: TextFormField(
+    return TextFormField(
         controller: controlador,
         obscureText: esPassword && !verPassword,
-        validator: validator ??
-            (v) {
-              if (v == null || v.isEmpty) return 'Campo requerido';
-              if (esPassword && v.length < 6) {
-                return 'Mínimo 6 caracteres';
-              }
-              return null;
-            },
+        validator: validator,
         style: TextStyle(
           color: esOscuro ? Colors.white : Colors.black87,
           fontSize: 15,
@@ -232,38 +229,34 @@ class _CampoRestablecer extends StatelessWidget {
           suffixIcon: esPassword
               ? IconButton(
                   icon: Icon(
-                    verPassword ? Icons.visibility_off : Icons.visibility,
-                    color: colorPrimario.withOpacity(0.7),
+                    verPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: esOscuro ? Colors.white70 : Colors.black45,
                     size: 20,
                   ),
                   onPressed: onCambioVisibilidad,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 )
               : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
+            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
+            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: colorPrimario,
-              width: 1.5,
-            ),
+            borderSide: BorderSide(color: colorPrimario, width: 1.5),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
             vertical: 14,
           ),
         ),
-      ),
-    );
+      );
   }
 }
