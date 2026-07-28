@@ -200,6 +200,23 @@ class _InicioRouterState extends State<_InicioRouter>
                 },
               ),
 
+            // Cabecera decorativa de fondo (solo en auth)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                opacity: mostrarAguaYLogo ? 1 : 0,
+                duration: const Duration(milliseconds: 400),
+                child: IgnorePointer(
+                  child: Image.asset(
+                    'assets/images/cabecera_login.png',
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            ),
+
             // Agua: tres capas superpuestas con distinto color y altura
             // para dar profundidad al efecto de agua.
             AnimatedBuilder(
