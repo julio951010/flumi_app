@@ -186,13 +186,7 @@ class _InicioRouterState extends State<_InicioRouter>
     return Scaffold(
       body: Container(
         height: screenHeight,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFB3D9FF), Color(0xFFD6EAFF), Color(0xFFF2F8FF)],
-          ),
-        ),
+        color: Colors.white,
         child: Stack(
           children: [
             // Onboarding: aparece en CUANTO termina el splash,
