@@ -5,7 +5,10 @@ class FlumiTema {
   static const Color colorFondo = Color(0xFFF5F7FA);
 
   static ThemeData tema = ThemeData(
-    colorSchemeSeed: colorPrimario,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: colorPrimario,
+      primary: colorPrimario,
+    ),
     useMaterial3: true,
     brightness: Brightness.light,
     scaffoldBackgroundColor: colorFondo,
