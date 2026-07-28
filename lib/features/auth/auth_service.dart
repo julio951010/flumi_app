@@ -91,6 +91,9 @@ class AuthService {
       if (msg.contains('user already registered')) {
         throw Exception('El correo ya está registrado. ¿Quieres iniciar sesión?');
       }
+      if (msg.contains('invalid format') || msg.contains('validation_failed')) {
+        throw Exception('El formato del correo no es válido.');
+      }
       rethrow;
     } catch (e) {
       if (e.toString().contains('SocketException') ||
@@ -102,5 +105,30 @@ class AuthService {
       }
       rethrow;
     }
+  }
+
+  Future<void> enviarOTP({required String email, String? nombre}) async {
+    _requerirConexion();
+    return _ejecutar(() => _auth.signInWithOtp(
+      email: email,
+      data: nombre != null ? {'nombre': nombre} : null,
+    ));
+  }
+
+  Future<AuthResponse> verificarOTP({
+    required String email,
+    required String token,
+  }) async {
+    _requerirConexion();
+    return _ejecutar(() => _auth.verifyOTP(
+      email: email,
+      token: token,
+      type: OtpType.email,
+    ));
+  }
+
+  Future<void> reenviarOTP({required String email}) async {
+    _requerirConexion();
+    return _ejecutar(() => _auth.signInWithOtp(email: email));
   }
 }

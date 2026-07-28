@@ -1,15 +1,25 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import '../../auth/auth_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 
 class CodigoVerificacionPantalla extends StatefulWidget {
+  final AuthService authService;
+  final String email;
+  final String? password;
+  final VoidCallback onExito;
   final VoidCallback onLogin;
-  final VoidCallback onRegistro;
+  final VoidCallback? onReenviar;
 
   const CodigoVerificacionPantalla({
     super.key,
+    required this.authService,
+    required this.email,
+    this.password,
+    required this.onExito,
     required this.onLogin,
-    required this.onRegistro,
+    this.onReenviar,
   });
 
   @override
@@ -30,19 +40,59 @@ class _CodigoVerificacionPantallaState
   }
 
   Future<void> _verificar() async {
-    // TODO: Implementar verificación de código
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _cargando = true);
+    try {
+      await widget.authService.verificarOTP(
+        email: widget.email,
+        token: _codigoCtrl.text.trim(),
+      );
+
+      if (widget.password != null) {
+        await widget.authService.actualizarPassword(widget.password!);
+      }
+
+      if (!mounted) return;
+      NotificacionServicio.exito(context, 'Cuenta verificada correctamente.');
+      widget.onExito();
+    } catch (e) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(context, e.toString());
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  Future<void> _reenviar() async {
+    setState(() => _cargando = true);
+    try {
+      await widget.authService.reenviarOTP(email: widget.email);
+      if (!mounted) return;
+      NotificacionServicio.exito(
+        context,
+        'Código reenviado. Revisa tu correo.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(context, e.toString());
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
     final esOscuro = Theme.of(context).brightness == Brightness.dark;
+    final ancho = MediaQuery.of(context).size.width;
+    final maxCardWidth = ancho > 600 ? 480.0 : 380.0;
+    final horizontalMargin = ancho > 600 ? 48.0 : 24.0;
 
     return Center(
       child: SingleChildScrollView(
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 24),
-          constraints: const BoxConstraints(maxWidth: 380),
+          margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
+          constraints: BoxConstraints(maxWidth: maxCardWidth),
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withOpacity(0.5)),
             borderRadius: BorderRadius.circular(15),
@@ -59,6 +109,7 @@ class _CodigoVerificacionPantallaState
                 ),
                 child: Form(
                   key: _formKey,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -72,18 +123,61 @@ class _CodigoVerificacionPantallaState
                         ),
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Ingresa el código que enviamos a tu correo electrónico.',
-                        style: TextStyle(fontSize: 14),
+                      Text(
+                        'Ingresa el código de 6 dígitos que enviamos a ${widget.email}',
+                        style: const TextStyle(fontSize: 14),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
-                      _CampoCodigo(
-                        label: 'Código',
-                        icono: Icons.lock_outlined,
-                        controlador: _codigoCtrl,
-                        esOscuro: esOscuro,
-                        colorPrimario: primario,
+                      TextFormField(
+                        controller: _codigoCtrl,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: esOscuro ? Colors.white : Colors.black87,
+                          fontSize: 24,
+                          letterSpacing: 8,
+                        ),
+                        validator: (v) {
+                          if (v == null || v.trim().length < 6) {
+                            return 'Ingresa el código completo';
+                          }
+                          return null;
+                        },
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.9),
+                          labelText: 'Código',
+                          labelStyle: TextStyle(
+                            color: esOscuro ? Colors.white70 : Colors.black45,
+                            fontSize: 14,
+                          ),
+                          counterText: '',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: primario.withOpacity(0.3),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: primario.withOpacity(0.3),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: primario,
+                              width: 1.5,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 14,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 20),
                       SizedBox(
@@ -119,7 +213,7 @@ class _CodigoVerificacionPantallaState
                       ),
                       const SizedBox(height: 12),
                       GestureDetector(
-                        onTap: () {},
+                        onTap: _cargando ? null : _reenviar,
                         child: Text(
                           'Reenviar código',
                           style: TextStyle(
@@ -157,76 +251,6 @@ class _CodigoVerificacionPantallaState
                 ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CampoCodigo extends StatelessWidget {
-  final String label;
-  final IconData icono;
-  final TextEditingController? controlador;
-  final bool esOscuro;
-  final Color colorPrimario;
-
-  const _CampoCodigo({
-    required this.label,
-    required this.icono,
-    this.controlador,
-    required this.esOscuro,
-    required this.colorPrimario,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: TextFormField(
-        controller: controlador,
-        keyboardType: TextInputType.number,
-        maxLength: 6,
-        style: TextStyle(
-          color: esOscuro ? Colors.white : Colors.black87,
-          fontSize: 15,
-        ),
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: Colors.white.withOpacity(0.9),
-          labelText: label,
-          labelStyle: TextStyle(
-            color: esOscuro ? Colors.white70 : Colors.black45,
-            fontSize: 14,
-          ),
-          prefixIcon: Icon(
-            icono,
-            color: colorPrimario.withOpacity(0.7),
-            size: 20,
-          ),
-          counterText: '',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: colorPrimario,
-              width: 1.5,
-            ),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 14,
           ),
         ),
       ),

@@ -339,6 +339,8 @@ class _AuthWrapperState extends State<_AuthWrapper>
   _AuthPage _paginaActual = _AuthPage.login;
   _AuthPage _paginaAnterior = _AuthPage.login;
   late final AnimationController _ctrl;
+  String? _emailOtp;
+  String? _passwordOtp;
 
   @override
   void initState() {
@@ -369,18 +371,29 @@ class _AuthWrapperState extends State<_AuthWrapper>
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
           onExito: () {},
-          onCodigoVerificacion: () =>
-              _alternar(_AuthPage.codigoVerificacion),
+          onCodigoVerificacion: (email, password) {
+            _emailOtp = email;
+            _passwordOtp = password;
+            _alternar(_AuthPage.codigoVerificacion);
+          },
         );
       case _AuthPage.olvideContrasena:
         return OlvideContrasenaPantalla(
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
+          onCodigoVerificacion: (email) {
+            _emailOtp = email;
+            _passwordOtp = null;
+            _alternar(_AuthPage.codigoVerificacion);
+          },
         );
       case _AuthPage.codigoVerificacion:
         return CodigoVerificacionPantalla(
+          authService: authService,
+          email: _emailOtp ?? '',
+          password: _passwordOtp,
+          onExito: () {},
           onLogin: () => _alternar(_AuthPage.login),
-          onRegistro: () => _alternar(_AuthPage.registro),
         );
     }
   }

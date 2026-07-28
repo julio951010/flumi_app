@@ -11,7 +11,7 @@ class RegistroPantalla extends StatefulWidget {
   final AuthService authService;
   final VoidCallback onLogin;
   final VoidCallback onExito;
-  final VoidCallback? onCodigoVerificacion;
+  final void Function(String email, String password)? onCodigoVerificacion;
 
   const RegistroPantalla({
     super.key,
@@ -40,22 +40,15 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      final respuesta = await widget.authService.registrar(
+      await widget.authService.enviarOTP(
         email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
         nombre: _nombreCtrl.text.trim(),
       );
-
       if (!mounted) return;
-
-      if (respuesta.session == null) {
-        widget.onLogin();
-        if (!mounted) return;
-        NotificacionServicio.exito(
-          context,
-          'Revisa tu correo para confirmar la cuenta.',
-        );
-      }
+      widget.onCodigoVerificacion?.call(
+        _emailCtrl.text.trim(),
+        _passwordCtrl.text,
+      );
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());

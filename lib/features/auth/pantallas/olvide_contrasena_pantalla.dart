@@ -7,11 +7,13 @@ import '../../../core/servicios/notificacion_servicio.dart';
 class OlvideContrasenaPantalla extends StatefulWidget {
   final AuthService authService;
   final VoidCallback onLogin;
+  final void Function(String email)? onCodigoVerificacion;
 
   const OlvideContrasenaPantalla({
     super.key,
     required this.authService,
     required this.onLogin,
+    this.onCodigoVerificacion,
   });
 
   @override
@@ -34,12 +36,9 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      await widget.authService.restablecerContrasena(_emailCtrl.text.trim());
+      await widget.authService.enviarOTP(email: _emailCtrl.text.trim());
       if (!mounted) return;
-      NotificacionServicio.exito(
-        context,
-        'Revisa tu correo para restablecer la contraseña.',
-      );
+      widget.onCodigoVerificacion?.call(_emailCtrl.text.trim());
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());
