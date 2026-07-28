@@ -236,7 +236,7 @@ class _InicioRouterState extends State<_InicioRouter>
                   ),
                 ),
               ),
-              child: AnimacionAgua(color: const Color(0xFF0099DD)),
+              child: AnimacionAgua(color: const Color(0xFF1FA0F0)),
             ),
 
             // Tercera capa de agua (la más clara, la más baja)
@@ -255,7 +255,7 @@ class _InicioRouterState extends State<_InicioRouter>
                   ),
                 ),
               ),
-              child: AnimacionAgua(color: const Color(0xFF00AAEE)),
+              child: AnimacionAgua(color: const Color(0xFF30B0FF)),
             ),
 
             // Auth/app: se revela con _formAparecerAnim.
