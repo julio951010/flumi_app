@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class AnimacionAgua extends StatefulWidget {
   final Color color;
 
-  const AnimacionAgua({super.key, this.color = const Color(0xff3B6ABA)});
+  const AnimacionAgua({super.key, this.color = const Color(0xFF0088CC)});
 
   @override
   State<AnimacionAgua> createState() => _AnimacionAguaState();
