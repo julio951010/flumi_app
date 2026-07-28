@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import '../../auth/auth_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 
 class OlvideContrasenaPantalla extends StatefulWidget {
   final AuthService authService;
@@ -35,18 +36,13 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
     try {
       await widget.authService.restablecerContrasena(_emailCtrl.text.trim());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Revisa tu correo para restablecer la contraseña.',
-          ),
-        ),
+      NotificacionServicio.exito(
+        context,
+        'Revisa tu correo para restablecer la contraseña.',
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      NotificacionServicio.alerta(context, e.toString());
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -104,6 +100,13 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
                         controlador: _emailCtrl,
                         esOscuro: esOscuro,
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Ingresa tu correo';
+                          if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(v.trim())) {
+                            return 'Correo inválido';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 20),
                       SizedBox(
@@ -179,6 +182,7 @@ class _CampoOlvide extends StatelessWidget {
   final TextEditingController? controlador;
   final bool esOscuro;
   final Color colorPrimario;
+  final String? Function(String?)? validator;
 
   const _CampoOlvide({
     required this.label,
@@ -187,6 +191,7 @@ class _CampoOlvide extends StatelessWidget {
     this.controlador,
     required this.esOscuro,
     required this.colorPrimario,
+    this.validator,
   });
 
   @override
@@ -196,6 +201,7 @@ class _CampoOlvide extends StatelessWidget {
       child: TextFormField(
         controller: controlador,
         keyboardType: tipo,
+        validator: validator,
         style: TextStyle(
           color: esOscuro ? Colors.white : Colors.black87,
           fontSize: 15,

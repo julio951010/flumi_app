@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/auth_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 
 class LoginPantalla extends StatefulWidget {
   final AuthService authService;
@@ -66,9 +67,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
       widget.onExito();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      NotificacionServicio.alerta(context, e.toString());
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -127,6 +126,13 @@ class _LoginPantallaState extends State<LoginPantalla> {
                         controlador: _emailCtrl,
                         esOscuro: esOscuro,
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Ingresa tu correo';
+                          if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(v.trim())) {
+                            return 'Correo inválido';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 14),
                       _CampoAuth(
@@ -140,6 +146,11 @@ class _LoginPantallaState extends State<LoginPantalla> {
                         onCambioVisibilidad: () =>
                             setState(() => _verPassword = !_verPassword),
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Ingresa tu contraseña';
+                          if (v.length < 6) return 'Mínimo 6 caracteres';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 10),
                       GestureDetector(
@@ -267,6 +278,7 @@ class _CampoAuth extends StatelessWidget {
   final bool verPassword;
   final VoidCallback? onCambioVisibilidad;
   final Color colorPrimario;
+  final String? Function(String?)? validator;
 
   const _CampoAuth({
     required this.label,
@@ -278,6 +290,7 @@ class _CampoAuth extends StatelessWidget {
     this.esPassword = false,
     this.verPassword = false,
     this.onCambioVisibilidad,
+    this.validator,
   });
 
   @override
@@ -288,6 +301,7 @@ class _CampoAuth extends StatelessWidget {
         controller: controlador,
         keyboardType: tipo,
         obscureText: esPassword && !verPassword,
+        validator: validator,
         style: TextStyle(
           color: esOscuro ? Colors.white : Colors.black87,
           fontSize: 15,

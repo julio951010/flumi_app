@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import '../../auth/auth_service.dart';
 import '../../legal/pantallas/terminos_pantalla.dart';
 import '../../legal/pantallas/politicas_pantalla.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 
 class RegistroPantalla extends StatefulWidget {
   final AuthService authService;
@@ -50,17 +51,14 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
       if (respuesta.session == null) {
         widget.onLogin();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Revisa tu correo para confirmar la cuenta.'),
-          ),
+        NotificacionServicio.exito(
+          context,
+          'Revisa tu correo para confirmar la cuenta.',
         );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      NotificacionServicio.alerta(context, e.toString());
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -121,6 +119,11 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         controlador: _nombreCtrl,
                         esOscuro: esOscuro,
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Ingresa tu nombre';
+                          if (v.trim().length < 2) return 'Mínimo 2 caracteres';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       _CampoAuth(
@@ -130,6 +133,13 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         controlador: _emailCtrl,
                         esOscuro: esOscuro,
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Ingresa tu correo';
+                          if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(v.trim())) {
+                            return 'Correo inválido';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       _CampoAuth(
@@ -143,6 +153,11 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         onCambioVisibilidad: () =>
                             setState(() => _verPassword = !_verPassword),
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Ingresa una contraseña';
+                          if (v.length < 6) return 'Mínimo 6 caracteres';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       _CampoAuth(
@@ -156,6 +171,11 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         onCambioVisibilidad: () =>
                             setState(() => _verConfirmar = !_verConfirmar),
                         colorPrimario: primario,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Confirma tu contraseña';
+                          if (v != _passwordCtrl.text) return 'Las contraseñas no coinciden';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 10),
                       GestureDetector(
@@ -315,6 +335,7 @@ class _CampoAuth extends StatelessWidget {
   final bool verPassword;
   final VoidCallback? onCambioVisibilidad;
   final Color colorPrimario;
+  final String? Function(String?)? validator;
 
   const _CampoAuth({
     required this.label,
@@ -326,6 +347,7 @@ class _CampoAuth extends StatelessWidget {
     this.esPassword = false,
     this.verPassword = false,
     this.onCambioVisibilidad,
+    this.validator,
   });
 
   @override
@@ -336,6 +358,7 @@ class _CampoAuth extends StatelessWidget {
         controller: controlador,
         keyboardType: tipo,
         obscureText: esPassword && !verPassword,
+        validator: validator,
         style: TextStyle(
           color: esOscuro ? Colors.white : Colors.black87,
           fontSize: 15,
