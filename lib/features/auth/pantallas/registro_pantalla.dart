@@ -392,22 +392,15 @@ class _CampoAuth extends StatelessWidget {
               : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
+            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: Colors.white.withOpacity(0.5),
-            ),
+            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-              color: colorPrimario,
-              width: 1.5,
-            ),
+            borderSide: BorderSide(color: colorPrimario, width: 1.5),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
