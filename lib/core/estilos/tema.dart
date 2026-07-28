@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class FlumiTema {
-  static const Color colorPrimario = Color(0xFF0E90E1);
+  static const Color colorPrimario = Color(0xFF3AA5ED);
   static const Color colorFondo = Color(0xFFF5F7FA);
 
   static ThemeData tema = ThemeData(
