@@ -22,6 +22,9 @@ dependencies:
   # --- Conectividad ---
   connectivity_plus: ^6.0.3
 
+  # --- HTTP para servidor local ---
+  http: ^1.2.0
+
   # --- Identificadores únicos generados en cliente ---
   uuid: ^4.4.0
 
@@ -35,6 +38,15 @@ dependencies:
   # --- UI ---
   cupertino_icons: ^1.0.6
   curved_navigation_bar: ^1.0.6
+  swipe_cards:
+    path: packages/swipe_cards
+
+  # --- Cámara / galería ---
+  image_picker: ^1.1.2
+
+  # --- Georreferencia ---
+  geolocator: ^13.0.1
+  geocoding: ^3.0.0
 
 dev_dependencies:
   flutter_test:
@@ -46,5 +58,18 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+
   assets:
     - assets/images/
+    - assets/data/

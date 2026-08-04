@@ -11,14 +11,12 @@ class RegistroPantalla extends StatefulWidget {
   final AuthService authService;
   final VoidCallback onLogin;
   final VoidCallback onExito;
-  final void Function(String email, String password)? onCodigoVerificacion;
 
   const RegistroPantalla({
     super.key,
     required this.authService,
     required this.onLogin,
     required this.onExito,
-    this.onCodigoVerificacion,
   });
 
   @override
@@ -26,7 +24,6 @@ class RegistroPantalla extends StatefulWidget {
 }
 
 class _RegistroPantallaState extends State<RegistroPantalla> {
-  final _nombreCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmarCtrl = TextEditingController();
@@ -40,15 +37,17 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      await widget.authService.enviarOTP(
+      await widget.authService.registrar(
         email: _emailCtrl.text.trim(),
-        nombre: _nombreCtrl.text.trim(),
+        password: _passwordCtrl.text,
+        nombre: '',
       );
       if (!mounted) return;
-      widget.onCodigoVerificacion?.call(
-        _emailCtrl.text.trim(),
-        _passwordCtrl.text,
+      NotificacionServicio.exito(
+        context,
+        'Revisa tu correo y haz clic en el enlace de confirmación.',
       );
+      widget.onExito();
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());
@@ -59,7 +58,6 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
 
   @override
   void dispose() {
-    _nombreCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmarCtrl.dispose();
@@ -109,20 +107,6 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         ),
                       ),
                       const SizedBox(height: 28),
-                      _CampoAuth(
-                        label: 'Nombre',
-                        icono: Icons.person_outlined,
-                        tipo: TextInputType.text,
-                        controlador: _nombreCtrl,
-                        esOscuro: esOscuro,
-                        colorPrimario: primario,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Ingresa tu nombre';
-                          if (v.trim().length < 2) return 'Mínimo 2 caracteres';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
                       _CampoAuth(
                         label: 'Correo electrónico',
                         icono: Icons.email_outlined,

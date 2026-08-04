@@ -34,7 +34,9 @@ subprojects {
         if (androidExtension.namespace == null) {
             androidExtension.namespace = "com.flumi.${project.name.replace("-", "_")}"
         }
-        if (androidExtension.compileSdkVersion == "android-30") {
+        if (androidExtension.compileSdkVersion == "android-30" ||
+            androidExtension.compileSdk == 30 ||
+            androidExtension.compileSdk == 33) {
             androidExtension.compileSdk = 36
         }
     }

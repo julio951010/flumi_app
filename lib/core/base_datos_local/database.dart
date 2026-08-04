@@ -15,7 +15,42 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_abrirConexion());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 6;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (Migrator m, int from, int to) async {
+      if (from < 2) {
+        await m.addColumn(usuarios, usuarios.perfilCompletado);
+      }
+      if (from < 3) {
+        await m.addColumn(usuarios, usuarios.queBusca);
+      }
+      if (from < 4) {
+        await m.addColumn(usuarios, usuarios.orientacionSexual);
+        await m.addColumn(usuarios, usuarios.situacionSentimental);
+        await m.addColumn(usuarios, usuarios.intereses);
+        await m.addColumn(usuarios, usuarios.altura);
+        await m.addColumn(usuarios, usuarios.educacion);
+        await m.addColumn(usuarios, usuarios.trabajo);
+        await m.addColumn(usuarios, usuarios.bebe);
+        await m.addColumn(usuarios, usuarios.fuma);
+        await m.addColumn(usuarios, usuarios.hijos);
+        await m.addColumn(usuarios, usuarios.personalidad);
+        await m.addColumn(usuarios, usuarios.signoZodiaco);
+        await m.addColumn(usuarios, usuarios.mascotas);
+        await m.addColumn(usuarios, usuarios.religion);
+        await m.addColumn(usuarios, usuarios.fotoVerificacion);
+      }
+      if (from < 5) {
+        await m.addColumn(matches, matches.leidoHasta);
+      }
+      if (from < 6) {
+        await m.addColumn(usuarios, usuarios.fechaNacimiento);
+        await m.addColumn(usuarios, usuarios.ciudad);
+      }
+    },
+  );
 
   static QueryExecutor _abrirConexion() {
     return LazyDatabase(() async {

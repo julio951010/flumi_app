@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 
 class EncabezadoPagina extends StatelessWidget {
   final String titulo;
+  final Widget? accion;
 
-  const EncabezadoPagina({super.key, required this.titulo});
+  const EncabezadoPagina({super.key, required this.titulo, this.accion});
 
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
+    final paddingTop = MediaQuery.of(context).padding.top;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 44, 16, 8),
+      padding: EdgeInsets.fromLTRB(24, paddingTop + 12, 16, 8),
       child: Row(
         children: [
           Image.asset('assets/images/flumi_logo.png', height: 36),
@@ -23,6 +25,8 @@ class EncabezadoPagina extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
+          const Spacer(),
+          if (accion != null) accion!,
         ],
       ),
     );

@@ -1,0 +1,14 @@
+name: flumi_server
+description: Local development server for Flumi (replaces Supabase locally)
+version: 0.1.0
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  postgres: ^3.2.1
+  crypto: ^3.0.3
+  uuid: ^4.3.3
+  shelf_hotreload: ^1.5.0

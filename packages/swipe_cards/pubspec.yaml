@@ -1,0 +1,12 @@
+name: swipe_cards
+description: Tinder like swipe cards (copia local adaptada).
+version: 2.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter

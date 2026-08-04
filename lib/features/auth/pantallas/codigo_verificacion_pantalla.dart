@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../auth/auth_service.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 
@@ -43,9 +44,11 @@ class _CodigoVerificacionPantallaState
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      await widget.authService.verificarOTP(
+      final tipo = widget.password != null ? OtpType.email : OtpType.recovery;
+      await widget.authService.verificarCodigo(
         email: widget.email,
         token: _codigoCtrl.text.trim(),
+        tipo: tipo,
       );
 
       if (widget.password != null) {
@@ -53,7 +56,10 @@ class _CodigoVerificacionPantallaState
       }
 
       if (!mounted) return;
-      NotificacionServicio.exito(context, 'Cuenta verificada correctamente.');
+      final mensaje = widget.password != null
+          ? 'Cuenta verificada correctamente.'
+          : 'Código verificado. Ahora puedes restablecer tu contraseña.';
+      NotificacionServicio.exito(context, mensaje);
       widget.onExito();
     } catch (e) {
       if (!mounted) return;
@@ -66,7 +72,8 @@ class _CodigoVerificacionPantallaState
   Future<void> _reenviar() async {
     setState(() => _cargando = true);
     try {
-      await widget.authService.reenviarOTP(email: widget.email);
+      final tipo = widget.password != null ? OtpType.email : OtpType.recovery;
+      await widget.authService.reenviarCodigo(email: widget.email, tipo: tipo);
       if (!mounted) return;
       NotificacionServicio.exito(
         context,
@@ -124,7 +131,7 @@ class _CodigoVerificacionPantallaState
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Ingresa el código de 6 dígitos que enviamos a ${widget.email}',
+                        'Ingresa el código que enviamos a ${widget.email}',
                         style: const TextStyle(fontSize: 14),
                         textAlign: TextAlign.center,
                       ),
@@ -132,7 +139,7 @@ class _CodigoVerificacionPantallaState
                       TextFormField(
                         controller: _codigoCtrl,
                         keyboardType: TextInputType.number,
-                        maxLength: 6,
+                        maxLength: 8,
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: esOscuro ? Colors.white : Colors.black87,
@@ -140,7 +147,7 @@ class _CodigoVerificacionPantallaState
                           letterSpacing: 8,
                         ),
                         validator: (v) {
-                          if (v == null || v.trim().length < 6) {
+                          if (v == null || v.trim().length < 4) {
                             return 'Ingresa el código completo';
                           }
                           return null;

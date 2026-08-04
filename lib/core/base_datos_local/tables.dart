@@ -28,6 +28,10 @@ class Usuarios extends Table {
 
   TextColumn get genero => text()();
   TextColumn get buscaGenero => text()();
+  TextColumn get queBusca => text().withDefault(const Constant(''))();
+
+  DateTimeColumn get fechaNacimiento => dateTime().nullable()();
+  TextColumn get ciudad => text().withDefault(const Constant(''))();
 
   RealColumn get ubicacionLat => real().withDefault(const Constant(0.0))();
   RealColumn get ubicacionLon => real().withDefault(const Constant(0.0))();
@@ -39,6 +43,24 @@ class Usuarios extends Table {
 
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(false))();
   BoolColumn get esPerfilPropio => boolean().withDefault(const Constant(false))();
+  BoolColumn get perfilCompletado => boolean().withDefault(const Constant(false))();
+
+  TextColumn get orientacionSexual => text().withDefault(const Constant(''))();
+  TextColumn get situacionSentimental => text().withDefault(const Constant(''))();
+  TextColumn get intereses => text()
+      .map(const ListaStringConverter())
+      .withDefault(const Constant('[]'))();
+  TextColumn get altura => text().withDefault(const Constant(''))();
+  TextColumn get educacion => text().withDefault(const Constant(''))();
+  TextColumn get trabajo => text().withDefault(const Constant(''))();
+  TextColumn get bebe => text().withDefault(const Constant(''))();
+  TextColumn get fuma => text().withDefault(const Constant(''))();
+  TextColumn get hijos => text().withDefault(const Constant(''))();
+  TextColumn get personalidad => text().withDefault(const Constant(''))();
+  TextColumn get signoZodiaco => text().withDefault(const Constant(''))();
+  TextColumn get mascotas => text().withDefault(const Constant(''))();
+  TextColumn get religion => text().withDefault(const Constant(''))();
+  TextColumn get fotoVerificacion => text().withDefault(const Constant(''))();
 
   DateTimeColumn get creadoEn => dateTime().withDefault(currentDateAndTime)();
 
@@ -72,6 +94,7 @@ class Matches extends Table {
 
   TextColumn get ultimoMensajePreview => text().nullable()();
   DateTimeColumn get ultimoMensajeTimestamp => dateTime().nullable()();
+  DateTimeColumn get leidoHasta => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {uuid};

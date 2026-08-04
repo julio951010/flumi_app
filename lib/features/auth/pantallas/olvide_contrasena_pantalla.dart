@@ -7,13 +7,13 @@ import '../../../core/servicios/notificacion_servicio.dart';
 class OlvideContrasenaPantalla extends StatefulWidget {
   final AuthService authService;
   final VoidCallback onLogin;
-  final void Function(String email)? onCodigoVerificacion;
+  final VoidCallback onExito;
 
   const OlvideContrasenaPantalla({
     super.key,
     required this.authService,
     required this.onLogin,
-    this.onCodigoVerificacion,
+    required this.onExito,
   });
 
   @override
@@ -36,9 +36,19 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      await widget.authService.enviarOTP(email: _emailCtrl.text.trim());
+      final existe = await widget.authService.emailExiste(_emailCtrl.text.trim());
+      if (!existe) {
+        if (!mounted) return;
+        NotificacionServicio.alerta(context, 'No hay una cuenta asociada a este correo.');
+        return;
+      }
+      await widget.authService.solicitarRecuperacion(email: _emailCtrl.text.trim());
       if (!mounted) return;
-      widget.onCodigoVerificacion?.call(_emailCtrl.text.trim());
+      NotificacionServicio.exito(
+        context,
+        'Revisa tu correo y haz clic en el enlace para restablecer tu contraseña.',
+      );
+      widget.onExito();
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());

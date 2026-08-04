@@ -1,27 +1,38 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:drift/drift.dart' hide Column;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'config/env.dart';
+import 'core/api/mock_data.dart';
 import 'core/base_datos_local/database.dart';
 import 'core/constantes/constantes.dart';
 import 'core/estilos/tema.dart';
 import 'core/servicios/connectivity_service.dart';
 import 'core/servicios/sync_service.dart';
+import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/pantallas/login_pantalla.dart';
 import 'features/auth/pantallas/olvide_contrasena_pantalla.dart';
-import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
 import 'features/auth/pantallas/registro_pantalla.dart';
 import 'features/auth/pantallas/restablecer_contrasena_pantalla.dart';
 import 'features/chat/chat_repositorio.dart';
-import 'features/chat/pantallas/chat_pantalla.dart';
-import 'features/matches/matches_repositorio.dart';
-import 'features/matches/pantallas/matches_pantalla.dart';
+import 'features/chat/pantallas/chats_pantalla.dart';
 import 'features/onboarding/onboarding_servicio.dart';
 import 'features/onboarding/pantallas/onboarding_pantalla.dart';
+import 'features/onboarding/pantallas/onboarding_perfil_pantalla.dart';
+import 'features/onboarding/pantallas/cuestionario_perfil_pantalla.dart';
+import 'features/encuentros/pantallas/cerca_de_ti_pantalla.dart';
+import 'features/encuentros/pantallas/encuentros_pantalla.dart';
+import 'features/encuentros/pantallas/filtros_encuentros_sheet.dart';
+import 'features/encuentros/pantallas/me_gusta_pantalla.dart';
 import 'features/perfiles/perfil_repositorio.dart';
 import 'features/perfiles/pantallas/perfil_pantalla.dart';
+import 'features/perfiles/pantallas/editar_perfil_pantalla.dart';
+import 'features/configuracion/pantallas/configuracion_pantalla.dart';
 import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
 import 'widgets_comunes/indicador_conexion.dart';
@@ -32,7 +43,6 @@ late final AppDatabase database;
 late final SyncService syncService;
 late final AuthService authService;
 late final PerfilRepositorio perfilRepositorio;
-late final MatchesRepositorio matchesRepositorio;
 late final ChatRepositorio chatRepositorio;
 
 void main() async {
@@ -40,9 +50,13 @@ void main() async {
 
   database = AppDatabase();
 
-  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
+  if (!kUsarServidorLocal) {
+    await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
+  }
 
   authService = AuthService();
+  AuthService.initDb(database);
+  await authService.inicializar();
 
   syncService = SyncService(database);
 
@@ -54,7 +68,6 @@ void main() async {
   });
 
   perfilRepositorio = PerfilRepositorio(database);
-  matchesRepositorio = MatchesRepositorio(database);
   chatRepositorio = ChatRepositorio(database);
 
   runApp(const FlumiApp());
@@ -91,6 +104,8 @@ class _InicioRouterState extends State<_InicioRouter>
   bool _onboardingCompletado = false;
   bool? _autenticado;
   bool _recoveryMode = false;
+  bool _perfilCompletado = true;
+  bool _mostrarCuestionario = false;
 
   // Transición splash -> contenido, en dos fases SEPARADAS y
   // SECUENCIALES (no la misma controller repartida con Interval):
@@ -145,9 +160,17 @@ class _InicioRouterState extends State<_InicioRouter>
     _autenticado = authService.estaAutenticado;
     authService.estadoStream.listen((estado) {
       if (!mounted) return;
+      if (estado.user != null &&
+          (estado.event == 'SIGNED_IN' ||
+           estado.event == 'INITIAL_SESSION' ||
+           estado.event == 'USER_UPDATED' ||
+           estado.event == 'TOKEN_REFRESHED')) {
+        syncService.sincronizarTodo();
+        _verificarPerfilCompletado();
+      }
       setState(() {
-        _autenticado = estado.session != null;
-        if (estado.event == AuthChangeEvent.passwordRecovery) {
+        _autenticado = estado.user != null;
+        if (estado.event == 'PASSWORD_RECOVERY') {
           _recoveryMode = true;
         }
       });
@@ -167,6 +190,9 @@ class _InicioRouterState extends State<_InicioRouter>
       if (!mounted) return;
 
       if (_onboardingCompletado) {
+        if (authService.estaAutenticado) {
+          await _verificarPerfilCompletado();
+        }
         await _formCtrl.forward();
       }
     });
@@ -305,10 +331,57 @@ class _InicioRouterState extends State<_InicioRouter>
     );
   }
 
+  Future<void> _verificarPerfilCompletado() async {
+    if (!kUsarModoMock) return;
+    try {
+      List<Usuario> propios;
+      try {
+        propios = await (database.select(database.usuarios)
+              ..where((u) => u.esPerfilPropio.equals(true)))
+            .get();
+      } catch (_) {
+        propios = [];
+      }
+
+      if (propios.isEmpty) {
+        final nombre = authService.usuarioActual?['nombre'] as String? ?? '';
+        final usuario = await GeneradorMock.crearUsuarioPropio(database, nombre);
+        authService.actualizarIdLocal(usuario.uuid);
+        if (mounted) setState(() => _perfilCompletado = true);
+        return;
+      }
+
+      // Alinear la sesión local con un perfil propio real: la app escribe
+      // (nombre, perfilCompletado) usando authService.usuarioActual['id'].
+      final sesionId = authService.usuarioActual?['id'] as String?;
+      Usuario? porSesion;
+      for (final p in propios) {
+        if (p.uuid == sesionId) {
+          porSesion = p;
+          break;
+        }
+      }
+      final propio = porSesion ?? propios.first;
+      if (propio.uuid != sesionId) {
+        authService.actualizarIdLocal(propio.uuid);
+        final usr = authService.usuarioActual;
+        if (usr != null) await LocalTokenStore.guardarUsuario(usr);
+      }
+      if (mounted) {
+        setState(() => _perfilCompletado = propio.perfilCompletado);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _perfilCompletado = true);
+    }
+  }
+
   Widget _buildPaginaAuth() {
     if (_autenticado == null ||
         (_autenticado! && authService.usuarioActual == null)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(child: ShimmerCaja(width: 120, height: 120, radius: 24)),
+      );
     }
     if (!_autenticado!) {
       return const _AuthWrapper();
@@ -321,11 +394,39 @@ class _InicioRouterState extends State<_InicioRouter>
         },
       );
     }
+    // Mostrar cuestionario opcional después del onboarding
+    if (_mostrarCuestionario) {
+      final uuid = authService.usuarioActual?['id'] as String? ?? '';
+      return CuestionarioPerfilPantalla(
+        db: database,
+        usuarioUuid: uuid,
+        onCompletado: () => setState(() {
+          _mostrarCuestionario = false;
+          _perfilCompletado = true;
+        }),
+      );
+    }
+    // Mostrar onboarding de perfil si no está completo
+    if (!_perfilCompletado) {
+      final uuid = authService.usuarioActual?['id'] as String? ?? '';
+      return OnboardingPerfilPantalla(
+        db: database,
+        usuarioUuid: uuid,
+        onCompletado: () async {
+          final uuid = authService.usuarioActual?['id'] as String? ?? '';
+          await (database.update(database.usuarios)
+                ..where((u) => u.uuid.equals(uuid)))
+              .write(UsuariosCompanion(perfilCompletado: const Value(true)));
+          setState(() => _mostrarCuestionario = true);
+          _verificarPerfilCompletado();
+        },
+      );
+    }
     return IndicadorConexion(child: const _NavegacionPrincipal());
   }
 }
 
-enum _AuthPage { login, registro, olvideContrasena, codigoVerificacion }
+enum _AuthPage { login, registro, olvideContrasena }
 
 class _AuthWrapper extends StatefulWidget {
   const _AuthWrapper({super.key});
@@ -339,8 +440,6 @@ class _AuthWrapperState extends State<_AuthWrapper>
   _AuthPage _paginaActual = _AuthPage.login;
   _AuthPage _paginaAnterior = _AuthPage.login;
   late final AnimationController _ctrl;
-  String? _emailOtp;
-  String? _passwordOtp;
 
   @override
   void initState() {
@@ -370,30 +469,13 @@ class _AuthWrapperState extends State<_AuthWrapper>
         return RegistroPantalla(
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
-          onExito: () {},
-          onCodigoVerificacion: (email, password) {
-            _emailOtp = email;
-            _passwordOtp = password;
-            _alternar(_AuthPage.codigoVerificacion);
-          },
+          onExito: () => _alternar(_AuthPage.login),
         );
       case _AuthPage.olvideContrasena:
         return OlvideContrasenaPantalla(
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
-          onCodigoVerificacion: (email) {
-            _emailOtp = email;
-            _passwordOtp = null;
-            _alternar(_AuthPage.codigoVerificacion);
-          },
-        );
-      case _AuthPage.codigoVerificacion:
-        return CodigoVerificacionPantalla(
-          authService: authService,
-          email: _emailOtp ?? '',
-          password: _passwordOtp,
-          onExito: () {},
-          onLogin: () => _alternar(_AuthPage.login),
+          onExito: () => _alternar(_AuthPage.login),
         );
     }
   }
@@ -448,31 +530,135 @@ class _NavegacionPrincipal extends StatefulWidget {
 
 class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   int _indice = 1;
+  final FiltrosEncuentros _filtros = FiltrosEncuentros();
+  final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
+  final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
+  final ValueNotifier<int> _meGustaNoLeidas = ValueNotifier<int>(0);
+  StreamSubscription? _convSub;
 
   static const _nombresPaginas = [
     'Cerca de ti',
     'Encuentros',
     'Me Gusta',
-    'Chat',
+    'Chats',
     'Perfil',
   ];
 
   @override
+  void initState() {
+    super.initState();
+    final miId = authService.usuarioActual!['id'] as String;
+    _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) {
+      _notificacionesNoLeidas.value =
+          resumenes.fold<int>(0, (acc, r) => acc + r.noLeidos);
+    });
+    // Mock: likes recibidos + visitas = notificaciones Me Gusta no leídas
+    _meGustaNoLeidas.value =
+        GeneradorMock.obtenerLikesRecibidos().length + GeneradorMock.obtenerVisitas().length;
+  }
+
+  @override
+  void dispose() {
+    _convSub?.cancel();
+    _convSub = null;
+    _undoSignal.dispose();
+    _notificacionesNoLeidas.dispose();
+    _meGustaNoLeidas.dispose();
+    super.dispose();
+  }
+
+  Future<void> _abrirFiltros() async {
+    final resultado = await mostrarFiltrosEncuentros(context, actuales: _filtros);
+    if (resultado != null) {
+      setState(() => _filtros
+        ..generoFiltro = resultado.generoFiltro
+        ..edadRango = resultado.edadRango
+        ..distanciaKm = resultado.distanciaKm
+        ..enLineaAhora = resultado.enLineaAhora);
+    }
+  }
+
+  Future<void> _editarPerfil() async {
+    final perfil = await perfilRepositorio.obtenerPerfilPropio();
+    if (perfil == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Completa tu perfil para editarlo'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EditarPerfilPantalla(perfil: perfil, repositorio: perfilRepositorio),
+      ),
+    );
+  }
+
+  void _abrirConfiguracion(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfiguracionPantalla(
+          authService: authService,
+          repositorio: perfilRepositorio,
+          onCerrarSesion: () => _cerrarSesion(context),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cerrarSesion(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Estás seguro?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await authService.cerrarSesion();
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
-    final miId = authService.usuarioActual!.id;
+    final miId = authService.usuarioActual!['id'] as String;
     final nombre = _nombresPaginas[_indice];
 
     final pantallas = <Widget>[
-      const Center(child: Text('Cerca de ti')),
-      const Center(child: Text('Encuentros — Fase 3')),
-      MatchesPantalla(repositorio: matchesRepositorio),
-      ChatPantalla(
+      CercaDeTiPantalla(db: database, miId: miId),
+      EncuentrosPantalla(
+        db: database,
+        miId: miId,
+        filtros: _filtros,
+        undoSignal: _undoSignal,
+      ),
+      MeGustaPantalla(db: database, miId: miId),
+      ChatsPantalla(
+        db: database,
         repositorio: chatRepositorio,
-        otroUsuarioId: '',
         miId: miId,
       ),
-      PerfilPantalla(repositorio: perfilRepositorio),
+      PerfilPantalla(
+        repositorio: perfilRepositorio,
+        onConfiguracion: () => _abrirConfiguracion(context),
+      ),
     ];
 
     return Scaffold(
@@ -481,7 +667,107 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         children: [
           Column(
             children: [
-              EncabezadoPagina(titulo: nombre),
+              EncabezadoPagina(
+                titulo: nombre,
+                accion: _indice <= 1
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_indice == 1)
+                            IconButton(
+                              icon: Icon(Icons.undo, color: primario, size: 24),
+                              onPressed: () => _undoSignal.value++,
+                              tooltip: 'Deshacer',
+                            ),
+                          IconButton(
+                            icon: Icon(Icons.tune, color: primario, size: 24),
+                            onPressed: _abrirFiltros,
+                            tooltip: 'Filtros',
+                          ),
+                        ],
+                      )
+                    : _indice == 2
+                        ? ValueListenableBuilder<int>(
+                            valueListenable: _meGustaNoLeidas,
+                            builder: (context, total, _) => IconButton(
+                              icon: Badge(
+                                isLabelVisible: total > 0,
+                                label: Text(
+                                  '$total',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                                child: Icon(Icons.notifications_none,
+                                    color: primario, size: 24),
+                              ),
+                              onPressed: () {
+                                ScaffoldMessenger.of(context)
+                                  ..hideCurrentSnackBar()
+                                  ..showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        total > 0
+                                            ? 'Tienes $total notificación${total == 1 ? '' : 'es'} nueva${total == 1 ? '' : 's'} en Me Gusta'
+                                            : 'No tienes notificaciones nuevas',
+                                      ),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                              },
+                              tooltip: 'Notificaciones',
+                            ),
+                          )
+                        : _indice == 3
+                        ? ValueListenableBuilder<int>(
+                            valueListenable: _notificacionesNoLeidas,
+                            builder: (context, total, _) => IconButton(
+                              icon: Badge(
+                                isLabelVisible: total > 0,
+                                label: Text(
+                                  '$total',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                                child: Icon(Icons.notifications_none,
+                                    color: primario, size: 24),
+                              ),
+                              onPressed: () {
+                                ScaffoldMessenger.of(context)
+                                  ..hideCurrentSnackBar()
+                                  ..showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        total > 0
+                                            ? 'Tienes $total mensaje${total == 1 ? '' : 's'} sin leer'
+                                            : 'No tienes notificaciones nuevas',
+                                      ),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                              },
+                              tooltip: 'Notificaciones',
+                            ),
+                          )
+                        : _indice == 4
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: Icon(Icons.settings_outlined,
+                                        color: primario, size: 24),
+                                    onPressed: () => _abrirConfiguracion(context),
+                                    tooltip: 'Configuración',
+                                  ),
+                                  IconButton(
+                                    icon: Icon(Icons.edit_outlined,
+                                        color: primario, size: 24),
+                                    onPressed: _editarPerfil,
+                                    tooltip: 'Editar perfil',
+                                  ),
+                                ],
+                              )
+                        : null,
+              ),
               Expanded(child: pantallas[_indice]),
             ],
           ),
@@ -494,9 +780,21 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
           ),
         ],
       ),
-      bottomNavigationBar: BarraNavegacion(
-        indiceActual: _indice,
-        onCambio: (i) => setState(() => _indice = i),
+      bottomNavigationBar: ValueListenableBuilder<int>(
+        valueListenable: _meGustaNoLeidas,
+        builder: (context, meGustaCount, _) {
+          return ValueListenableBuilder<int>(
+            valueListenable: _notificacionesNoLeidas,
+            builder: (context, chatsCount, _) {
+              return BarraNavegacion(
+                indiceActual: _indice,
+                onCambio: (i) => setState(() => _indice = i),
+                meGustaNoLeidas: meGustaCount,
+                chatsNoLeidos: chatsCount,
+              );
+            },
+          );
+        },
       ),
     );
   }

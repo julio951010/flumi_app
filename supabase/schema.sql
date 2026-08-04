@@ -169,6 +169,23 @@ create trigger on_auth_user_created
   execute function public.handle_new_user();
 
 -- ============================================================
+-- FUNCIÓN: verificar si un email ya está registrado en auth.users
+-- (se usa en recuperar contraseña para avisar antes de enviar)
+-- ============================================================
+create or replace function public.email_existe(email_ingresado text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return exists(
+    select 1 from auth.users where email = email_ingresado
+  );
+end;
+$$;
+
+-- ============================================================
 -- FUNCIÓN: perfiles cercanos (usada por el feed de descubrimiento)
 -- ============================================================
 create or replace function public.perfiles_cercanos(

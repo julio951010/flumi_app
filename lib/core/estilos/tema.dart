@@ -12,6 +12,7 @@ class FlumiTema {
     useMaterial3: true,
     brightness: Brightness.light,
     scaffoldBackgroundColor: colorFondo,
+    fontFamily: 'Poppins',
     appBarTheme: const AppBarTheme(
       centerTitle: true,
       elevation: 0,
