@@ -73,3 +73,9 @@ flutter:
   assets:
     - assets/images/
     - assets/data/
+    - assets/fotos_prueba/Alice/
+    - assets/fotos_prueba/Bob/
+    - assets/fotos_prueba/Carla/
+    - assets/fotos_prueba/David/
+    - assets/fotos_prueba/Elena/
+    - assets/fotos_prueba/Julio Cesar/

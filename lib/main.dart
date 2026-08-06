@@ -32,6 +32,7 @@ import 'features/encuentros/pantallas/me_gusta_pantalla.dart';
 import 'features/perfiles/perfil_repositorio.dart';
 import 'features/perfiles/pantallas/perfil_pantalla.dart';
 import 'features/perfiles/pantallas/editar_perfil_pantalla.dart';
+import 'features/notificaciones/pantallas/bandeja_notificaciones_pantalla.dart';
 import 'features/configuracion/pantallas/configuracion_pantalla.dart';
 import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
@@ -567,6 +568,25 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     super.dispose();
   }
 
+  void _abrirBandejaNotificaciones() {
+    final miId = authService.usuarioActual!['id'] as String;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BandejaNotificacionesPantalla(
+          db: database,
+          miId: miId,
+          onAbierto: _marcarNotificacionesVistas,
+        ),
+      ),
+    );
+  }
+
+  void _marcarNotificacionesVistas() {
+    _meGustaNoLeidas.value = 0;
+    _notificacionesNoLeidas.value = 0;
+  }
+
   Future<void> _abrirFiltros() async {
     final resultado = await mostrarFiltrosEncuentros(context, actuales: _filtros);
     if (resultado != null) {
@@ -699,21 +719,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                                 child: Icon(Icons.notifications_none,
                                     color: primario, size: 24),
                               ),
-                              onPressed: () {
-                                ScaffoldMessenger.of(context)
-                                  ..hideCurrentSnackBar()
-                                  ..showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        total > 0
-                                            ? 'Tienes $total notificación${total == 1 ? '' : 'es'} nueva${total == 1 ? '' : 's'} en Me Gusta'
-                                            : 'No tienes notificaciones nuevas',
-                                      ),
-                                      duration: const Duration(seconds: 2),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                              },
+                              onPressed: _abrirBandejaNotificaciones,
                               tooltip: 'Notificaciones',
                             ),
                           )
@@ -730,21 +736,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                                 child: Icon(Icons.notifications_none,
                                     color: primario, size: 24),
                               ),
-                              onPressed: () {
-                                ScaffoldMessenger.of(context)
-                                  ..hideCurrentSnackBar()
-                                  ..showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        total > 0
-                                            ? 'Tienes $total mensaje${total == 1 ? '' : 's'} sin leer'
-                                            : 'No tienes notificaciones nuevas',
-                                      ),
-                                      duration: const Duration(seconds: 2),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                              },
+                              onPressed: _abrirBandejaNotificaciones,
                               tooltip: 'Notificaciones',
                             ),
                           )

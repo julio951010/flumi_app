@@ -12,10 +12,10 @@ part 'database.g.dart';
 
 @DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_abrirConexion());
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? _abrirConexion());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -48,6 +48,15 @@ class AppDatabase extends _$AppDatabase {
       if (from < 6) {
         await m.addColumn(usuarios, usuarios.fechaNacimiento);
         await m.addColumn(usuarios, usuarios.ciudad);
+      }
+      if (from < 7) {
+        await m.addColumn(usuarios, usuarios.profesion);
+        await m.addColumn(usuarios, usuarios.preferenciaRelacion);
+        await m.addColumn(usuarios, usuarios.idiomas);
+        await m.addColumn(usuarios, usuarios.tatuajes);
+      }
+      if (from < 8) {
+        await m.addColumn(usuarios, usuarios.preguntasPerfil);
       }
     },
   );

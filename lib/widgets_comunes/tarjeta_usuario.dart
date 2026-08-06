@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../core/base_datos_local/database.dart';
 
@@ -19,9 +20,8 @@ class TarjetaUsuario extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inicial = usuario.nombre.isNotEmpty
-        ? usuario.nombre[0].toUpperCase()
-        : '?';
+    final inicial =
+        usuario.nombre.isNotEmpty ? usuario.nombre[0].toUpperCase() : '?';
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -56,6 +56,11 @@ class TarjetaUsuario extends StatelessWidget {
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold)),
                           ),
+                          if (usuario.fotosLocalesRutas.isNotEmpty &&
+                              File(usuario.fotosLocalesRutas.first)
+                                  .existsSync())
+                            Image.file(File(usuario.fotosLocalesRutas.first),
+                                fit: BoxFit.cover),
                           if (imagenOverlay != null) imagenOverlay!,
                         ],
                       ),
@@ -101,10 +106,11 @@ class TarjetaUsuario extends StatelessWidget {
                                 width: 8,
                                 height: 8,
                                 decoration: BoxDecoration(
-                                  color: usuario.ultimaSincronizacionTimestamp !=
-                                          null
-                                      ? const Color(0xFF4CD964)
-                                      : Colors.grey[400],
+                                  color:
+                                      usuario.ultimaSincronizacionTimestamp !=
+                                              null
+                                          ? const Color(0xFF4CD964)
+                                          : Colors.grey[400],
                                   shape: BoxShape.circle,
                                 ),
                               ),

@@ -12,6 +12,9 @@ class DraggableCard extends StatefulWidget {
   final Widget? likeTag;
   final Widget? nopeTag;
   final Widget? superLikeTag;
+  final Widget? likeGradient;
+  final Widget? nopeGradient;
+  final Widget? superLikeGradient;
   final bool isDraggable;
   final SlideDirection? slideTo;
   final Function(double distance)? onSlideUpdate;
@@ -28,6 +31,9 @@ class DraggableCard extends StatefulWidget {
       this.likeTag,
       this.nopeTag,
       this.superLikeTag,
+      this.likeGradient,
+      this.nopeGradient,
+      this.superLikeGradient,
       this.isDraggable = true,
       this.onSlideUpdate,
       this.onSlideOutComplete,
@@ -321,6 +327,18 @@ class _DraggableCardState extends State<DraggableCard>
     );
   }
 
+  double _progresoLateral() {
+    final ancho = anchorBounds?.width ?? context.size!.width;
+    if (ancho == 0 || cardOffset == null) return 0;
+    return ((cardOffset!.dx.abs() / ancho - 0.10) / 0.10).clamp(0.0, 1.0);
+  }
+
+  double _progresoVertical() {
+    final alto = anchorBounds?.height ?? context.size!.height;
+    if (alto == 0 || cardOffset == null) return 0;
+    return ((cardOffset!.dy.abs() / alto - 0.10) / 0.10).clamp(0.0, 1.0);
+  }
+
   Widget _buildCard() {
     //Disables dragging card while slide out animation is in progress. Solves
     // issue that fast swipes cause the back card not loading
@@ -348,6 +366,30 @@ class _DraggableCardState extends State<DraggableCard>
                       clipBehavior: Clip.none,
                       children: [
                         widget.card!,
+                        if (widget.nopeGradient != null &&
+                            slideRegion == SlideRegion.inNopeRegion)
+                          Positioned.fill(
+                            child: Opacity(
+                              opacity: _progresoLateral(),
+                              child: widget.nopeGradient,
+                            ),
+                          ),
+                        if (widget.likeGradient != null &&
+                            slideRegion == SlideRegion.inLikeRegion)
+                          Positioned.fill(
+                            child: Opacity(
+                              opacity: _progresoLateral(),
+                              child: widget.likeGradient,
+                            ),
+                          ),
+                        if (widget.superLikeGradient != null &&
+                            slideRegion == SlideRegion.inSuperLikeRegion)
+                          Positioned.fill(
+                            child: Opacity(
+                              opacity: _progresoVertical(),
+                              child: widget.superLikeGradient,
+                            ),
+                          ),
                         if (widget.likeTag != null &&
                             slideRegion == SlideRegion.inLikeRegion)
                           Positioned(
@@ -367,9 +409,9 @@ class _DraggableCardState extends State<DraggableCard>
                         if (widget.superLikeTag != null &&
                             slideRegion == SlideRegion.inSuperLikeRegion)
                           Positioned(
+                            top: -26,
                             left: 0,
                             right: 0,
-                            bottom: 12,
                             child: Center(child: widget.superLikeTag),
                           ),
                       ],

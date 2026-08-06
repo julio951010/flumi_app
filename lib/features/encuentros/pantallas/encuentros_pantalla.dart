@@ -6,6 +6,8 @@ import '../../../core/estilos/tema.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/tarjeta_detalle_usuario.dart';
+import '../../chat/chat_repositorio.dart';
+import '../../chat/pantallas/chat_pantalla.dart';
 import 'filtros_encuentros_sheet.dart';
 
 class EncuentrosPantalla extends StatefulWidget {
@@ -37,6 +39,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   bool _agotado = false;
   int _motorId = 0;
   MatchEngine? _matchEngine;
+  late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
 
   @override
   void initState() {
@@ -53,7 +56,11 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   }
 
   void _alCambiarCarta() {
-    if (mounted) setState(() => _progresoFoto = 0);
+    if (mounted) {
+      setState(() {
+        _progresoFoto = 0;
+      });
+    }
   }
 
   void _undo() {
@@ -69,7 +76,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         _matchEngine = MatchEngine(
           swipeItems: [
             for (final u in _filtrados.sublist(_motorBase))
-              SwipeItem(content: u),
+              SwipeItem(content: u, superlikeAction: () => _abrirChat(u)),
           ],
         )..addListener(_alCambiarCarta);
       });
@@ -133,7 +140,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       _progresoFoto = 0;
       _motorId++;
       _matchEngine = MatchEngine(
-        swipeItems: [for (final u in lista) SwipeItem(content: u)],
+        swipeItems: [for (final u in lista) SwipeItem(content: u, superlikeAction: () => _abrirChat(u))],
       )..addListener(_alCambiarCarta);
     });
   }
@@ -199,7 +206,10 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
               fillSpace: true,
               likeTag: _badgeSwipe(Icons.check, Colors.greenAccent),
               nopeTag: _badgeSwipe(Icons.close, Colors.red),
-              superLikeTag: _etiquetaSwipe('SUPER', FlumiTema.colorPrimario),
+              superLikeTag: _badgeSwipe(Icons.chat_bubble, FlumiTema.colorPrimario),
+              likeGradient: _overlaySwipe(Colors.green),
+              nopeGradient: _overlaySwipe(Colors.red),
+              superLikeGradient: _overlaySwipe(Colors.blueAccent),
             ),
           ),
         ),
@@ -221,17 +231,18 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     );
   }
 
-  Widget _etiquetaSwipe(String texto, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: color, width: 3),
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white.withValues(alpha: 0.95),
+  void _abrirChat(Usuario usuario) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPantalla(
+          repositorio: _chatRepo,
+          otroUsuarioId: usuario.uuid,
+          miId: widget.miId,
+          nombreOtro: usuario.nombre,
+          online: usuario.ultimaSincronizacionTimestamp != null,
+        ),
       ),
-      child: Text(texto,
-          style: TextStyle(
-              color: color, fontSize: 20, fontWeight: FontWeight.bold)),
     );
   }
 
@@ -244,6 +255,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         color: Colors.white.withValues(alpha: 0.95),
       ),
       child: Icon(icono, color: color, size: 26),
+    );
+  }
+
+  Widget _overlaySwipe(Color color) {
+    return Container(
+      color: color.withValues(alpha: 0.35),
     );
   }
 

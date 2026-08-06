@@ -217,12 +217,14 @@ class PerfilDetallePage extends StatelessWidget {
   final bool gusta;
   final bool esMatch;
   final bool esMeGusta;
+  final bool soloVista;
   const PerfilDetallePage({
     super.key,
     required this.usuario,
     this.gusta = false,
     this.esMatch = false,
     this.esMeGusta = false,
+    this.soloVista = false,
   });
 
   @override
@@ -241,6 +243,7 @@ class PerfilDetallePage extends StatelessWidget {
                   esMeGusta: esMeGusta,
                   onRechazar: () => Navigator.pop(context),
                   gusta: gusta,
+                  soloVista: soloVista,
                 ),
               ),
             ),

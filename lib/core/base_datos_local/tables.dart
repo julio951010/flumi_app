@@ -14,6 +14,39 @@ class ListaStringConverter extends TypeConverter<List<String>, String> {
   String toSql(List<String> value) => jsonEncode(value);
 }
 
+class PreguntaRespuesta {
+  const PreguntaRespuesta({required this.pregunta, required this.respuesta});
+
+  final String pregunta;
+  final String respuesta;
+
+  Map<String, dynamic> toJson() =>
+      {'pregunta': pregunta, 'respuesta': respuesta};
+
+  factory PreguntaRespuesta.fromJson(Map<String, dynamic> json) =>
+      PreguntaRespuesta(
+        pregunta: json['pregunta'] as String? ?? '',
+        respuesta: json['respuesta'] as String? ?? '',
+      );
+}
+
+class ListaPreguntasConverter
+    extends TypeConverter<List<PreguntaRespuesta>, String> {
+  const ListaPreguntasConverter();
+
+  @override
+  List<PreguntaRespuesta> fromSql(String fromDb) {
+    if (fromDb.isEmpty) return [];
+    return (jsonDecode(fromDb) as List)
+        .map((e) => PreguntaRespuesta.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  String toSql(List<PreguntaRespuesta> value) =>
+      jsonEncode(value.map((e) => e.toJson()).toList());
+}
+
 class Usuarios extends Table {
   TextColumn get uuid => text()();
   TextColumn get nombre => text()();
@@ -53,6 +86,8 @@ class Usuarios extends Table {
   TextColumn get altura => text().withDefault(const Constant(''))();
   TextColumn get educacion => text().withDefault(const Constant(''))();
   TextColumn get trabajo => text().withDefault(const Constant(''))();
+  TextColumn get profesion => text().withDefault(const Constant(''))();
+  TextColumn get preferenciaRelacion => text().withDefault(const Constant(''))();
   TextColumn get bebe => text().withDefault(const Constant(''))();
   TextColumn get fuma => text().withDefault(const Constant(''))();
   TextColumn get hijos => text().withDefault(const Constant(''))();
@@ -60,6 +95,11 @@ class Usuarios extends Table {
   TextColumn get signoZodiaco => text().withDefault(const Constant(''))();
   TextColumn get mascotas => text().withDefault(const Constant(''))();
   TextColumn get religion => text().withDefault(const Constant(''))();
+  TextColumn get idiomas => text().withDefault(const Constant(''))();
+  TextColumn get tatuajes => text().withDefault(const Constant(''))();
+  TextColumn get preguntasPerfil => text()
+      .map(const ListaPreguntasConverter())
+      .withDefault(const Constant('[]'))();
   TextColumn get fotoVerificacion => text().withDefault(const Constant(''))();
 
   DateTimeColumn get creadoEn => dateTime().withDefault(currentDateAndTime)();

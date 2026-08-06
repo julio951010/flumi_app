@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../core/base_datos_local/database.dart';
 import '../core/estilos/tema.dart';
+import '../features/perfiles/perfil_etiquetas.dart';
 import 'barra_progreso_rio.dart';
 
 class TarjetaDetalleUsuario extends StatefulWidget {
@@ -13,6 +15,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   final bool gusta;
   final bool esMatch;
   final bool esMeGusta;
+  final bool soloVista;
   const TarjetaDetalleUsuario({
     super.key,
     required this.usuario,
@@ -24,6 +27,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
     this.gusta = false,
     this.esMatch = false,
     this.esMeGusta = false,
+    this.soloVista = false,
   });
 
   @override
@@ -39,6 +43,13 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     [Color(0xFF667eea), Color(0xFF764ba2)],
     [Color(0xFFf093fb), Color(0xFFf5576c)],
   ];
+
+  List<String> get _fotos {
+    final fotos = widget.usuario.fotosLocalesRutas;
+    return fotos.isEmpty ? const [] : fotos;
+  }
+
+  int get _totalFotos => _fotos.isEmpty ? _fotosMock : _fotos.length;
 
   int _fotoActual = 0;
   bool _scrolled = false;
@@ -79,7 +90,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   void _fotoSiguiente() {
-    if (_fotoActual < _fotosMock - 1) {
+    if (_fotoActual < _totalFotos - 1) {
       setState(() => _fotoActual++);
       widget.onFotoCambio?.call(_fotoActual);
     }
@@ -143,7 +154,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
             child: BarraProgresoRio(
-              progreso: (_fotoActual + 1) / _fotosMock,
+              progreso: (_fotoActual + 1) / _totalFotos,
             ),
           ),
         Expanded(
@@ -224,7 +235,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                       top: 16,
                       right: 16,
                       child: GestureDetector(
-                        onTap: _abrirMenu,
+                        onTap: widget.soloVista ? null : _abrirMenu,
                         child: const Icon(Icons.more_horiz,
                             color: Colors.white, size: 40),
                       ),
@@ -265,22 +276,23 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                 icon: Icons.close,
                 color: const Color(0xFFCCCCCC),
                 size: tamano,
-                onTap: widget.onRechazar,
+                onTap: widget.soloVista ? null : widget.onRechazar,
               ),
               const SizedBox(width: 28),
               _fabCircular(
                 icon: Icons.chat_bubble_outline,
                 color: const Color(0xFF7B2CBF),
                 size: tamano,
-                onTap: widget.onChat,
+                onTap: widget.soloVista ? null : widget.onChat,
               ),
-              if (!widget.gusta && !widget.esMeGusta && !widget.esMatch) ...[
+              if (widget.soloVista ||
+                  (!widget.gusta && !widget.esMeGusta && !widget.esMatch)) ...[
                 const SizedBox(width: 28),
                 _fabCircular(
                   icon: Icons.favorite,
                   color: FlumiTema.colorPrimario,
                   size: tamano,
-                  onTap: widget.onMeGusta,
+                  onTap: widget.soloVista ? null : widget.onMeGusta,
                 ),
               ],
             ],
@@ -319,6 +331,19 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   Widget _buildFoto() {
+    if (_fotos.isNotEmpty &&
+        File(_fotos[_fotoActual % _fotos.length]).existsSync()) {
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: Image.file(
+          File(_fotos[_fotoActual % _fotos.length]),
+          key: ValueKey(_fotoActual),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+        ),
+      );
+    }
     final colores = _mockGradientes[_fotoActual % _mockGradientes.length];
     final inicial = widget.usuario.nombre.isNotEmpty
         ? widget.usuario.nombre[0].toUpperCase()
@@ -409,27 +434,30 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
               children: [
                 const SizedBox(height: 6),
                 _buildQueBuscaBadge(u),
-                const SizedBox(height: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(10),
+                if (u.ciudad.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.location_on,
+                            size: 13,
+                            color: Colors.white.withValues(alpha: 0.9)),
+                        const SizedBox(width: 4),
+                        Text(u.ciudad,
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.white.withValues(alpha: 0.9))),
+                      ],
+                    ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.location_on_outlined,
-                          size: 13, color: Colors.white.withValues(alpha: 0.9)),
-                      const SizedBox(width: 4),
-                      Text('A pocos km',
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.white.withValues(alpha: 0.9))),
-                    ],
-                  ),
-                ),
+                ],
               ],
             ),
           ),
@@ -439,14 +467,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   Widget _buildQueBuscaBadge(Usuario u) {
-    final map = <String, String>{
-      'relacion': 'Relaci\u00f3n seria',
-      'casual': 'Algo casual',
-      'amistad': 'Amistad',
-      'chatear': 'Chatear',
-    };
-    final texto = map[u.queBusca.toLowerCase()] ?? u.queBusca;
-    if (texto.isEmpty) return const SizedBox.shrink();
+    final texto = opcionTexto(opcionesQueBusca, u.queBusca);
+    if (texto.isEmpty || texto == 'Sin definir') return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
@@ -456,8 +478,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.favorite, size: 14, color: Colors.black87),
-          const SizedBox(width: 5),
           Text(texto,
               style: const TextStyle(
                   fontSize: 13,
@@ -470,26 +490,73 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
 
   Widget _buildExtendedContent() {
     final u = widget.usuario;
+    final secciones = <Widget>[
+      _seccionDetalle('Informaci\u00f3n b\u00e1sica', [
+        _pillIconoValor(Icons.face, valorTexto(capitalizar(u.genero))),
+        _pillIconoValor(Icons.location_on, valorTexto(u.ciudad)),
+      ]),
+      if (u.biografia.trim().isNotEmpty) ...[
+        const _SeccionTitulo('Sobre m\u00ed'),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
+          child: Text(u.biografia,
+              style: const TextStyle(
+                  fontSize: 16,
+                  color: Colors.black87,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600)),
+        ),
+        const SizedBox(height: 20),
+      ],
+      _seccionDetalle('Preferencias de b\u00fasqueda', [
+        _pill(null, opcionTexto(opcionesQueBusca, u.queBusca)),
+        _pillBuscaRango(u),
+      ]),
+      _seccionDetalle('Vida personal', [
+        _pillIconoValor(Icons.favorite, orientacionTexto(u.orientacionSexual)),
+        _pill(null, situacionTexto(u.situacionSentimental)),
+        _pillIconoValor(Icons.child_care, hijosTexto(u.hijos)),
+        _pill(null, religionTexto(u.religion)),
+      ]),
+      _seccionDetalle('Profesi\u00f3n y estudios', [
+        _pill(null, educacionTexto(u.educacion)),
+        _pillIconoValor(Icons.badge, valorTexto(u.profesion)),
+        _pillIconoValor(Icons.work, trabajoTexto(u.trabajo)),
+      ]),
+      _seccionDetalle('Estilo de vida', [
+        _pill(null, tabacoTexto(u.fuma)),
+        _pill(null, alcoholTexto(u.bebe)),
+        _pillIconoValor(Icons.pets, mascotasTexto(u.mascotas)),
+        _pillIconoValor(Icons.colorize, tatuajesTexto(u.tatuajes)),
+      ]),
+      _seccionDetalle('Personalidad y apariencia', [
+        for (final p in listaPersonalidad(u.personalidad))
+          _pill(Icons.psychology, p),
+        _pillIconoValor(Icons.height, alturaTexto(u.altura)),
+        _pill(null, signoTexto(u.signoZodiaco)),
+      ]),
+      _seccionDetalle('Idiomas', [
+        for (final idioma in u.idiomas.split(','))
+          if (idioma.trim().isNotEmpty) _pill(Icons.translate, idioma.trim()),
+      ]),
+    ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 170),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(height: 1),
           const SizedBox(height: 16),
-          if (u.biografia.isNotEmpty) ...[
-            const _SeccionTitulo('Sobre m\u00ed'),
-            const SizedBox(height: 6),
-            Text(u.biografia,
-                style: TextStyle(
-                    fontSize: 15, color: Colors.grey[700], height: 1.4)),
-            const SizedBox(height: 20),
-          ],
-          _buildIntencion(u),
-          const SizedBox(height: 20),
+          ...secciones,
           _buildIntereses(u),
           const SizedBox(height: 20),
-          _buildPrompts(u),
+          _buildPreguntas(u),
           const SizedBox(height: 20),
           _buildVerificacion(u),
           const SizedBox(height: 24),
@@ -498,60 +565,73 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     );
   }
 
-  Widget _buildIntencion(Usuario u) {
-    final map = <String, String>{
-      'relacion': 'Relaci\u00f3n seria',
-      'casual': 'Algo casual',
-      'amistad': 'Amistad',
-      'chatear': 'Chatear',
-    };
-    final texto = map[u.queBusca.toLowerCase()] ?? u.queBusca;
-    if (texto.isEmpty) return const SizedBox.shrink();
+  Widget _pillIconoValor(IconData icono, String valor) {
+    if (valor == 'Sin definir' || valor.isEmpty) return const SizedBox.shrink();
+    return _pill(icono, valor);
+  }
+
+  Widget _pillBuscaRango(Usuario u) {
+    final conocer = buscaGeneroTexto(u.buscaGenero);
+    final rango = rangoEdadTexto(u.preferenciaEdadMin, u.preferenciaEdadMax);
+    if (conocer.isEmpty || conocer == 'Sin definir') {
+      return const SizedBox.shrink();
+    }
+    final rangoParte =
+        (rango.isEmpty || rango == 'Sin definir') ? '' : ' de $rango';
+    return _pill(Icons.people, 'Tengo inter\u00e9s en $conocer$rangoParte');
+  }
+
+  Widget _pill(IconData? icono, String texto) {
+    if (texto == 'Sin definir' || texto.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icono != null) ...[
+            Icon(icono, size: 16, color: Colors.black87),
+            const SizedBox(width: 6),
+          ],
+          Flexible(
+            child: Text(texto,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 15,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _seccionDetalle(String titulo, List<Widget> pills) {
+    final visibles = pills.where((f) => f is! SizedBox).toList();
+    if (visibles.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SeccionTitulo('Qu\u00e9 busco'),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-          decoration: BoxDecoration(
-            color: FlumiTema.colorPrimario.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.favorite,
-                  size: 14, color: FlumiTema.colorPrimario),
-              const SizedBox(width: 6),
-              Text(texto,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: FlumiTema.colorPrimario,
-                      fontWeight: FontWeight.w600)),
-            ],
-          ),
+        _SeccionTitulo(titulo),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: visibles,
         ),
+        const SizedBox(height: 20),
       ],
     );
   }
 
   Widget _buildIntereses(Usuario u) {
-    final intereses = u.intereses.isNotEmpty
-        ? u.intereses
-        : ['F\u00fatbol', 'Caf\u00e9', 'Viajes', 'M\u00fasica', 'Cine'];
+    final intereses = u.intereses;
     if (intereses.isEmpty) return const SizedBox.shrink();
-
-    const emojis = {
-      'F\u00fatbol': '\u26bd',
-      'Caf\u00e9': '\u2615',
-      'Viajes': '\u2708\ufe0f',
-      'M\u00fasica': '\ud83c\udfb5',
-      'Cine': '\ud83c\udfac',
-      'Libros': '\ud83d\udcda',
-      'Yoga': '\ud83e\uddd8',
-      'Fotograf\u00eda': '\ud83d\udcf7',
-    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -562,7 +642,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
           spacing: 8,
           runSpacing: 8,
           children: intereses.map((i) {
-            final emoji = emojis[i] ?? '';
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
@@ -571,8 +650,11 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                     color: FlumiTema.colorPrimario.withValues(alpha: 0.15)),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text('$emoji $i',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+              child: Text(i,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600)),
             );
           }).toList(),
         ),
@@ -580,17 +662,15 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     );
   }
 
-  Widget _buildPrompts(Usuario u) {
-    const prompts = [
-      'Mi domingo ideal es\u2026 \u2014 No hacer nada y ver series',
-      'Un dato curioso\u2026 \u2014 Aprend\u00ed a tocar guitarra en un mes',
-    ];
+  Widget _buildPreguntas(Usuario u) {
+    final preguntas = u.preguntasPerfil;
+    if (preguntas.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SeccionTitulo('Preguntas r\u00e1pidas'),
+        const _SeccionTitulo('Preguntas del perfil'),
         const SizedBox(height: 8),
-        ...prompts.map((p) => Container(
+        ...preguntas.map((p) => Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(14),
@@ -599,9 +679,23 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.grey[200]!),
               ),
-              child: Text(p,
-                  style: TextStyle(
-                      fontSize: 13, color: Colors.grey[700], height: 1.3)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(p.pregunta,
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey[700])),
+                  const SizedBox(height: 4),
+                  Text(p.respuesta,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black87,
+                          height: 1.3,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
             )),
       ],
     );
@@ -625,13 +719,14 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                     item.verificado
                         ? Icons.check_circle
                         : Icons.radio_button_unchecked,
-                    size: 18,
+                    size: 20,
                     color: item.verificado ? Colors.green : Colors.grey[400],
                   ),
                   const SizedBox(width: 8),
                   Text(item.label,
                       style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
                           color: item.verificado
                               ? Colors.green[700]
                               : Colors.grey[500])),
@@ -640,7 +735,10 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
             )),
         const SizedBox(height: 4),
         Text('La cuenta fue creada hace m\u00e1s de 3 meses',
-            style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+            style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[400],
+                fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -653,8 +751,10 @@ class _SeccionTitulo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(texto,
-        style: const TextStyle(
-            fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87));
+        style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700]));
   }
 }
 

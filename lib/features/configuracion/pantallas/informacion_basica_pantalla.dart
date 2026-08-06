@@ -157,6 +157,8 @@ class ActualizarNombrePantalla extends StatefulWidget {
 }
 
 class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
+  static final _regexPermitido = RegExp(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ'\- ]+$");
+
   final _nombreCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _cargando = true;
@@ -208,6 +210,17 @@ class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
     }
   }
 
+  String? _validar(String? v) {
+    final valor = v?.trim() ?? '';
+    if (valor.isEmpty) return 'Ingresa tu nombre';
+    if (valor.length < 2) return 'El nombre debe tener al menos 2 caracteres';
+    if (valor.length > 30) return 'El nombre no puede superar los 30 caracteres';
+    if (!_regexPermitido.hasMatch(valor)) {
+      return 'Solo letras, espacios, guiones y apóstrofes';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
@@ -228,98 +241,116 @@ class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
         top: false,
         child: _cargando
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-                children: [
-                  Form(
-                    key: _formKey,
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                    child: Column(
-                      children: [
-                        _campo(
-                          controlador: _nombreCtrl,
-                          label: 'Nombre',
-                          icono: Icons.person_outline,
-                          primario: primario,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Ingresa tu nombre';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: ElevatedButton(
-                            onPressed: _guardando ? null : _guardar,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: primario,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '¿Cómo quieres que te llamen en la app?',
+                                style: TextStyle(
+                                    color: Colors.grey[600], fontSize: 14),
+                                textAlign: TextAlign.center,
                               ),
-                              elevation: 0,
-                            ),
-                            child: _guardando
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
+                              const SizedBox(height: 20),
+                              Form(
+                                key: _formKey,
+                                autovalidateMode:
+                                    AutovalidateMode.onUserInteraction,
+                                child: TextFormField(
+                                  controller: _nombreCtrl,
+                                  maxLength: 30,
+                                  textCapitalization:
+                                      TextCapitalization.words,
+                                  style: const TextStyle(
+                                      color: Colors.black87, fontSize: 15),
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: Colors.grey[100],
+                                    hintText: 'Tu nombre',
+                                    hintStyle: const TextStyle(
+                                        color: Colors.black45, fontSize: 14),
+                                    prefixIcon: Icon(Icons.person_outline,
+                                        color: primario.withValues(alpha: 0.7),
+                                        size: 20),
+                                    border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                          color: primario.withValues(
+                                              alpha: 0.3)),
                                     ),
-                                  )
-                                : const Text(
-                                    'Guardar',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 16),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                          color: primario.withValues(
+                                              alpha: 0.3)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                          color: primario, width: 1.5),
+                                    ),
+                                    contentPadding: const EdgeInsets
+                                        .symmetric(
+                                        horizontal: 14, vertical: 14),
                                   ),
+                                  validator: _validar,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
       ),
-    );
-  }
-
-  Widget _campo({
-    required TextEditingController controlador,
-    required String label,
-    required IconData icono,
-    required Color primario,
-    required String? Function(String?) validator,
-  }) {
-    return TextFormField(
-      controller: controlador,
-      validator: validator,
-      style: const TextStyle(color: Colors.black87, fontSize: 15),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: Colors.grey[100],
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.black45, fontSize: 14),
-        prefixIcon: Icon(icono,
-            color: primario.withValues(alpha: 0.7), size: 20),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _guardando ? null : _guardar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primario,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              child: _guardando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Guardar',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
+            ),
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: primario, width: 1.5),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
     );
   }
@@ -491,13 +522,32 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
         top: false,
         child: _cargando
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-                children: [
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                  Text(
+                    'Tu edad se mostrará en tu perfil.',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Expanded(
-                        flex: 32,
+                      SizedBox(
+                        width: 110,
                         child: TextFormField(
                           controller: _diaCtrl,
                           keyboardType: TextInputType.number,
@@ -514,8 +564,8 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
-                        flex: 32,
+                      SizedBox(
+                        width: 110,
                         child: TextFormField(
                           controller: _mesCtrl,
                           focusNode: _mesFocus,
@@ -533,8 +583,8 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
-                        flex: 36,
+                      SizedBox(
+                        width: 120,
                         child: TextFormField(
                           controller: _anioCtrl,
                           focusNode: _anioFocus,
@@ -566,56 +616,68 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                   if (_fechaParseada != null && _errorFecha == null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Row(
-                        children: [
-                          Icon(Icons.tag_faces_outlined,
-                              size: 22,
-                              color:
-                                  Theme.of(context).colorScheme.secondary),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Edad: ${_calcularEdad(_fechaParseada!)} años',
-                            style: TextStyle(
-                              color: Colors.grey[700],
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-),
-const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: _guardando ? null : _guardar,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primario,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          elevation: 0,
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                        decoration: BoxDecoration(
+                          color: primario.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: primario.withValues(alpha: 0.3)),
                         ),
-                        child: _guardando
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'Guardar',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 16),
-                              ),
+                        child: Text(
+                          '${_calcularEdad(_fechaParseada!)} a\u00f1os',
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                            color: primario,
+                          ),
+                        ),
                       ),
                     ),
+                  const SizedBox(height: 20),
                 ],
               ),
+            ),
+          ),
+        ),
+      );
+    },
+  ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _guardando ? null : _guardar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primario,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              child: _guardando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Guardar',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -635,38 +697,15 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
   static const _opcionesGenero = [
     'Mujer',
     'Hombre',
-    'Mujer Trans',
-    'Hombre Trans',
+    'Mujer trans',
+    'Hombre trans',
     'No binario',
     'Género fluido',
-    'Agénero',
-    'Bigénero',
-    'Trigénero',
-    'Pangénero',
-    'Demigénero',
+    'Prefiero no decirlo',
   ];
 
-  static const _explicacionesGenero = {
-    'Hombre': 'Tienes identidad masculina',
-    'Mujer': 'Tienes identidad femenina',
-    'No binario':
-        'No te identificas exclusivamente como hombre o mujer',
-    'Género fluido': 'Tu identidad cambia con el tiempo',
-    'Agénero':
-        'No sientes tener género o te sientes neutral',
-    'Bigénero': 'Te identificas con dos géneros',
-    'Trigénero': 'Te identificas con tres géneros',
-    'Demigénero':
-        'Te identificas parcialmente con un género',
-    'Mujer Trans':
-        'Naciste con sexo biológico masculino pero tu identidad es femenina',
-    'Hombre Trans':
-        'Naciste con sexo biológico femenino pero tu identidad es masculina',
-    'Pangénero':
-        'Te identificas con múltiples géneros, o con todos los géneros existentes',
-  };
-
-  String _genero = '';
+  final _personalizadaCtrl = TextEditingController();
+  String _seleccion = '';
   bool _cargando = true;
   bool _guardando = false;
 
@@ -676,13 +715,10 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
     _cargar();
   }
 
-  Future<void> _cargar() async {
-    final perfil = await widget.repositorio.obtenerPerfilPropio();
-    if (!mounted) return;
-    setState(() {
-      _genero = _capitalizar(perfil?.genero ?? '');
-      _cargando = false;
-    });
+  @override
+  void dispose() {
+    _personalizadaCtrl.dispose();
+    super.dispose();
   }
 
   String _capitalizar(String v) {
@@ -690,38 +726,29 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
     return v[0].toUpperCase() + v.substring(1);
   }
 
-  Widget _panelExplicacion(String genero, Color primario) {
-    final explicacion = _explicacionesGenero[genero];
-    if (explicacion == null) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: primario.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: primario.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline, size: 18, color: primario),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              explicacion,
-              style: TextStyle(color: Colors.black87, fontSize: 14, height: 1.4),
-            ),
-          ),
-        ],
-      ),
-    );
+  Future<void> _cargar() async {
+    final perfil = await widget.repositorio.obtenerPerfilPropio();
+    if (!mounted) return;
+    setState(() {
+      final valor = perfil?.genero ?? '';
+      final etiqueta = _capitalizar(valor);
+      if (_opcionesGenero.contains(etiqueta)) {
+        _seleccion = etiqueta;
+      } else if (valor.isNotEmpty) {
+        _personalizadaCtrl.text = valor;
+      }
+      _cargando = false;
+    });
   }
 
   Future<void> _guardar() async {
-    if (_genero.isEmpty) {
-      NotificacionServicio.alerta(context, 'Selecciona tu género.');
+    final texto = _personalizadaCtrl.text.trim();
+    if (_seleccion.isEmpty && texto.isEmpty) {
+      NotificacionServicio.alerta(
+          context, 'Selecciona una opción o escribe la tuya.');
       return;
     }
+    final valor = _seleccion.isNotEmpty ? _seleccion.toLowerCase() : texto;
     setState(() => _guardando = true);
     try {
       final perfil = await widget.repositorio.obtenerPerfilPropio();
@@ -731,11 +758,12 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
       }
       await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
         uuid: Value(perfil.uuid),
-        genero: Value(_genero.toLowerCase()),
+        genero: Value(valor),
         pendienteDeSincronizar: const Value(true),
       ));
       if (!mounted) return;
-      NotificacionServicio.exito(context, 'Género actualizado correctamente.');
+      NotificacionServicio.exito(
+          context, 'Género actualizado correctamente.');
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
@@ -765,100 +793,193 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
         top: false,
         child: _cargando
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-                children: [
-                  Text(
-                    'Selecciona tu género',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _genero.isEmpty ? null : _genero,
-                    isExpanded: true,
-                    items: [
-                      for (final opcion in _opcionesGenero)
-                        DropdownMenuItem(
-                          value: opcion,
-                          child: Text(opcion),
-                        ),
-                    ],
-                    onChanged: _guardando
-                        ? null
-                        : (v) => setState(() => _genero = v ?? ''),
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      hintText: 'Selecciona una opción',
-                      hintStyle:
-                          const TextStyle(color: Colors.black45, fontSize: 15),
-                      prefixIcon: Icon(
-                        Icons.wc_outlined,
-                        color: primario.withValues(alpha: 0.7),
-                        size: 20,
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide:
-                            BorderSide(color: primario.withValues(alpha: 0.3)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide:
-                            BorderSide(color: primario.withValues(alpha: 0.3)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: primario, width: 1.5),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 14),
-                    ),
-                  ),
-                  if (_genero.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    _panelExplicacion(_genero, primario),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: _guardando ? null : _guardar,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primario,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _guardando
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '¿Cómo te identificas?',
+                                style: TextStyle(
+                                    color: Colors.grey[600], fontSize: 14),
                               ),
-                            )
-                          : const Text(
-                              'Guardar',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w600, fontSize: 16),
-                            ),
+                              const SizedBox(height: 20),
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final anchoTarjeta =
+                                      (constraints.maxWidth - 10) / 2;
+                                  return Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    children: [
+                                      for (final opcion in _opcionesGenero)
+                                        if (opcion == 'Prefiero no decirlo')
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: _tarjetaOpcion(
+                                                opcion, primario),
+                                          )
+                                        else
+                                          SizedBox(
+                                            width: anchoTarjeta,
+                                            child: _tarjetaOpcion(
+                                                opcion, primario),
+                                          ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                              TextField(
+                                controller: _personalizadaCtrl,
+                                enabled: !_guardando,
+                                onChanged: (v) {
+                                  if (v.trim().isNotEmpty &&
+                                      _seleccion.isNotEmpty) {
+                                    setState(() => _seleccion = '');
+                                  }
+                                },
+                                style: const TextStyle(
+                                    color: Colors.black87, fontSize: 15),
+                                decoration: InputDecoration(
+                                  filled: true,
+                                  fillColor: Colors.grey[100],
+                                  labelText:
+                                      '¿No encuentras el tuyo? Escríbelo aquí',
+                                  labelStyle: const TextStyle(
+                                      color: Colors.black45, fontSize: 13),
+                                  prefixIcon: Icon(Icons.edit_outlined,
+                                      color: primario.withValues(alpha: 0.7),
+                                      size: 20),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                        color:
+                                            primario.withValues(alpha: 0.3)),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                        color:
+                                            primario.withValues(alpha: 0.3)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide:
+                                        BorderSide(color: primario, width: 1.5),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 14),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _guardando ? null : _guardar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primario,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              child: _guardando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Guardar',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tarjetaOpcion(String opcion, Color primario) {
+    final seleccionada = _seleccion == opcion;
+    return InkWell(
+      onTap: _guardando
+          ? null
+          : () {
+              setState(() {
+                if (_seleccion == opcion) {
+                  _seleccion = '';
+                } else {
+                  _seleccion = opcion;
+                  _personalizadaCtrl.clear();
+                }
+              });
+            },
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: seleccionada
+              ? primario.withValues(alpha: 0.10)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: seleccionada
+                ? primario
+                : primario.withValues(alpha: 0.3),
+            width: seleccionada ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                opcion,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight:
+                      seleccionada ? FontWeight.w600 : FontWeight.w500,
+                  color: seleccionada ? primario : Colors.black87,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              seleccionada ? Icons.check_circle : Icons.circle_outlined,
+              size: 22,
+              color: seleccionada ? primario : Colors.grey[400],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1105,90 +1226,124 @@ Future<void> _establecerUbicacion() async {
         top: false,
         child: _cargando
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-                children: [
-                  Form(
-                    key: _formKey,
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                    child: Column(
-                      children: [
-                        _campoUbicacion(
-                          controlador: _ubicacionCtrl,
-                          label: 'Ubicación',
-                          icono: Icons.location_on_outlined,
-                          primario: primario,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Ingresa tu ubicación';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: OutlinedButton.icon(
-                            onPressed:
-                                _obteniendoUbicacion ? null : _establecerUbicacion,
-                            icon: _obteniendoUbicacion
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.my_location, size: 20),
-                            label: const Text('Establecer ubicación actual'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: primario,
-                              side: BorderSide(
-                                  color: primario.withValues(alpha: 0.5)),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Comparte tu ubicación para conectar con personas cerca de ti. Solo se mostrará tu ciudad.',
+                                style: TextStyle(
+                                    color: Colors.grey[600], fontSize: 14),
+                                textAlign: TextAlign.center,
                               ),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: ElevatedButton(
-                            onPressed: _guardando ? null : _guardar,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: primario,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              elevation: 0,
-                            ),
-                            child: _guardando
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
+                              const SizedBox(height: 20),
+                              Form(
+                                key: _formKey,
+                                autovalidateMode:
+                                    AutovalidateMode.onUserInteraction,
+                                child: Column(
+                                  children: [
+                                    _campoUbicacion(
+                                      controlador: _ubicacionCtrl,
+                                      label: 'Ubicación',
+                                      icono: Icons.location_on_outlined,
+                                      primario: primario,
+                                      validator: (v) {
+                                        if (v == null || v.trim().isEmpty) {
+                                          return 'Ingresa tu ubicación';
+                                        }
+                                        return null;
+                                      },
                                     ),
-                                  )
-                                : const Text(
-                                    'Guardar',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 16),
-                                  ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 48,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _obteniendoUbicacion
+                                            ? null
+                                            : _establecerUbicacion,
+                                        icon: _obteniendoUbicacion
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        strokeWidth: 2),
+                                              )
+                                            : const Icon(Icons.my_location,
+                                                size: 20),
+                                        label: const Text(
+                                            'Usar mi ubicación actual'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: primario,
+                                          side: BorderSide(
+                                              color: primario.withValues(
+                                                  alpha: 0.5)),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 20),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _guardando ? null : _guardar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primario,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              child: _guardando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Guardar',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }

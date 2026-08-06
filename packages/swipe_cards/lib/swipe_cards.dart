@@ -10,6 +10,9 @@ class SwipeCards extends StatefulWidget {
   final Widget? likeTag;
   final Widget? nopeTag;
   final Widget? superLikeTag;
+  final Widget? likeGradient;
+  final Widget? nopeGradient;
+  final Widget? superLikeGradient;
   final MatchEngine matchEngine;
   final Function onStackFinished;
   final Function(SwipeItem, int)? itemChanged;
@@ -26,6 +29,9 @@ class SwipeCards extends StatefulWidget {
     this.likeTag,
     this.nopeTag,
     this.superLikeTag,
+    this.likeGradient,
+    this.nopeGradient,
+    this.superLikeGradient,
     this.fillSpace = true,
     this.upSwipeAllowed = false,
     this.leftSwipeAllowed = true,
@@ -196,6 +202,9 @@ class _SwipeCardsState extends State<SwipeCards> {
             likeTag: widget.likeTag,
             nopeTag: widget.nopeTag,
             superLikeTag: widget.superLikeTag,
+            likeGradient: widget.likeGradient,
+            nopeGradient: widget.nopeGradient,
+            superLikeGradient: widget.superLikeGradient,
             slideTo: _desiredSlideOutDirection(),
             onSlideUpdate: _onSlideUpdate,
             onSlideRegionUpdate: _onSlideRegion,
