@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:drift/drift.dart' hide Column;
 
+import '../../perfiles/perfil_etiquetas.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
@@ -694,15 +695,7 @@ class ActualizarGeneroPantalla extends StatefulWidget {
 }
 
 class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
-  static const _opcionesGenero = [
-    'Mujer',
-    'Hombre',
-    'Mujer trans',
-    'Hombre trans',
-    'No binario',
-    'Género fluido',
-    'Prefiero no decirlo',
-  ];
+  static const _opcionesGenero = opcionesGenero;
 
   final _personalizadaCtrl = TextEditingController();
   String _seleccion = '';
@@ -821,18 +814,11 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
                                     runSpacing: 10,
                                     children: [
                                       for (final opcion in _opcionesGenero)
-                                        if (opcion == 'Prefiero no decirlo')
-                                          SizedBox(
-                                            width: double.infinity,
-                                            child: _tarjetaOpcion(
-                                                opcion, primario),
-                                          )
-                                        else
-                                          SizedBox(
-                                            width: anchoTarjeta,
-                                            child: _tarjetaOpcion(
-                                                opcion, primario),
-                                          ),
+                                        SizedBox(
+                                          width: anchoTarjeta,
+                                          child: _tarjetaOpcion(
+                                              opcion, primario),
+                                        ),
                                     ],
                                   );
                                 },

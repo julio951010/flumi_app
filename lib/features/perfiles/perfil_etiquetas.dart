@@ -8,6 +8,15 @@ const opcionesBuscaGenero = <OpcionEtiqueta>[
   ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
 ];
 
+const opcionesGenero = <String>[
+  'Mujer',
+  'Hombre',
+  'Mujer trans',
+  'Hombre trans',
+  'No binario',
+  'G\u00e9nero fluido',
+];
+
 const opcionesQueBusca = <OpcionEtiqueta>[
   ('\u2764\ufe0f Busco una relaci\u00f3n estable', 'relacion'),
   ('\ud83d\udd25 Busco algo casual / sin compromiso', 'casual'),

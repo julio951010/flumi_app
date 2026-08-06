@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
+import '../../perfiles/perfil_etiquetas.dart';
 
 class OnboardingPerfilPantalla extends StatefulWidget {
   final AppDatabase db;
@@ -30,37 +36,29 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   final TextEditingController _diaCtrl = TextEditingController();
   final TextEditingController _mesCtrl = TextEditingController();
   final TextEditingController _anioCtrl = TextEditingController();
+  final _ubicacionCtrl = TextEditingController();
+  final _formKeyUbicacion = GlobalKey<FormState>();
+  final _focusUbicacion = FocusNode();
   String _genero = '';
-  String _subGenero = '';
-  String _buscaGenero = '';
-  String _subBuscaGenero = '';
   String _queBusca = '';
   final List<String> _fotos = [];
-  bool _notificacionesConcedido = false;
-  bool _ubicacionConcedido = false;
+  bool _verificacionIniciada = false;
   String? _errorFecha;
+  Map<String, List<String>> _provincias = const {};
+  List<String> _opcionesUbicacion = const [];
+  bool _cargandoUbicacion = true;
+  bool _obteniendoUbicacion = false;
+  TextEditingController? _autocompleteCtrl;
 
-  static const _opcionesGenero = ['Hombre', 'Mujer', 'Otro'];
-  static const _subGeneros = [
-    'No binario', 'Género fluido', 'Agénero', 'Bigénero',
-    'Transgénero', 'Transexual', 'Intersexual', 'Queer',
-    'Prefiero no decirlo',
-  ];
-  static const _opcionesBusca = ['Hombres', 'Mujeres', 'Todos', 'Otro'];
-  static final _subBusca = ['Ambos', 'No binario', 'Género fluido', 'Agénero', 'Todos los géneros', 'Prefiero no decirlo'];
-  static const _opcionesQueBusca = [
-    'Relación seria',
-    'Algo casual',
-    'Amistad',
-    'Aún no lo sé',
-  ];
+  static const _rutaJsonUbicacion = 'assets/data/cuba_provincias_municipios.json';
 
-  int get _totalPasos => 9;
+  int get _totalPasos => 8;
 
   @override
   void initState() {
     super.initState();
     _cargarDatosActuales();
+    _cargarOpcionesUbicacion();
   }
 
   Future<void> _cargarDatosActuales() async {
@@ -69,7 +67,39 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         .getSingleOrNull();
     if (perfil != null && mounted) {
       _nombreCtrl.text = perfil.nombre;
+      _ubicacionCtrl.text = perfil.ciudad;
     }
+  }
+
+  Future<void> _cargarOpcionesUbicacion() async {
+    String json = '{}';
+    try {
+      json = await rootBundle.loadString(_rutaJsonUbicacion);
+    } catch (_) {}
+    final municipiosPorProvincia = <String, List<String>>{};
+    final opciones = <String>{};
+    final data = jsonDecode(json) as Map<String, dynamic>;
+    final paises = data['paises'] as List? ?? const [];
+    for (final pais in paises) {
+      final provincias = (pais as Map<String, dynamic>)['provincias'];
+      if (provincias is! List) continue;
+      for (final p in provincias) {
+        final provincia = (p as Map<String, dynamic>)['nombre'] as String? ?? '';
+        final municipios = (p['municipios'] as List? ?? const [])
+            .map((m) => m.toString())
+            .toList();
+        if (provincia.isEmpty) continue;
+        municipiosPorProvincia[provincia] = municipios;
+        opciones.addAll(municipios);
+        opciones.add(provincia);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _provincias = municipiosPorProvincia;
+      _opcionesUbicacion = opciones.toList();
+      _cargandoUbicacion = false;
+    });
   }
 
   @override
@@ -79,6 +109,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     _diaCtrl.dispose();
     _mesCtrl.dispose();
     _anioCtrl.dispose();
+    _ubicacionCtrl.dispose();
+    _focusUbicacion.dispose();
     super.dispose();
   }
 
@@ -89,11 +121,11 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       case 2:
         return _errorFecha == null && _fechaValida;
       case 3:
-        return _genero.isNotEmpty && (_genero != 'Otro' || _subGenero.isNotEmpty);
+        return _genero.isNotEmpty;
       case 4:
-        return _buscaGenero.isNotEmpty && (_buscaGenero != 'Otro' || _subBuscaGenero.isNotEmpty);
-      case 5:
         return _queBusca.isNotEmpty;
+      case 5:
+        return _ubicacionCtrl.text.trim().isNotEmpty;
       default:
         return true;
     }
@@ -132,8 +164,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   }
 
   Future<void> _siguiente() async {
-    if (_paso == 3 && _genero == 'Otro' && _subGenero.isEmpty) return;
-    if (_paso == 4 && _buscaGenero == 'Otro' && _subBuscaGenero.isEmpty) return;
     if (_paso == 6) {
       if (_fotos.isEmpty) {
         setState(() => _paso++);
@@ -147,9 +177,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       if (mounted) widget.onCompletado();
       return;
     }
-
-    if (_paso == 7) _notificacionesConcedido = true;
-    if (_paso == 8) _ubicacionConcedido = true;
 
     _pageCtrl.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
   }
@@ -183,11 +210,10 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
                   _pasoNombre(primario),
                   _pasoFechaNacimiento(primario),
                   _pasoGenero(primario),
-                  _pasoBusca(primario),
                   _pasoQueBusca(primario),
-                  _pasoFotos(primario),
-                  _pasoNotificaciones(primario),
                   _pasoUbicacion(primario),
+                  _pasoFotos(primario),
+                  _pasoVerificacion(primario),
                 ],
               ),
             ),
@@ -336,57 +362,23 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   }
 
   Widget _pasoGenero(Color primario) {
-    final mostrandoSub = _genero == 'Otro';
     return _pasoLayout(
       icono: Icons.wc,
       titulo: '¿Cuál es tu género?',
       subtitulo: 'Puedes cambiarlo después en tu perfil.',
-      child: Column(
-        children: [
-          _selector(_opcionesGenero, _genero, (v) {
-            setState(() {
-              _genero = v;
-              if (v != 'Otro') _subGenero = '';
-            });
-          }, primario),
-          if (mostrandoSub) ...[
-            const SizedBox(height: 16),
-            _dropdownSub(_subGeneros, _subGenero, (v) => setState(() => _subGenero = v), primario),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _pasoBusca(Color primario) {
-    final mostrandoSub = _buscaGenero == 'Otro';
-    return _pasoLayout(
-      icono: Icons.favorite_outline,
-      titulo: '¿A quién te gustaría conocer?',
-      subtitulo: 'Define tus preferencias.',
-      child: Column(
-        children: [
-          _selector(_opcionesBusca, _buscaGenero, (v) {
-            setState(() {
-              _buscaGenero = v;
-              if (v != 'Otro') _subBuscaGenero = '';
-            });
-          }, primario),
-          if (mostrandoSub) ...[
-            const SizedBox(height: 16),
-            _dropdownSub(_subBusca, _subBuscaGenero, (v) => setState(() => _subBuscaGenero = v), primario),
-          ],
-        ],
-      ),
+      child: _selector(opcionesGenero, _genero, (v) {
+        setState(() => _genero = v);
+      }, primario),
     );
   }
 
   Widget _pasoQueBusca(Color primario) {
+    final opciones = [for (final o in opcionesQueBusca) o.$1];
     return _pasoLayout(
       icono: Icons.search_outlined,
       titulo: '¿Qué estás buscando?',
       subtitulo: 'Selecciona lo que mejor describa lo que quieres.',
-      child: _selector(_opcionesQueBusca, _queBusca, (v) => setState(() => _queBusca = v), primario),
+      child: _selector(opciones, _queBusca, (v) => setState(() => _queBusca = v), primario),
     );
   }
 
@@ -441,17 +433,18 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     );
   }
 
-  Widget _pasoNotificaciones(Color primario) {
+  Widget _pasoVerificacion(Color primario) {
     return _pasoLayout(
-      icono: Icons.notifications_outlined,
-      titulo: 'Activa las notificaciones',
-      subtitulo: 'Te avisaremos cuando tengas matches, mensajes y más.',
+      icono: Icons.verified_outlined,
+      titulo: 'Verifica tu perfil',
+      subtitulo:
+          'Confirma tu identidad para aumentar la confianza y obtener más coincidencias.',
       child: _permisoBoton(
-        icono: _notificacionesConcedido ? Icons.check_circle : Icons.notifications_off_outlined,
-        label: _notificacionesConcedido ? 'Notificaciones activadas' : 'Activar notificaciones',
-        activo: _notificacionesConcedido,
+        icono: _verificacionIniciada ? Icons.check_circle : Icons.verified_outlined,
+        label: _verificacionIniciada ? 'Perfil en proceso de verificación' : 'Verificar perfil',
+        activo: _verificacionIniciada,
         primario: primario,
-        onTap: _notificacionesConcedido ? null : () => setState(() => _notificacionesConcedido = true),
+        onTap: _verificacionIniciada ? null : () => setState(() => _verificacionIniciada = true),
       ),
     );
   }
@@ -460,15 +453,297 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     return _pasoLayout(
       icono: Icons.location_on_outlined,
       titulo: 'Comparte tu ubicación',
-      subtitulo: 'Te mostraremos personas cerca de ti.',
-      child: _permisoBoton(
-        icono: _ubicacionConcedido ? Icons.check_circle : Icons.location_off_outlined,
-        label: _ubicacionConcedido ? 'Ubicación compartida' : 'Compartir ubicación',
-        activo: _ubicacionConcedido,
-        primario: primario,
-        onTap: _ubicacionConcedido ? null : () => setState(() => _ubicacionConcedido = true),
+      subtitulo:
+          'Comparte tu ubicación para conectar con personas cerca de ti. Solo se mostrará tu ciudad.',
+      child: Form(
+        key: _formKeyUbicacion,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        child: _cargandoUbicacion
+            ? const SizedBox(
+                height: 40,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _campoUbicacion(primario),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _obteniendoUbicacion
+                          ? null
+                          : _establecerUbicacion,
+                      icon: _obteniendoUbicacion
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.my_location, size: 20),
+                      label: const Text('Usar mi ubicación actual'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primario,
+                        side: BorderSide(color: primario.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
+  }
+
+  Widget _campoUbicacion(Color primario) {
+    return Autocomplete<String>(
+      optionsBuilder: (TextEditingValue texto) {
+        if (texto.text.trim().isEmpty) return const Iterable<String>.empty();
+        final consulta = _normalizar(texto.text.trim().toLowerCase());
+        return _opcionesUbicacion.where((opcion) =>
+            _normalizar(opcion.toLowerCase()).contains(consulta));
+      },
+      displayStringForOption: (opcion) => _etiqueta(opcion),
+      fieldViewBuilder:
+          (context, controladorTexto, focusNodeTexto, onFieldSubmitted) {
+        _autocompleteCtrl = controladorTexto;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (controladorTexto.text.isEmpty &&
+              _ubicacionCtrl.text.isNotEmpty) {
+            controladorTexto.text = _ubicacionCtrl.text;
+          }
+        });
+        return TextFormField(
+          controller: controladorTexto,
+          focusNode: focusNodeTexto,
+          validator: (v) {
+            if (v == null || v.trim().isEmpty) return 'Ingresa tu ubicación';
+            return null;
+          },
+          onChanged: (v) {
+            _ubicacionCtrl.text = v;
+            setState(() {});
+          },
+          onFieldSubmitted: (_) => onFieldSubmitted(),
+          style: const TextStyle(color: Colors.black87, fontSize: 15),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.grey[100],
+            labelText: 'Ubicación',
+            labelStyle: const TextStyle(color: Colors.black45, fontSize: 14),
+            prefixIcon:
+                Icon(Icons.location_on_outlined, color: primario.withValues(alpha: 0.7), size: 20),
+            suffixIcon: Icon(Icons.arrow_drop_down, color: Colors.grey[400]),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario, width: 1.5),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, opciones) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: opciones.length,
+                itemBuilder: (context, index) {
+                  final opcion = opciones.elementAt(index);
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(
+                      _provincias.containsKey(opcion)
+                          ? Icons.map_outlined
+                          : Icons.location_city_outlined,
+                      size: 20,
+                      color: primario.withValues(alpha: 0.8),
+                    ),
+                    title: Text(
+                      _etiqueta(opcion),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    onTap: () {
+                      onSelected(opcion);
+                      _focusUbicacion.unfocus();
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      onSelected: (opcion) {
+        _ubicacionCtrl.text = _etiqueta(opcion);
+        setState(() {});
+      },
+    );
+  }
+
+  Future<void> _establecerUbicacion() async {
+    setState(() => _obteniendoUbicacion = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        if (!mounted) return;
+        NotificacionServicio.alerta(
+          context,
+          'El GPS está desactivado. Actívalo en los ajustes del dispositivo.',
+        );
+        return;
+      }
+      var permiso = await Geolocator.checkPermission();
+      if (permiso == LocationPermission.denied) {
+        permiso = await Geolocator.requestPermission();
+      }
+      if (permiso == LocationPermission.denied) {
+        if (!mounted) return;
+        NotificacionServicio.alerta(
+          context,
+          'Permiso de ubicación denegado. Permítelo para usar esta función.',
+        );
+        return;
+      }
+      if (permiso == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        NotificacionServicio.alerta(
+          context,
+          'El permiso de ubicación está bloqueado. Actívalo manualmente en Ajustes > Permisos.',
+        );
+        return;
+      }
+      final posicion = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+      final placemarks = await placemarkFromCoordinates(
+        posicion.latitude,
+        posicion.longitude,
+      );
+      if (placemarks.isNotEmpty) {
+        final pm = placemarks.first;
+        final nombresPosibles = [
+          pm.locality,
+          pm.subAdministrativeArea,
+          pm.administrativeArea,
+        ].whereType<String>().where((n) => n.trim().isNotEmpty).toList();
+        String? encontrado;
+        for (final opcion in _opcionesUbicacion) {
+          final normal = _normalizar(opcion.toLowerCase());
+          final match = nombresPosibles.any((n) =>
+              _normalizar(n.toLowerCase()).contains(normal) ||
+              normal.contains(_normalizar(n.toLowerCase())));
+          if (match) {
+            encontrado = opcion;
+            break;
+          }
+        }
+        if (!mounted) return;
+        final textoFinal = encontrado ?? nombresPosibles.first;
+        _ubicacionCtrl.text = textoFinal;
+        _autocompleteCtrl?.text = textoFinal;
+        setState(() {});
+        if (encontrado != null) {
+          NotificacionServicio.exito(
+            context,
+            'Ubicación establecida: $textoFinal',
+          );
+        } else {
+          NotificacionServicio.advertencia(
+            context,
+            'Ubicación detectada: $textoFinal. Verifícala y edítala si es necesario.',
+          );
+        }
+      } else {
+        if (!mounted) return;
+        NotificacionServicio.alerta(
+          context,
+          'No se pudo obtener la dirección a partir de las coordenadas. Intenta de nuevo o escribe la ubicación manualmente.',
+        );
+      }
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      String mensaje;
+      switch (e.code) {
+        case 'location_unavailable':
+          mensaje = 'Ubicación no disponible. Verifica la señal GPS e intenta de nuevo.';
+          break;
+        case 'permission_denied':
+          mensaje = 'Permiso de ubicación denegado.';
+          break;
+        case 'timeout':
+          mensaje = 'Tiempo de espera agotado para obtener la ubicación. Intenta de nuevo.';
+          break;
+        case 'service_not_available':
+          mensaje = 'Servicio de ubicación no disponible en este dispositivo.';
+          break;
+        default:
+          mensaje = 'Error del GPS. Intenta de nuevo.';
+      }
+      NotificacionServicio.alerta(context, mensaje);
+    } on SocketException {
+      if (!mounted) return;
+      NotificacionServicio.alerta(
+        context,
+        'Sin conexión a internet. El GPS funciona, pero la geocodificación inversa (convertir coordenadas a dirección) requiere internet. Escribe la ubicación manualmente o intenta más tarde.',
+      );
+    } on TimeoutException {
+      if (!mounted) return;
+      NotificacionServicio.alerta(
+        context,
+        'Tiempo de espera agotado al obtener la ubicación. Verifica la señal GPS e intenta de nuevo.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(
+        context,
+        'Algo salió mal. Escribe tu ubicación manualmente o intenta más tarde.',
+      );
+    } finally {
+      if (mounted) setState(() => _obteniendoUbicacion = false);
+    }
+  }
+
+  String _normalizar(String valor) {
+    return valor
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n');
+  }
+
+  String _etiqueta(String opcion) {
+    if (_provincias.containsKey(opcion)) return opcion;
+    final provincia = _provincias.entries
+        .where((e) => e.value.contains(opcion))
+        .map((e) => e.key)
+        .firstOrNull;
+    return provincia == null ? opcion : '$opcion, $provincia';
   }
 
   InputDecoration _inputDeco(String hint, Color primario) {
@@ -483,39 +758,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         borderSide: BorderSide(color: primario, width: 1.5),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-    );
-  }
-
-  Widget _dropdownSub(List<String> opciones, String seleccion, ValueChanged<String> onChanged, Color primario) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 32),
-      decoration: BoxDecoration(
-        border: Border.all(color: primario.withValues(alpha: 0.3)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: seleccion.isNotEmpty ? seleccion : null,
-            hint: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Text('Selecciona una opción',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 15)),
-            ),
-            isExpanded: true,
-            items: opciones.map((o) {
-              return DropdownMenuItem(value: o, child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Text(o, style: const TextStyle(fontSize: 15)),
-              ));
-            }).toList(),
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
-          ),
-        ),
-      ),
     );
   }
 
