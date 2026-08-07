@@ -898,12 +898,12 @@ class NivelEducativoPantalla extends StatefulWidget {
 
 class _NivelEducativoPantallaState extends State<NivelEducativoPantalla> {
   static const _opciones = <(String, String)>[
-    ('\ud83d\udcda Educaci\u00f3n primaria', 'primaria'),
-    ('\ud83d\udcd6 Educaci\u00f3n secundaria / Bachillerato', 'secundaria'),
-    ('\ud83d\udee0\ufe0f Formaci\u00f3n profesional / Ciclo formativo',
-        'formacion_profesional'),
-    ('\ud83c\udf93 Universidad (Grado / Licenciatura)', 'universidad'),
-    ('\ud83c\udf93 Postgrado / M\u00e1ster / Doctorado', 'posgrado'),
+    ('Educaci\u00f3n Primaria', 'primaria'),
+    ('Educaci\u00f3n Secundaria', 'secundaria'),
+    ('Educaci\u00f3n Preuniversitaria', 'preuniversitaria'),
+    ('Ense\u00f1anza T\u00e9cnica y Profesional', 'tecnica_profesional'),
+    ('Educaci\u00f3n Superior', 'superior'),
+    ('Postgrado', 'postgrado'),
     ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
   ];
 
@@ -1095,14 +1095,14 @@ class TrabajoPantalla extends StatefulWidget {
 
 class _TrabajoPantallaState extends State<TrabajoPantalla> {
   static const _opciones = <(String, String)>[
-    ('\ud83c\udfe2 Sector privado', 'sector_privado'),
-    ('\ud83c\udfdb\ufe0f Sector p\u00fablico', 'sector_publico'),
-    ('\ud83d\udcbb Trabajo independiente', 'independiente'),
-    ('\ud83d\udcbc Emprendedor', 'emprendedor'),
-    ('\ud83c\udfe0 Ama de casa', 'ama_de_casa'),
-    ('\ud83d\udcda Estudiante', 'estudiante'),
-    ('\ud83c\udf05 Jubilado', 'jubilado'),
-    ('\ud83d\udd0d Buscando trabajo', 'buscando_trabajo'),
+    ('Sector privado', 'sector_privado'),
+    ('Sector p\u00fablico', 'sector_publico'),
+    ('Trabajo independiente', 'independiente'),
+    ('Emprendedor', 'emprendedor'),
+    ('Ama de casa', 'ama_de_casa'),
+    ('Estudiante', 'estudiante'),
+    ('Jubilado', 'jubilado'),
+    ('Buscando trabajo', 'buscando_trabajo'),
     ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
   ];
 
@@ -2847,17 +2847,22 @@ class _EstaturaPantallaState extends State<EstaturaPantalla> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text(
-                                            '140 cm / 4\u00277\u201d',
-                                            style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 12),
+                                          Flexible(
+                                            child: Text(
+                                              '140 cm / 4\u00277\u201d',
+                                              style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 12),
+                                            ),
                                           ),
-                                          Text(
-                                            '220 cm / 7\u00273\u201d',
-                                            style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 12),
+                                          Flexible(
+                                            child: Text(
+                                              '220 cm / 7\u00273\u201d',
+                                              style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 12),
+                                              textAlign: TextAlign.end,
+                                            ),
                                           ),
                                         ],
                                       ),

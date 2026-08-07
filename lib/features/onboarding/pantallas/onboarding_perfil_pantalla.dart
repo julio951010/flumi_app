@@ -268,13 +268,33 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       titulo: '¿Cómo te llamas?',
       subtitulo: 'Este nombre aparecerá en tu perfil.',
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         child: TextFormField(
           controller: _nombreCtrl,
           onChanged: (_) => setState(() {}),
-          style: const TextStyle(fontSize: 18),
-          textAlign: TextAlign.center,
-          decoration: _inputDeco('Tu nombre', primario),
+          style: const TextStyle(color: Colors.black87, fontSize: 15),
+          textAlign: TextAlign.start,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.grey[100],
+            labelText: 'Nombre',
+            labelStyle: const TextStyle(color: Colors.black45, fontSize: 14),
+            floatingLabelStyle: TextStyle(color: primario, fontSize: 13),
+            prefixIcon: Icon(Icons.person_outline, color: primario.withValues(alpha: 0.7), size: 20),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primario, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
         ),
       ),
     );
@@ -284,57 +304,61 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     return _pasoLayout(
       icono: Icons.cake_outlined,
       titulo: '¿Cuándo naciste?',
-      subtitulo: 'Debes tener al menos 18 años.',
+      subtitulo: 'Tu edad se mostrará en tu perfil.',
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Expanded(
+                  flex: 11,
                   child: TextFormField(
                     controller: _diaCtrl,
-                    onChanged: (_) {
+                    onChanged: (valor) {
                       if (_diaCtrl.text.length >= 2) _enfocarMes();
                       _validarFecha();
                     },
                     keyboardType: TextInputType.number,
                     maxLength: 2,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 18),
-                    decoration: _inputDeco('Día', primario).copyWith(counterText: ''),
+                    style: const TextStyle(color: Colors.black87, fontSize: 16),
+                    decoration: _campoFecha('Día', primario).copyWith(counterText: ''),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
+                  flex: 11,
                   child: TextFormField(
                     controller: _mesCtrl,
                     focusNode: _mesFocus,
-                    onChanged: (_) {
+                    onChanged: (valor) {
                       if (_mesCtrl.text.length >= 2) _enfocarAnio();
                       _validarFecha();
                     },
                     keyboardType: TextInputType.number,
                     maxLength: 2,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 18),
-                    decoration: _inputDeco('Mes', primario).copyWith(counterText: ''),
+                    style: const TextStyle(color: Colors.black87, fontSize: 16),
+                    decoration: _campoFecha('Mes', primario).copyWith(counterText: ''),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
+                  flex: 11,
                   child: TextFormField(
                     controller: _anioCtrl,
                     focusNode: _anioFocus,
-                    onChanged: (_) {
+                    onChanged: (valor) {
                       if (_anioCtrl.text.length >= 4) _anioFocus.unfocus();
                       _validarFecha();
                     },
                     keyboardType: TextInputType.number,
                     maxLength: 4,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 18),
-                    decoration: _inputDeco('Año', primario).copyWith(counterText: ''),
+                    style: const TextStyle(color: Colors.black87, fontSize: 16),
+                    decoration: _campoFecha('Año', primario).copyWith(counterText: ''),
                   ),
                 ),
               ],
@@ -347,6 +371,29 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           ],
         ),
       ),
+    );
+  }
+
+  InputDecoration _campoFecha(String label, Color primario) {
+    return InputDecoration(
+      filled: true,
+      fillColor: Colors.grey[100],
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.black45, fontSize: 14),
+      floatingLabelStyle: TextStyle(color: primario, fontSize: 13),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primario, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
     );
   }
 
@@ -452,49 +499,52 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   Widget _pasoUbicacion(Color primario) {
     return _pasoLayout(
       icono: Icons.location_on_outlined,
-      titulo: 'Comparte tu ubicación',
+      titulo: 'Ubicación',
       subtitulo:
           'Comparte tu ubicación para conectar con personas cerca de ti. Solo se mostrará tu ciudad.',
-      child: Form(
-        key: _formKeyUbicacion,
-        autovalidateMode: AutovalidateMode.onUserInteraction,
-        child: _cargandoUbicacion
-            ? const SizedBox(
-                height: 40,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _campoUbicacion(primario),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: OutlinedButton.icon(
-                      onPressed: _obteniendoUbicacion
-                          ? null
-                          : _establecerUbicacion,
-                      icon: _obteniendoUbicacion
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.my_location, size: 20),
-                      label: const Text('Usar mi ubicación actual'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: primario,
-                        side: BorderSide(color: primario.withValues(alpha: 0.5)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Form(
+          key: _formKeyUbicacion,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child: _cargandoUbicacion
+              ? const SizedBox(
+                  height: 40,
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _campoUbicacion(primario),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: _obteniendoUbicacion
+                            ? null
+                            : _establecerUbicacion,
+                        icon: _obteniendoUbicacion
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.my_location, size: 20),
+                        label: const Text('Usar mi ubicación actual'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primario,
+                          side: BorderSide(color: primario.withValues(alpha: 0.5)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+        ),
       ),
     );
   }
@@ -744,21 +794,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         .map((e) => e.key)
         .firstOrNull;
     return provincia == null ? opcion : '$opcion, $provincia';
-  }
-
-  InputDecoration _inputDeco(String hint, Color primario) {
-    return InputDecoration(
-      hintText: hint,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: primario, width: 1.5),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-    );
   }
 
   Widget _permisoBoton({

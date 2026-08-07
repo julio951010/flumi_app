@@ -123,9 +123,9 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
               onTap: () => Navigator.pop(ctx, 'reportar'),
             ),
             ListTile(
-              leading: const Icon(Icons.block, color: Colors.black87),
+              leading: const Icon(Icons.block, color: Colors.redAccent),
               title: const Text('Bloquear Usuario',
-                  style: TextStyle(fontSize: 15)),
+                  style: TextStyle(fontSize: 15, color: Colors.redAccent)),
               onTap: () => Navigator.pop(ctx, 'bloquear'),
             ),
             const SizedBox(height: 8),
@@ -272,25 +272,22 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _fabCircular(
-                icon: Icons.close,
-                color: const Color(0xFFCCCCCC),
+              _fabImage(
+                asset: 'assets/icons/close.png',
                 size: tamano,
                 onTap: widget.soloVista ? null : widget.onRechazar,
               ),
               const SizedBox(width: 28),
-              _fabCircular(
-                icon: Icons.chat_bubble_outline,
-                color: const Color(0xFF7B2CBF),
+              _fabImage(
+                asset: 'assets/icons/chat.png',
                 size: tamano,
                 onTap: widget.soloVista ? null : widget.onChat,
               ),
               if (widget.soloVista ||
                   (!widget.gusta && !widget.esMeGusta && !widget.esMatch)) ...[
                 const SizedBox(width: 28),
-                _fabCircular(
-                  icon: Icons.favorite,
-                  color: FlumiTema.colorPrimario,
+                _fabImage(
+                  asset: 'assets/icons/heart.png',
                   size: tamano,
                   onTap: widget.soloVista ? null : widget.onMeGusta,
                 ),
@@ -302,30 +299,36 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     );
   }
 
-  Widget _fabCircular({
-    required IconData icon,
-    required Color color,
+  Widget _fabImage({
+    required String asset,
     required double size,
     required VoidCallback? onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
+      child: Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.white,
           shape: BoxShape.circle,
+          color: Colors.white,
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 8,
-                offset: const Offset(0, 2)),
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 20,
+              spreadRadius: 4,
+              offset: const Offset(0, 8),
+            ),
           ],
         ),
-        child: Icon(icon, color: color, size: size * 0.46),
+        child: Center(
+          child: Image.asset(
+            asset,
+            width: size * 0.8,  // Cambia de 0.5 a 0.7 para hacerla más grande
+            height: size * 0.8,
+            fit: BoxFit.contain,
+          ),
+        ),
       ),
     );
   }
@@ -502,9 +505,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.grey[50],
+            color: Colors.grey[200],
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[200]!),
           ),
           child: Text(u.biografia,
               style: const TextStyle(
@@ -515,34 +517,34 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
         ),
         const SizedBox(height: 20),
       ],
-      _seccionDetalle('Preferencias de b\u00fasqueda', [
+      _seccionDetalle('Qu\u00e9 buscas', [
         _pill(null, opcionTexto(opcionesQueBusca, u.queBusca)),
         _pillBuscaRango(u),
       ]),
-      _seccionDetalle('Vida personal', [
+      _seccionDetalle('Vida personal y creencias', [
         _pillIconoValor(Icons.favorite, orientacionTexto(u.orientacionSexual)),
         _pill(null, situacionTexto(u.situacionSentimental)),
         _pillIconoValor(Icons.child_care, hijosTexto(u.hijos)),
         _pill(null, religionTexto(u.religion)),
       ]),
-      _seccionDetalle('Profesi\u00f3n y estudios', [
-        _pill(null, educacionTexto(u.educacion)),
+      _seccionDetalle('Trabajo y formaci\u00f3n', [
+        _pillIconoValor(Icons.school, educacionTexto(u.educacion)),
         _pillIconoValor(Icons.badge, valorTexto(u.profesion)),
         _pillIconoValor(Icons.work, trabajoTexto(u.trabajo)),
       ]),
-      _seccionDetalle('Estilo de vida', [
+      _seccionDetalle('H\u00e1bitos y estilo de vida', [
         _pill(null, tabacoTexto(u.fuma)),
         _pill(null, alcoholTexto(u.bebe)),
         _pillIconoValor(Icons.pets, mascotasTexto(u.mascotas)),
         _pillIconoValor(Icons.colorize, tatuajesTexto(u.tatuajes)),
       ]),
-      _seccionDetalle('Personalidad y apariencia', [
+      _seccionDetalle('Personalidad y rasgos', [
         for (final p in listaPersonalidad(u.personalidad))
           _pill(Icons.psychology, p),
         _pillIconoValor(Icons.height, alturaTexto(u.altura)),
         _pill(null, signoTexto(u.signoZodiaco)),
       ]),
-      _seccionDetalle('Idiomas', [
+      _seccionDetalle('Idiomas que hablas', [
         for (final idioma in u.idiomas.split(','))
           if (idioma.trim().isNotEmpty) _pill(Icons.translate, idioma.trim()),
       ]),
@@ -586,8 +588,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border.all(color: Colors.grey[200]!),
+        color: Colors.grey[200],
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -645,9 +646,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: FlumiTema.colorPrimario.withValues(alpha: 0.06),
-                border: Border.all(
-                    color: FlumiTema.colorPrimario.withValues(alpha: 0.15)),
+                color: FlumiTema.colorPrimario.withValues(alpha: 0.06) ,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(i,
@@ -675,9 +674,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.grey[50],
+                color: Colors.grey[200],
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -754,7 +752,7 @@ class _SeccionTitulo extends StatelessWidget {
         style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
-            color: Colors.grey[700]));
+            color: Colors.grey[500]));
   }
 }
 

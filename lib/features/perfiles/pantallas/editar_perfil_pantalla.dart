@@ -190,8 +190,10 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   }
 
   static const _educacionesLegacy = {
-    'bachillerato': '\ud83d\udcd6 Educaci\u00f3n secundaria / Bachillerato',
-    'en_curso': '\ud83c\udf93 Universidad (Grado / Licenciatura)',
+    'formacion_profesional': '\ud83c\udf93 Ense\u00f1anza T\u00e9cnica y Profesional',
+    'universidad': '\ud83c\udf93 Educaci\u00f3n Superior',
+    'bachillerato': '\ud83c\udf93 Educaci\u00f3n Secundaria',
+    'en_curso': '\ud83c\udf93 Educaci\u00f3n Superior',
   };
 
   String _educacionTexto(String valor) {
@@ -604,13 +606,13 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
             ),
           ),
         ),
-        OutlinedButton.icon(
+        ElevatedButton.icon(
           onPressed: _vistaPrevia,
           icon: const Icon(Icons.visibility_outlined, size: 18),
           label: const Text('Vista previa'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: primario,
-            side: BorderSide(color: primario.withValues(alpha: 0.5)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: primario,
+            foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:drift/drift.dart' hide Column;
 import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/estilos/tema.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../auth/auth_service.dart';
 import '../perfil_repositorio.dart';
@@ -421,7 +422,7 @@ class _PerfilBadoo extends StatelessWidget {
   Widget _botonVistaPrevia(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
+      child: ElevatedButton.icon(
         onPressed: () {
           Navigator.of(context).push(
             MaterialPageRoute(
@@ -432,9 +433,9 @@ class _PerfilBadoo extends StatelessWidget {
         icon: const Icon(Icons.visibility_outlined, size: 20),
         label: const Text('Vista previa de mi perfil',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF6C63FF),
-          side: const BorderSide(color: Color(0xFF6C63FF)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: FlumiTema.colorPrimario,
+          foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(vertical: 14),
         ),

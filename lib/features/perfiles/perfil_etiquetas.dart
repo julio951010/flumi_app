@@ -45,24 +45,24 @@ const opcionesSituacion = <OpcionEtiqueta>[
 ];
 
 const opcionesEducacion = <OpcionEtiqueta>[
-  ('\ud83d\udcda Educaci\u00f3n primaria', 'primaria'),
-  ('\ud83d\udcd6 Educaci\u00f3n secundaria / Bachillerato', 'secundaria'),
-  ('\ud83d\udee0\ufe0f Formaci\u00f3n profesional / Ciclo formativo',
-      'formacion_profesional'),
-  ('\ud83c\udf93 Universidad (Grado / Licenciatura)', 'universidad'),
-  ('\ud83c\udf93 Postgrado / M\u00e1ster / Doctorado', 'posgrado'),
+  ('Educaci\u00f3n Primaria', 'primaria'),
+  ('Educaci\u00f3n Secundaria', 'secundaria'),
+  ('Educaci\u00f3n Preuniversitaria', 'preuniversitaria'),
+  ('Ense\u00f1anza T\u00e9cnica y Profesional', 'tecnica_profesional'),
+  ('Educaci\u00f3n Superior', 'superior'),
+  ('Postgrado', 'postgrado'),
   ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
 ];
 
 const opcionesTrabajo = <OpcionEtiqueta>[
-  ('\ud83c\udfe2 Sector privado', 'sector_privado'),
-  ('\ud83c\udfdb\ufe0f Sector p\u00fablico', 'sector_publico'),
-  ('\ud83d\udcbb Trabajo independiente', 'independiente'),
-  ('\ud83d\udcbc Emprendedor', 'emprendedor'),
-  ('\ud83c\udfe0 Ama de casa', 'ama_de_casa'),
-  ('\ud83d\udcda Estudiante', 'estudiante'),
-  ('\ud83c\udf05 Jubilado', 'jubilado'),
-  ('\ud83d\udd0d Buscando trabajo', 'buscando_trabajo'),
+  ('Sector privado', 'sector_privado'),
+  ('Sector p\u00fablico', 'sector_publico'),
+  ('Trabajo independiente', 'independiente'),
+  ('Emprendedor', 'emprendedor'),
+  ('Ama de casa', 'ama_de_casa'),
+  ('Estudiante', 'estudiante'),
+  ('Jubilado', 'jubilado'),
+  ('Buscando trabajo', 'buscando_trabajo'),
   ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
 ];
 
@@ -219,8 +219,10 @@ String situacionTexto(String valor) {
 }
 
 const _educacionesLegacy = {
-  'bachillerato': '\ud83d\udcd6 Educaci\u00f3n secundaria / Bachillerato',
-  'en_curso': '\ud83c\udf93 Universidad (Grado / Licenciatura)',
+  'formacion_profesional': '\ud83c\udf93 Ense\u00f1anza T\u00e9cnica y Profesional',
+  'universidad': '\ud83c\udf93 Educaci\u00f3n Superior',
+  'bachillerato': '\ud83c\udf93 Educaci\u00f3n Secundaria',
+  'en_curso': '\ud83c\udf93 Educaci\u00f3n Superior',
 };
 
 String educacionTexto(String valor) {

@@ -289,17 +289,22 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
               flex: 3,
               child: Padding(
                 padding: EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ShimmerCaja(width: 200, height: 22),
-                    SizedBox(height: 12),
-                    ShimmerCaja(width: 100, height: 16),
-                    SizedBox(height: 12),
-                    ShimmerCaja(width: double.infinity, height: 14),
-                    SizedBox(height: 6),
-                    ShimmerCaja(width: 160, height: 14),
-                  ],
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ShimmerCaja(width: 200, height: 22),
+                      SizedBox(height: 12),
+                      ShimmerCaja(width: 100, height: 16),
+                      SizedBox(height: 12),
+                      ShimmerCaja(width: 200, height: 14),
+                      SizedBox(height: 6),
+                      ShimmerCaja(width: 160, height: 14),
+                    ],
+                  ),
                 ),
               ),
             ),

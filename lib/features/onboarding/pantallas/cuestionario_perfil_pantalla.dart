@@ -14,6 +14,8 @@ import 'widgets/rango_edad_opcion.dart';
 import 'widgets/selector_categorias.dart';
 import 'widgets/selector_multi_opciones.dart';
 import 'widgets/selector_opciones.dart';
+import 'widgets/selector_opciones_layout.dart';
+import 'widgets/signo_zodiacal_opcion.dart';
 import 'widgets/slider_opcion.dart';
 import 'widgets/text_area_opcion.dart';
 
@@ -38,6 +40,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   int _paso = 0;
   bool _cargando = false;
   bool _omitido = false;
+  DateTime? _fechaNacimiento;
 
   final _bioCtrl = TextEditingController();
   final _orientacionPropiaCtrl = TextEditingController();
@@ -68,14 +71,20 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
 
   static const _totalPasos = 22;
 
-  static List<(String, String)> _opcionesSignoPantalla() {
-    return [
-      ...opcionesSigno,
-      ('\ud83d\ude48 Prefiero no decirlo', _codigoPrefieroNoDecirSigno),
-    ];
+  @override
+  void initState() {
+    super.initState();
+    _cargarFechaNacimiento();
   }
 
-  static const _codigoPrefieroNoDecirSigno = 'prefiero_no_decirlo';
+  Future<void> _cargarFechaNacimiento() async {
+    final perfil = await (widget.db.select(widget.db.usuarios)
+          ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+        .getSingleOrNull();
+    if (perfil != null && mounted) {
+      setState(() => _fechaNacimiento = perfil.fechaNacimiento);
+    }
+  }
 
   @override
   void dispose() {
@@ -384,15 +393,22 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectorOpciones(
+                  SelectorOpcionesLayout(
                     valorActual: _religion,
-                    opciones: opcionesReligion,
+                    filas: [
+                      [opcionesReligion[0], opcionesReligion[1]],
+                      [opcionesReligion[2], opcionesReligion[3]],
+                      [opcionesReligion[4], opcionesReligion[5]],
+                      [opcionesReligion[7], opcionesReligion[8]],
+                      [opcionesReligion[6]],
+                      [opcionesReligion[9]],
+                    ],
                     onSeleccion: (v) => setState(() {
                       _religion = v;
                       _religionPropiaCtrl.clear();
                     }),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 14),
                   CampoPersonalizadoOpcion(
                     controlador: _religionPropiaCtrl,
                     habilitado: !_cargando,
@@ -421,9 +437,17 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
               )),
           _pagina('¿En qué sector trabajas?',
               'Ayuda a conocer un poco más sobre tu día a día.',
-              SelectorOpciones(
+              SelectorOpcionesLayout(
                 valorActual: _trabajo,
-                opciones: opcionesTrabajo,
+                filas: [
+                  [opcionesTrabajo[1]],
+                  [opcionesTrabajo[0]],
+                  [opcionesTrabajo[2]],
+                  [opcionesTrabajo[3], opcionesTrabajo[4]],
+                  [opcionesTrabajo[5], opcionesTrabajo[6]],
+                  [opcionesTrabajo[7]],
+                  [opcionesTrabajo[8]],
+                ],
                 onSeleccion: (v) => setState(() => _trabajo = v),
               )),
           _pagina('¿Fumas?',
@@ -503,10 +527,10 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
               )),
           _pagina('¿Cuál es tu signo del zodíaco?',
               'Un dato divertido para conectar con personas afines.',
-              SelectorOpciones(
+              SignoZodiacalOpcion(
+                fechaNacimiento: _fechaNacimiento,
                 valorActual: _signo,
-                opciones: _opcionesSignoPantalla(),
-                onSeleccion: (v) => setState(() => _signo = v),
+                onCambio: (v) => setState(() => _signo = v),
               )),
           _pagina('¿Qué idiomas hablas?',
               'Compartir idiomas ayuda a conectar con personas de todo el mundo.',
@@ -634,7 +658,11 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
               style: TextStyle(color: Colors.grey[600], fontSize: 14),
             ),
             const SizedBox(height: 20),
-            Expanded(child: child),
+            Expanded(
+              child: SingleChildScrollView(
+                child: child,
+              ),
+            ),
           ],
         ),
       ),
@@ -642,95 +670,101 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   }
 
   Widget _pasoIntro(Color primario) {
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        children: [
-          const Spacer(flex: 2),
-          Container(
-            height: 90, width: 90,
-            decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
-            child: Icon(Icons.assignment, size: 50, color: primario),
-          ),
-          const SizedBox(height: 28),
-          const Text('Completa tu perfil',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87)),
-          const SizedBox(height: 14),
-          Text(
-            'Realiza este cuestionario para completar tu perfil\ny ayuda a otros a conocerte mejor.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.5),
-          ),
-          const Spacer(flex: 3),
-          SizedBox(
-            width: double.infinity, height: 52,
-            child: ElevatedButton(
-              onPressed: _siguiente,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primario, foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            Container(
+              height: 90, width: 90,
+              decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
+              child: Icon(Icons.assignment, size: 50, color: primario),
+            ),
+            const SizedBox(height: 28),
+            const Text('Completa tu perfil',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87)),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Realiza este cuestionario para completar tu perfil\ny ayuda a otros a conocerte mejor.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.5),
               ),
-              child: const Text('Ir al cuestionario', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
             ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity, height: 48,
-            child: TextButton(
-              onPressed: _omitirAhora,
-              child: Text('Quizá más tarde', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity, height: 52,
+              child: ElevatedButton(
+                onPressed: _siguiente,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primario, foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
+                ),
+                child: const Text('Ir al cuestionario', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity, height: 48,
+              child: TextButton(
+                onPressed: _omitirAhora,
+                child: Text('Quizá más tarde', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
 
   Widget _pasoBienvenida(Color primario) {
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Spacer(),
-          Container(
-            height: 100, width: 100,
-            decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
-            child: Icon(Icons.check_circle, size: 60, color: primario),
-          ),
-          const SizedBox(height: 32),
-          const Text('¡Todo listo!',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
-          const SizedBox(height: 12),
-          Text(
-            _omitido
-                ? 'Puedes completar tu perfil más tarde desde la sección de perfil.'
-                : 'Tu perfil está completo. Ahora puedes empezar a conocer personas.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.4),
-          ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity, height: 52,
-            child: ElevatedButton(
-              onPressed: () async {
-                if (_omitido) {
-                  await (widget.db.update(widget.db.usuarios)
-                      ..where((u) => u.uuid.equals(widget.usuarioUuid)))
-                    .write(const UsuariosCompanion(perfilCompletado: Value(true)));
-                }
-                if (mounted) widget.onCompletado();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primario, foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
-              ),
-              child: const Text('Comenzar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              height: 100, width: 100,
+              decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
+              child: Icon(Icons.check_circle, size: 60, color: primario),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
+            const SizedBox(height: 32),
+            const Text('¡Todo listo!',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                _omitido
+                    ? 'Puedes completar tu perfil más tarde desde la sección de perfil.'
+                    : 'Tu perfil está completo. Ahora puedes empezar a conocer personas.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.4),
+              ),
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity, height: 52,
+              child: ElevatedButton(
+                onPressed: () async {
+                  if (_omitido) {
+                    await (widget.db.update(widget.db.usuarios)
+                        ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+                      .write(const UsuariosCompanion(perfilCompletado: Value(true)));
+                  }
+                  if (mounted) widget.onCompletado();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primario, foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
+                ),
+                child: const Text('Comenzar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }

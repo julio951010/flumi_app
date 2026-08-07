@@ -73,6 +73,7 @@ flutter:
   assets:
     - assets/images/
     - assets/data/
+    - assets/icons/
     - assets/fotos_prueba/Alice/
     - assets/fotos_prueba/Bob/
     - assets/fotos_prueba/Carla/

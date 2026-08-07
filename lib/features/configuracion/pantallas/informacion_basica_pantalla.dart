@@ -547,8 +547,8 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(
-                        width: 110,
+                      Expanded(
+                        flex: 11,
                         child: TextFormField(
                           controller: _diaCtrl,
                           keyboardType: TextInputType.number,
@@ -565,8 +565,8 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      SizedBox(
-                        width: 110,
+                      Expanded(
+                        flex: 11,
                         child: TextFormField(
                           controller: _mesCtrl,
                           focusNode: _mesFocus,
@@ -584,8 +584,8 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      SizedBox(
-                        width: 120,
+                      Expanded(
+                        flex: 12,
                         child: TextFormField(
                           controller: _anioCtrl,
                           focusNode: _anioFocus,
