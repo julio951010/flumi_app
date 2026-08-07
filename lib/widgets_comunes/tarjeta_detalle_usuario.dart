@@ -517,7 +517,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
         ),
         const SizedBox(height: 20),
       ],
-      _seccionDetalle('Qu\u00e9 buscas', [
+      _seccionDetalle('\u00bfQu\u00e9 busco?', [
         _pill(null, opcionTexto(opcionesQueBusca, u.queBusca)),
         _pillBuscaRango(u),
       ]),

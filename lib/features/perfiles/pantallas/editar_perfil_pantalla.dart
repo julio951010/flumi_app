@@ -595,6 +595,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Widget _cabecera(Color primario) {
     final porcentaje = _porcentajeCompletado;
     return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Expanded(
           child: Text(
@@ -606,19 +607,20 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
             ),
           ),
         ),
-        ElevatedButton.icon(
-          onPressed: _vistaPrevia,
-          icon: const Icon(Icons.visibility_outlined, size: 18),
-          label: const Text('Vista previa'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primario,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+        Flexible(
+          child: ElevatedButton.icon(
+            onPressed: _vistaPrevia,
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            label: const Text('Vista previa', style: TextStyle(fontSize: 14)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primario,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              visualDensity: VisualDensity.compact,
             ),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            visualDensity: VisualDensity.compact,
           ),
         ),
       ],
