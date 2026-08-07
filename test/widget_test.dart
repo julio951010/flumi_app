@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flumi/main.dart';
+import 'package:Flumi/main.dart';
 
 void main() {
   testWidgets('App se inicia correctamente', (WidgetTester tester) async {

@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:drift/drift.dart' hide Column;
 import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/base_datos_local/database.dart';
 import '../lib/features/perfiles/pantallas/subpaginas_perfil.dart';
@@ -21,39 +18,28 @@ class _FakeRepositorio extends PerfilRepositorio {
 }
 
 void main() {
-  testWidgets('IdiomasPantalla muestra sugerencias al escribir',
+  testWidgets('IdiomasPantalla muestra los idiomas disponibles',
       (WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(
       home: IdiomasPantalla(repositorio: _FakeRepositorio()),
     ));
     await tester.pumpAndSettle();
 
-    expect(find.byType(TextField), findsOneWidget);
-
-    await tester.enterText(find.byType(TextField), 'es');
-    await tester.pump();
-
-    expect(find.text('Español'), findsWidgets);
+    expect(find.text('Español'), findsOneWidget);
+    expect(find.text('Inglés'), findsOneWidget);
+    expect(tester.takeException(), null);
   });
 
-  testWidgets('IdiomasPantalla muestra sugerencias con teclado abierto',
+  testWidgets('IdiomasPantalla permite seleccionar idiomas de la lista',
       (WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1080, 1800);
-    tester.view.devicePixelRatio = 3.0;
-    addTearDown(tester.view.reset);
-
     await tester.pumpWidget(MaterialApp(
       home: IdiomasPantalla(repositorio: _FakeRepositorio()),
     ));
     await tester.pumpAndSettle();
 
-    tester.view.viewInsets = const FakeViewPadding(bottom: 400);
-    await tester.pump();
+    await tester.tap(find.text('Español'));
+    await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'es');
-    await tester.pump();
-
-    expect(find.text('Español'), findsWidgets);
     expect(tester.takeException(), null);
   });
 }
