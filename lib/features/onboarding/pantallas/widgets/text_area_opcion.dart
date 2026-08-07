@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../../core/estilos/tema.dart';
 
 typedef TextoCallback = void Function(String texto);
 
@@ -23,25 +22,35 @@ class TextAreaOpcion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primario = FlumiTema.colorPrimario;
+    final primario = Theme.of(context).colorScheme.primary;
 
     return TextField(
       controller: controller,
       maxLines: maxLines,
       maxLength: maxLength,
       textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(
+          color: Colors.black87, fontSize: 15, height: 1.4),
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: colorFondo ?? primario.withValues(alpha: 0.05),
+        fillColor: colorFondo ?? Colors.grey[100],
+        counterStyle:
+            const TextStyle(fontSize: 12, color: Colors.black54),
         border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
+        ),
+        enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: primario, width: 1.5),
+          borderSide: const BorderSide(color: Colors.black54, width: 1.5),
         ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
       onChanged: onCambio,
     );

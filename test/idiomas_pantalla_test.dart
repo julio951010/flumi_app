@@ -18,28 +18,37 @@ class _FakeRepositorio extends PerfilRepositorio {
 }
 
 void main() {
-  testWidgets('IdiomasPantalla muestra los idiomas disponibles',
+  testWidgets('IdiomasPantalla muestra el campo y permite escribir',
       (WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(
       home: IdiomasPantalla(repositorio: _FakeRepositorio()),
     ));
     await tester.pumpAndSettle();
 
+    expect(find.text('¿Qué idiomas hablas?'), findsOneWidget);
+    expect(find.text('Escribe un idioma...'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Esp');
+    await tester.pumpAndSettle();
+
     expect(find.text('Español'), findsOneWidget);
-    expect(find.text('Inglés'), findsOneWidget);
     expect(tester.takeException(), null);
   });
 
-  testWidgets('IdiomasPantalla permite seleccionar idiomas de la lista',
+  testWidgets('IdiomasPantalla permite agregar un idioma desde las sugerencias',
       (WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(
       home: IdiomasPantalla(repositorio: _FakeRepositorio()),
     ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'Esp');
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Español'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), null);
+    expect(find.text('Español'), findsOneWidget);
   });
 }

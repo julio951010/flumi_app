@@ -62,14 +62,16 @@ class BuscaGeneroOpcion extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      child: RejillaCardsOpciones(
-        tarjetas: [
-          for (final opcion in opcionesBuscaGenero)
+      child: Column(
+        children: [
+          for (final opcion in opcionesBuscaGenero) ...[
             TarjetaOpcionCheck(
               etiqueta: opcion.$1,
               seleccionada: seleccionados.contains(opcion.$2),
               onTap: () => _alternar(opcion.$2, seleccionados),
             ),
+            const SizedBox(height: 10),
+          ],
         ],
       ),
     );

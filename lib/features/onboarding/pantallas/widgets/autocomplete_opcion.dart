@@ -22,53 +22,129 @@ class AutocompleteOpcion extends StatefulWidget {
 }
 
 class _AutocompleteOpcionState extends State<AutocompleteOpcion> {
+  final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  String _normalizar(String valor) {
+    return valor
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n');
+  }
+
   @override
   Widget build(BuildContext context) {
     const primario = FlumiTema.colorPrimario;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextFormField(
-          controller: widget.controller,
-          style: const TextStyle(fontSize: 15),
-          decoration: InputDecoration(
-            hintText: widget.hint,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primario.withValues(alpha: 0.3)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primario, width: 1.5),
-            ),
-          ),
-          onChanged: widget.onCambio,
-        ),
-        const SizedBox(height: 16),
-        Expanded(
-          child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 10,
-              children: widget.sugerencias.map((p) {
-                return GestureDetector(
-                  onTap: () {
-                    widget.controller.text = p;
-                    widget.onCambio(p);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: primario.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: primario.withValues(alpha: 0.3)),
-                    ),
-                    child: Text(p, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+        Autocomplete<String>(
+          optionsBuilder: (TextEditingValue texto) {
+            if (texto.text.trim().isEmpty) {
+              return const Iterable<String>.empty();
+            }
+            final consulta = _normalizar(texto.text.trim().toLowerCase());
+            return widget.sugerencias
+                .where((opcion) => _normalizar(
+                    opcion.toLowerCase()).contains(consulta));
+          },
+          displayStringForOption: (opcion) => opcion,
+          fieldViewBuilder: (context, controladorTexto, focusNodeTexto,
+              onFieldSubmitted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              if (controladorTexto.text.isEmpty &&
+                  widget.controller.text.isNotEmpty) {
+                controladorTexto.text = widget.controller.text;
+              }
+            });
+            return TextField(
+              controller: controladorTexto,
+              focusNode: _focusNode,
+              onChanged: (v) {
+                widget.controller.text = v;
+                widget.onCambio(v);
+              },
+              onSubmitted: (_) => onFieldSubmitted(),
+              style: const TextStyle(color: Colors.black87, fontSize: 15),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: Colors.grey[100],
+                labelText: widget.hint,
+                labelStyle:
+                    const TextStyle(color: Colors.black45, fontSize: 14),
+                prefixIcon: Icon(Icons.badge_outlined,
+                    color: primario.withValues(alpha: 0.7), size: 20),
+                suffixIcon:
+                    Icon(Icons.arrow_drop_down, color: Colors.grey[400]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                      color: primario.withValues(alpha: 0.3)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                      color: primario.withValues(alpha: 0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:
+                      BorderSide(color: primario, width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 14),
+              ),
+            );
+          },
+          optionsViewBuilder: (context, onSelected, opciones) {
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(12),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    shrinkWrap: true,
+                    itemCount: opciones.length,
+                    itemBuilder: (context, index) {
+                      final opcion = opciones.elementAt(index);
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.work_outline,
+                          size: 20,
+                          color: primario.withValues(alpha: 0.8),
+                        ),
+                        title: Text(opcion,
+                            style: const TextStyle(fontSize: 14)),
+                        onTap: () {
+                          onSelected(opcion);
+                          _focusNode.unfocus();
+                        },
+                      );
+                    },
                   ),
-                );
-              }).toList(),
-            ),
-          ),
+                ),
+              ),
+            );
+          },
+          onSelected: (opcion) {
+            widget.controller.text = opcion;
+            widget.onCambio(opcion);
+          },
         ),
       ],
     );

@@ -347,6 +347,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
                   SelectorOpciones(
                     valorActual: _orientacion,
                     opciones: opcionesOrientacionSexual,
+                    dobleColumna: true,
                     onSeleccion: (v) => setState(() {
                       _orientacion = v;
                       _orientacionPropiaCtrl.clear();
@@ -613,15 +614,26 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   Widget _pagina(String titulo, String subtitulo, Widget child) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 24),
-            Text(titulo, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
             const SizedBox(height: 8),
-            Text(subtitulo, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
-            const SizedBox(height: 24),
+            Text(
+              titulo,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitulo,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600], fontSize: 14),
+            ),
+            const SizedBox(height: 20),
             Expanded(child: child),
           ],
         ),
