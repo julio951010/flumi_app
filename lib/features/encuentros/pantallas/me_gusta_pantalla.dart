@@ -1,8 +1,8 @@
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import '../../../config/env.dart';
 import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../widgets_comunes/imagen_difuminada.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/tarjeta_usuario.dart';
 import 'cerca_de_ti_pantalla.dart' show PerfilDetallePage;
@@ -254,10 +254,17 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
               ),
               imagenOverlay: !esPremium
                   ? Positioned.fill(
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                            color: Colors.black.withValues(alpha: 0.1)),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (usuario.fotosLocalesRutas.isNotEmpty)
+                            ImagenDifuminada(
+                              ruta: usuario.fotosLocalesRutas.first,
+                              sigma: 20,
+                            ),
+                          Container(
+                              color: Colors.black.withValues(alpha: 0.2)),
+                        ],
                       ),
                     )
                   : null,

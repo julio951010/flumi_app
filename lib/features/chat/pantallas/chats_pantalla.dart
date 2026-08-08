@@ -406,7 +406,7 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
         ? 'T\u00fa: ${conv.ultimoMensaje}'
         : conv.ultimoMensaje;
     return Material(
-      color: Colors.white,
+      color: const Color(0xFFF5F7FA),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),

@@ -102,9 +102,9 @@ class _ChatPantallaState extends State<ChatPantalla> {
               onTap: () => Navigator.pop(ctx, 'reportar'),
             ),
             ListTile(
-              leading: const Icon(Icons.block, color: Colors.black87),
+              leading: const Icon(Icons.block, color: Colors.redAccent),
               title: const Text('Bloquear Usuario',
-                  style: TextStyle(fontSize: 15)),
+                  style: TextStyle(fontSize: 15, color: Colors.redAccent)),
               onTap: () => Navigator.pop(ctx, 'bloquear'),
             ),
             const SizedBox(height: 8),

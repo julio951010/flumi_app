@@ -471,7 +471,11 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
 
   Widget _buildQueBuscaBadge(Usuario u) {
     final texto = opcionTexto(opcionesQueBusca, u.queBusca);
-    if (texto.isEmpty || texto == 'Sin definir') return const SizedBox.shrink();
+    if (texto.isEmpty ||
+        texto == 'Sin definir' ||
+        _esPrefieroNoDecir(texto)) {
+      return const SizedBox.shrink();
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
@@ -568,7 +572,11 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   Widget _pillIconoValor(IconData icono, String valor) {
-    if (valor == 'Sin definir' || valor.isEmpty) return const SizedBox.shrink();
+    if (valor == 'Sin definir' ||
+        valor.isEmpty ||
+        _esPrefieroNoDecir(valor)) {
+      return const SizedBox.shrink();
+    }
     return _pill(icono, valor);
   }
 
@@ -583,8 +591,17 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     return _pill(Icons.people, 'Tengo inter\u00e9s en $conocer$rangoParte');
   }
 
+  bool _esPrefieroNoDecir(String texto) {
+    final t = texto.toLowerCase();
+    return t == 'prefiero no decirlo' || t.contains('prefiero no decirlo');
+  }
+
   Widget _pill(IconData? icono, String texto) {
-    if (texto == 'Sin definir' || texto.isEmpty) return const SizedBox.shrink();
+    if (texto == 'Sin definir' ||
+        texto.isEmpty ||
+        _esPrefieroNoDecir(texto)) {
+      return const SizedBox.shrink();
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(

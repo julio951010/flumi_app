@@ -83,6 +83,10 @@ class FlumiApp extends StatelessWidget {
       title: appNombre,
       debugShowCheckedModeBanner: false,
       theme: FlumiTema.tema,
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: FlumiTema.estiloBarras,
+        child: child!,
+      ),
       home: const _InicioRouter(),
     );
   }

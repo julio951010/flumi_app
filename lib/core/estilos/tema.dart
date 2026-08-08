@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class FlumiTema {
   static const Color colorPrimario = Color(0xFF3AA5ED);
-  static const Color colorFondo = Color(0xFFF5F7FA);
+  static const Color colorFondo = Color(0xFFFFFFFF);
+
+  static const SystemUiOverlayStyle estiloBarras = SystemUiOverlayStyle(
+    statusBarColor: colorFondo,
+    statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  );
 
   static ThemeData tema = ThemeData(
     colorScheme: ColorScheme.fromSeed(
@@ -16,6 +24,7 @@ class FlumiTema {
     appBarTheme: const AppBarTheme(
       centerTitle: true,
       elevation: 0,
+      systemOverlayStyle: FlumiTema.estiloBarras,
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
