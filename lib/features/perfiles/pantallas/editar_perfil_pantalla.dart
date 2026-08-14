@@ -1,13 +1,24 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import 'package:drift/drift.dart' hide Column;
+
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/base_datos_local/tables.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../core/servicios/perfil_foto_servicio.dart';
+import '../../../widgets_comunes/foto_perfil.dart';
+import '../../../widgets_comunes/flumi_loader.dart';
+import '../../../widgets_comunes/recortar_imagen_pantalla.dart';
 import '../../configuracion/pantallas/informacion_basica_pantalla.dart';
 import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart'
     show PerfilDetallePage;
+import '../perfil_completado.dart';
 import '../perfil_repositorio.dart';
 import '../perfil_etiquetas.dart';
 import 'subpaginas_perfil.dart';
+import 'verificacion_cuenta_pantalla.dart';
 
 class EditarPerfilPantalla extends StatefulWidget {
   final Usuario perfil;
@@ -28,6 +39,7 @@ typedef _Opcion = OpcionEtiqueta;
 class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Usuario? _perfil;
   bool _cargando = true;
+  final _picker = ImagePicker();
 
   static const _opcionesBusca = opcionesBuscaGenero;
   static const _opcionesQueBusca = opcionesQueBusca;
@@ -66,33 +78,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   int get _porcentajeCompletado {
     final p = _perfil;
     if (p == null) return 0;
-    final creados = [
-      p.fotosLocalesRutas.isNotEmpty,
-      p.nombre.trim().isNotEmpty,
-      p.fechaNacimiento != null,
-      p.genero.isNotEmpty,
-      p.biografia.trim().isNotEmpty,
-      p.ciudad.trim().isNotEmpty,
-      p.orientacionSexual.isNotEmpty,
-      p.situacionSentimental.isNotEmpty,
-      p.queBusca.isNotEmpty,
-      p.buscaGenero.isNotEmpty,
-      p.educacion.isNotEmpty,
-      p.trabajo.trim().isNotEmpty,
-      p.hijos.isNotEmpty,
-      p.fuma.isNotEmpty,
-      p.bebe.isNotEmpty,
-      p.idiomas.trim().isNotEmpty,
-      p.altura.trim().isNotEmpty,
-      p.signoZodiaco.isNotEmpty,
-      p.mascotas.isNotEmpty,
-      p.religion.isNotEmpty,
-      p.personalidad.isNotEmpty,
-      p.tatuajes.isNotEmpty,
-      p.intereses.isNotEmpty,
-    ];
-    final completos = creados.where((c) => c).length;
-    return (completos / creados.length * 100).round();
+    return calcularCompletadoPerfil(p);
   }
 
   void _vistaPrevia() {
@@ -160,7 +146,17 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   }
 
   String _signoTexto(String valor) {
-    if (valor.isEmpty) return 'Sin definir';
+    if (valor.isEmpty) {
+      // Sin signo guardado: lo calculamos de la fecha de nacimiento.
+      final fecha = _perfil?.fechaNacimiento;
+      if (fecha != null) {
+        final codigo = calcularSignoZodiacal(fecha);
+        if (codigo != null) {
+          return '${_opcionTexto(_opcionesSigno, codigo)} (autom\u00e1tico)';
+        }
+      }
+      return 'Sin definir';
+    }
     if (valor == 'prefiero_no_decirlo') {
       return '\ud83d\ude48 Prefiero no decirlo';
     }
@@ -318,7 +314,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
                 children: [
@@ -327,6 +323,11 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
                   _seccionTitulo('Fotos de perfil'),
                   const SizedBox(height: 10),
                   _grillaFotos(primario),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Mantén presionado para reordenar. La primera foto es tu foto de perfil.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
                   const SizedBox(height: 12),
                   _botonVerificar(primario),
                   const SizedBox(height: 24),
@@ -625,32 +626,448 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
     );
   }
 
+  // Fotos a mostrar en la grilla: prioriza la URL remota de cada índice
+  // (persistente) y cae a la ruta local (en web son blobs que mueren al
+  // recargar la página). Usa la longitud máxima de ambas listas porque un
+  // perfil descargado del servidor solo trae URLs (las locales van vacías).
+  List<String> get _fotosGrilla {
+    final locales = _perfil?.fotosLocalesRutas ?? const <String>[];
+    final urls = _perfil?.fotosUrls ?? const <String>[];
+    final total = locales.length > urls.length ? locales.length : urls.length;
+    return List<String>.generate(total, (i) {
+      final url = i < urls.length ? urls[i] : '';
+      final local = i < locales.length ? locales[i] : '';
+      return url.isNotEmpty ? url : local;
+    }, growable: true);
+  }
+
   Widget _grillaFotos(Color primario) {
+    final fotos = _fotosGrilla;
+    const total = 4;
     return GridView.count(
       crossAxisCount: 4,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 10,
       crossAxisSpacing: 10,
-      children: List.generate(4, (index) {
-        return InkWell(
-          onTap: () => NotificacionServicio.advertencia(
-              context, 'Subir fotos estará disponible próximamente.'),
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: primario.withValues(alpha: 0.3)),
-            ),
-            child: index == 0
-                ? Icon(Icons.add_a_photo_outlined,
-                    color: primario.withValues(alpha: 0.6))
-                : Icon(Icons.add, color: Colors.grey[400]),
-          ),
-        );
+      children: List.generate(total, (index) {
+        final tieneFoto = index < fotos.length;
+        if (tieneFoto) {
+          return _celdaFoto(index, fotos[index], primario);
+        }
+        return _celdaAgregar(primario);
       }),
     );
+  }
+
+  Widget _celdaFoto(int index, String ruta, Color primario) {
+    final esPortada = index == 0;
+    final contenido = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: esPortada ? Border.all(color: primario, width: 3) : null,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _fotoWidget(ruta),
+            if (esPortada)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: primario,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Perfil',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) => _reordenarFotos(details.data, index),
+      builder: (context, candidate, rejected) {
+        final resaltado = candidate.isNotEmpty;
+        return LongPressDraggable<int>(
+          data: index,
+          dragAnchorStrategy: childDragAnchorStrategy,
+          feedback: Material(
+            elevation: 6,
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 72,
+              height: 72,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: _fotoWidget(ruta),
+              ),
+            ),
+          ),
+          childWhenDragging: Opacity(opacity: 0.4, child: contenido),
+          child: Container(
+            decoration: resaltado
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: primario, width: 2),
+                  )
+                : null,
+            child: GestureDetector(
+              onTap: () => _mostrarOpcionesFoto(index),
+              child: contenido,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _celdaAgregar(Color primario) {
+    return InkWell(
+      onTap: _seleccionarFoto,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: primario.withValues(alpha: 0.3)),
+        ),
+        child: Icon(Icons.add_a_photo_outlined,
+            color: primario.withValues(alpha: 0.6)),
+      ),
+    );
+  }
+
+  Future<void> _reordenarFotos(int from, int to) async {
+    final perfil = _perfil;
+    if (perfil == null) return;
+    final nuevas = [...perfil.fotosLocalesRutas];
+    final nuevasUrls = [...perfil.fotosUrls];
+    if (from < 0 || from >= nuevas.length) return;
+    if (to < 0 || to >= nuevas.length) return;
+    if (from == to) return;
+    final item = nuevas.removeAt(from);
+    nuevas.insert(to, item);
+    if (from < nuevasUrls.length && to < nuevasUrls.length) {
+      final itemUrl = nuevasUrls.removeAt(from);
+      nuevasUrls.insert(to, itemUrl);
+    }
+    await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+      uuid: Value(perfil.uuid),
+      fotosLocalesRutas: Value(nuevas),
+      fotosUrls: Value(nuevasUrls),
+      pendienteDeSincronizar: const Value(true),
+    ));
+    if (!mounted) return;
+    setState(() => _perfil = perfil.copyWith(
+        fotosLocalesRutas: nuevas,
+        fotosUrls: nuevasUrls,
+        pendienteDeSincronizar: true));
+  }
+
+  Widget _fotoWidget(String ruta) {
+    if (kIsWeb && (ruta.startsWith('blob:') || ruta.startsWith('data:'))) {
+      return Image.network(
+        ruta,
+        fit: BoxFit.cover,
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
+    return imagenFoto(ruta, fit: BoxFit.cover);
+  }
+
+  Future<ImageSource?> _elegirFuente() async {
+    if (kIsWeb) return ImageSource.gallery;
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Tomar foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Elegir de la galería'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirmar({required String titulo, required String mensaje}) async {
+    final resultado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(titulo),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    return resultado ?? false;
+  }
+
+  Future<XFile?> _recortar(XFile foto) async {
+    final bytes = await foto.readAsBytes();
+    final recortada = await Navigator.of(context).push<XFile>(
+      MaterialPageRoute(
+        builder: (_) => RecortarImagenPantalla(
+          bytes: bytes,
+          nombre: foto.name,
+        ),
+      ),
+    );
+    return recortada;
+  }
+
+  Future<void> _seleccionarFoto() async {
+    final fotos = _perfil?.fotosLocalesRutas ?? [];
+    if (fotos.length >= 4) {
+      NotificacionServicio.advertencia(context, 'Solo puedes subir 4 fotos.');
+      return;
+    }
+    final fuente = await _elegirFuente();
+    if (fuente == null) return;
+    try {
+      final foto = await _picker.pickImage(
+        source: fuente,
+        maxWidth: 1080,
+        imageQuality: 85,
+      );
+      if (foto == null) return;
+      final recortada = await _recortar(foto);
+      if (recortada == null) return;
+      await _agregarFoto(recortada);
+    } catch (_) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(
+        context,
+        'No se pudo abrir la cámara o la galería.',
+      );
+    }
+  }
+
+  Future<void> _agregarFoto(XFile foto) async {
+    final perfil = _perfil;
+    if (perfil == null) return;
+    final nuevas = [...perfil.fotosLocalesRutas, foto.path];
+    await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+      uuid: Value(perfil.uuid),
+      fotosLocalesRutas: Value(nuevas),
+      pendienteDeSincronizar: const Value(true),
+    ));
+    if (!mounted) return;
+    setState(() =>
+        _perfil = perfil.copyWith(fotosLocalesRutas: nuevas, pendienteDeSincronizar: true));
+    final indice = nuevas.length - 1;
+    PerfilFotoServicio.subirFotoPerfil(usuarioId: perfil.uuid, archivo: foto)
+        .then((url) async {
+      if (url == null || !mounted) return;
+      final actual = _perfil;
+      if (actual == null) return;
+      final nuevasUrls = [...actual.fotosUrls];
+      while (nuevasUrls.length <= indice) {
+        nuevasUrls.add('');
+      }
+      nuevasUrls[indice] = url;
+      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+        uuid: Value(actual.uuid),
+        fotosUrls: Value(nuevasUrls),
+        pendienteDeSincronizar: const Value(true),
+      ));
+      if (!mounted) return;
+      setState(() =>
+          _perfil = actual.copyWith(fotosUrls: nuevasUrls, pendienteDeSincronizar: true));
+      NotificacionServicio.exito(context, 'Foto subida al servidor.');
+    });
+  }
+
+  Future<void> _cambiarFoto(int index) async {
+    final perfil = _perfil;
+    if (perfil == null) return;
+    final fotos = perfil.fotosLocalesRutas;
+    if (index >= fotos.length) return;
+    final fuente = await _elegirFuente();
+    if (fuente == null) return;
+    try {
+      final foto = await _picker.pickImage(
+        source: fuente,
+        maxWidth: 1080,
+        imageQuality: 85,
+      );
+      if (foto == null) return;
+      final recortada = await _recortar(foto);
+      if (recortada == null) return;
+      final urlAnterior = index < perfil.fotosUrls.length
+          ? perfil.fotosUrls[index]
+          : '';
+      final nuevas = [...fotos];
+      nuevas[index] = recortada.path;
+      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+        uuid: Value(perfil.uuid),
+        fotosLocalesRutas: Value(nuevas),
+        pendienteDeSincronizar: const Value(true),
+      ));
+      if (urlAnterior.startsWith('http')) {
+        PerfilFotoServicio.eliminarFotoPerfil(
+          usuarioId: perfil.uuid,
+          urlOFoto: urlAnterior,
+        );
+      }
+      if (!mounted) return;
+      setState(() => _perfil =
+          perfil.copyWith(fotosLocalesRutas: nuevas, pendienteDeSincronizar: true));
+      PerfilFotoServicio.subirFotoPerfil(usuarioId: perfil.uuid, archivo: foto)
+          .then((url) async {
+        if (url == null || !mounted) return;
+        final actual = _perfil;
+        if (actual == null) return;
+        final nuevasUrls = [...actual.fotosUrls];
+        if (index < nuevasUrls.length) {
+          nuevasUrls[index] = url;
+        } else {
+          while (nuevasUrls.length < index) {
+            nuevasUrls.add('');
+          }
+          nuevasUrls.add(url);
+        }
+        await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+          uuid: Value(actual.uuid),
+          fotosUrls: Value(nuevasUrls),
+          pendienteDeSincronizar: const Value(true),
+        ));
+        if (!mounted) return;
+        setState(() =>
+            _perfil = actual.copyWith(fotosUrls: nuevasUrls, pendienteDeSincronizar: true));
+        NotificacionServicio.exito(context, 'Foto subida al servidor.');
+      });
+    } catch (_) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(
+        context,
+        'No se pudo abrir la cámara o la galería.',
+      );
+    }
+  }
+
+  void _mostrarOpcionesFoto(int index) {
+    final fotos = _fotosGrilla;
+    if (index >= fotos.length) return;
+    final ruta = fotos[index];
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.visibility_outlined),
+              title: const Text('Ver'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _verFoto(ruta);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_back_outlined),
+              title: const Text('Cambiar foto'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final confirmado = await _confirmar(
+                  titulo: 'Cambiar foto',
+                  mensaje: '¿Quieres reemplazar esta foto por una nueva?',
+                );
+                if (confirmado && mounted) await _cambiarFoto(index);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Eliminar',
+                  style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final confirmado = await _confirmar(
+                  titulo: 'Eliminar foto',
+                  mensaje: '¿Seguro que quieres eliminar esta foto?',
+                );
+                if (confirmado && mounted) await _eliminarFoto(index);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _verFoto(String ruta) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        child: InteractiveViewer(child: _fotoWidget(ruta)),
+      ),
+    );
+  }
+
+  Future<void> _eliminarFoto(int index) async {
+    final perfil = _perfil;
+    if (perfil == null) return;
+    final nuevas = [...perfil.fotosLocalesRutas];
+    if (index >= nuevas.length) {
+      nuevas.add('');
+    } else {
+      nuevas.removeAt(index);
+    }
+    final nuevasUrls = [...perfil.fotosUrls];
+    final urlEliminada =
+        index < nuevasUrls.length ? nuevasUrls[index] : '';
+    if (index < nuevasUrls.length) nuevasUrls.removeAt(index);
+    await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+      uuid: Value(perfil.uuid),
+      fotosLocalesRutas: Value(nuevas),
+      fotosUrls: Value(nuevasUrls),
+      pendienteDeSincronizar: const Value(true),
+    ));
+    if (urlEliminada.startsWith('http')) {
+      PerfilFotoServicio.eliminarFotoPerfil(
+        usuarioId: perfil.uuid,
+        urlOFoto: urlEliminada,
+      );
+    }
+    if (!mounted) return;
+    setState(() => _perfil = perfil.copyWith(
+        fotosLocalesRutas: nuevas,
+        fotosUrls: nuevasUrls,
+        pendienteDeSincronizar: true));
   }
 
   Widget _tarjetaSobreMi(Color primario, String biografia) {
@@ -806,25 +1223,67 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   }
 
   Widget _botonVerificar(Color primario) {
+    final perfil = _perfil;
+    final verificado = perfil?.verificadoStatus ?? false;
+    final pendiente = !verificado &&
+        (perfil?.fotoVerificacion.trim().isNotEmpty ?? false);
+
+    final IconData icono;
+    final String texto;
+    final Color colorIcono;
+    final Color colorFondo;
+    final Color colorBorde;
+
+    if (verificado) {
+      icono = Icons.verified;
+      texto = 'Perfil verificado';
+      colorIcono = const Color(0xFF2E7D32);
+      colorFondo = const Color(0xFF2E7D32).withValues(alpha: 0.08);
+      colorBorde = const Color(0xFF2E7D32).withValues(alpha: 0.3);
+    } else if (pendiente) {
+      icono = Icons.hourglass_top_outlined;
+      texto = 'Verificación en revisión';
+      colorIcono = const Color(0xFFC9A227);
+      colorFondo = const Color(0xFFC9A227).withValues(alpha: 0.1);
+      colorBorde = const Color(0xFFC9A227).withValues(alpha: 0.3);
+    } else {
+      icono = Icons.verified_outlined;
+      texto = 'Verificar perfil';
+      colorIcono = primario;
+      colorFondo = primario.withValues(alpha: 0.08);
+      colorBorde = primario.withValues(alpha: 0.3);
+    }
+
     return InkWell(
-      onTap: () => NotificacionServicio.advertencia(
-          context, 'La verificación estará disponible próximamente.'),
+      onTap: perfil == null
+          ? null
+          : () async {
+              await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => VerificacionCuentaPantalla(
+                    perfil: perfil,
+                    repositorio: widget.repositorio,
+                  ),
+                ),
+              );
+              if (mounted) _recargar();
+            },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         decoration: BoxDecoration(
-          color: primario.withValues(alpha: 0.08),
+          color: colorFondo,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: primario.withValues(alpha: 0.3)),
+          border: Border.all(color: colorBorde),
         ),
         child: Row(
           children: [
-            Icon(Icons.verified_outlined, color: primario, size: 22),
+            Icon(icono, color: colorIcono, size: 22),
             const SizedBox(width: 10),
-            const Text(
-              'Verificar perfil',
-              style: TextStyle(fontSize: 14, color: Colors.black87),
+            Text(
+              texto,
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
             ),
             const Spacer(),
             Icon(Icons.chevron_right, color: Colors.grey[400]),

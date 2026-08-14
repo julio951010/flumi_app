@@ -1,89 +1,9 @@
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../base_datos_local/database.dart';
+import 'fotos_mock.dart';
 
 const _uuid = Uuid();
-
-const _carpetaFotosPrueba =
-    'C:/_Proyectos_Flutter/flumi_app/test/features/perfiles';
-
-const _assetFotosPrueba = 'assets/fotos_prueba';
-
-const _carpetasPrueba = [
-  'Alice',
-  'Bob',
-  'Carla',
-  'David',
-  'Elena',
-  'Julio Cesar',
-];
-
-String _normalizar(String s) {
-  const conAcentos = 'áéíóúüñ';
-  const sinAcentos = 'aeiouun';
-  final b = StringBuffer();
-  for (final ch in s.trim().toLowerCase().split('')) {
-    final i = conAcentos.indexOf(ch);
-    b.write(i >= 0 ? sinAcentos[i] : ch);
-  }
-  return b.toString();
-}
-
-Future<String> _resolverCarpeta(String nombre) async {
-  final dirLocal = Directory(_carpetaFotosPrueba);
-  if (dirLocal.existsSync()) {
-    final carpetas = dirLocal
-        .listSync(followLinks: false)
-        .whereType<Directory>()
-        .map((d) => d.path.split(Platform.pathSeparator).last)
-        .toList();
-    final n = _normalizar(nombre);
-    for (final c in carpetas) {
-      if (_normalizar(c) == n) return c;
-    }
-    if (carpetas.isNotEmpty) return carpetas.first;
-    return '';
-  }
-  final n = _normalizar(nombre);
-  for (final c in _carpetasPrueba) {
-    if (_normalizar(c) == n) return c;
-  }
-  return _carpetasPrueba.first;
-}
-
-Future<List<String>> _fotosPrueba(String nombre) async {
-  final carpeta = await _resolverCarpeta(nombre);
-  if (carpeta.isEmpty) return const [];
-  final dirLocal = Directory('$_carpetaFotosPrueba/$carpeta');
-  if (dirLocal.existsSync()) {
-    return [
-      for (var i = 1; i <= 4; i++)
-        if (File('${dirLocal.path}/imagen$i.png').existsSync())
-          '${dirLocal.path}/imagen$i.png',
-    ];
-  }
-  final docs = await getApplicationDocumentsDirectory();
-  final dirDestino = Directory('${docs.path}/fotos_prueba/$carpeta');
-  final rutas = <String>[];
-  for (var i = 1; i <= 4; i++) {
-    final destino = File('${dirDestino.path}/imagen$i.png');
-    if (!destino.existsSync()) {
-      try {
-        final datos = await rootBundle.load(
-            '$_assetFotosPrueba/${Uri.encodeComponent(carpeta)}/imagen$i.png');
-        await dirDestino.create(recursive: true);
-        await destino.writeAsBytes(datos.buffer.asUint8List(), flush: true);
-      } catch (_) {
-        continue;
-      }
-    }
-    rutas.add(destino.path);
-  }
-  return rutas;
-}
 
 class InteraccionMock {
   final String usuarioId;
@@ -159,7 +79,7 @@ class GeneradorMock {
 
     for (final u in _mockUsuarios) {
       await db.into(db.usuarios).insert(u);
-      final fotos = await _fotosPrueba(u.nombre.value);
+      final fotos = await fotosMockDePrueba(u.nombre.value);
       if (fotos.isNotEmpty) {
         await (db.update(db.usuarios)
               ..where((w) => w.uuid.equals(u.uuid.value)))
@@ -169,10 +89,17 @@ class GeneradorMock {
 
     if (hayPropio) {
       final propio = todos.firstWhere((u) => u.esPerfilPropio);
-      final fotos = await _fotosPrueba(propio.nombre);
+      final fotos = await fotosMockDePrueba(propio.nombre);
       if (fotos.isNotEmpty) {
         await (db.update(db.usuarios)..where((u) => u.uuid.equals(propio.uuid)))
             .write(UsuariosCompanion(fotosLocalesRutas: Value(fotos)));
+      }
+      if (propio.ubicacionLat == 0 && propio.ubicacionLon == 0) {
+        await (db.update(db.usuarios)..where((u) => u.uuid.equals(propio.uuid)))
+            .write(const UsuariosCompanion(
+              ubicacionLat: Value(23.1136),
+              ubicacionLon: Value(-82.3666),
+            ));
       }
     }
   }
@@ -197,7 +124,7 @@ class GeneradorMock {
         '\ud83c\udfac Cine',
         '\ud83c\udfb6 M\u00fasica',
       ]),
-      fotosLocalesRutas: Value(await _fotosPrueba(nombre)),
+      fotosLocalesRutas: Value(await fotosMockDePrueba(nombre)),
       altura: Value('1.65'),
       educacion: Value('Universidad'),
       trabajo: Value('Dise\u00f1adora gr\u00e1fica'),
@@ -208,6 +135,8 @@ class GeneradorMock {
       signoZodiaco: Value('libra'),
       mascotas: Value('gato'),
       fotoVerificacion: Value('auto'),
+      ubicacionLat: const Value(23.1136),
+      ubicacionLon: const Value(-82.3666),
       esPerfilPropio: const Value(true),
       verificadoStatus: const Value(true),
       scorePopularidad: Value(100),
@@ -256,13 +185,13 @@ class GeneradorMock {
 
     if (otros.isNotEmpty) {
       await match(otros[0], const Duration(days: 3));
-      await mensaje(otros[0], 'Â¡Hola! Vi que te gusta el cafÃ© ðŸ˜„',
+      await mensaje(otros[0], '¡Hola! Vi que te gusta el café 😄',
           const Duration(days: 2, hours: 20),
           esMio: false);
-      await mensaje(otros[0], 'Â¡Hola! SÃ­, soy adicto jaja',
+      await mensaje(otros[0], '¡Hola! Sí, soy adicto jaja',
           const Duration(days: 2, hours: 18),
           esMio: true);
-      await mensaje(otros[0], 'Â¿CuÃ¡l es tu lugar favorito de la ciudad?',
+      await mensaje(otros[0], '¿Cuál es tu lugar favorito de la ciudad?',
           const Duration(days: 1, hours: 5),
           esMio: false);
       await mensaje(otros[0], 'El de la esquina de 23, sin dudas',
@@ -270,29 +199,29 @@ class GeneradorMock {
           esMio: true);
       await mensaje(
           otros[0],
-          'Â¡Buena elecciÃ³n! DeberÃ­amos ir algÃºn dÃ­a â˜•',
+          '¡Buena elección! Deberíamos ir algún día ☕',
           const Duration(hours: 5),
           esMio: false);
     }
     if (otros.length > 1) {
       await match(otros[1], const Duration(days: 2));
-      await mensaje(otros[1], 'Hola ðŸ‘‹', const Duration(days: 1, hours: 10),
+      await mensaje(otros[1], 'Hola 👋', const Duration(days: 1, hours: 10),
           esMio: false);
-      await mensaje(otros[1], 'Â¿Te gusta la fotografÃ­a?',
+      await mensaje(otros[1], '¿Te gusta la fotografía?',
           const Duration(days: 1, hours: 8),
           esMio: false);
-      await mensaje(otros[1], 'Â¡Mucho! Sobre todo atardeceres',
+      await mensaje(otros[1], '¡Mucho! Sobre todo atardeceres',
           const Duration(days: 1, hours: 7),
           esMio: true);
-      await mensaje(otros[1], 'DeberÃ­amos salir a tomar fotos algÃºn dÃ­a',
+      await mensaje(otros[1], 'Deberíamos salir a tomar fotos algún día',
           const Duration(hours: 8),
           esMio: false);
     }
     if (otros.length > 2) {
       await match(otros[2], const Duration(days: 1));
-      await mensaje(otros[2], 'Hey! Â¿QuÃ© tal?', const Duration(hours: 6),
+      await mensaje(otros[2], 'Hey! ¿Qué tal?', const Duration(hours: 6),
           esMio: false);
-      await mensaje(otros[2], 'Todo bien, Â¿y tÃº?', const Duration(hours: 5),
+      await mensaje(otros[2], 'Todo bien, ¿y tú?', const Duration(hours: 5),
           esMio: true);
     }
     if (otros.length > 3) {
@@ -317,15 +246,22 @@ class GeneradorMock {
         '\ud83c\udfb6 M\u00fasica'
       ]),
       altura: Value('1.65'),
-      educacion: Value('Universidad'),
-      trabajo: Value('Dise\u00f1adora gr\u00e1fica'),
+      educacion: Value('superior'),
+      trabajo: Value('independiente'),
       bebe: Value('no'),
       fuma: Value('no'),
       hijos: Value('no'),
       personalidad: Value('extrovertida'),
       signoZodiaco: Value('libra'),
       mascotas: Value('gato'),
-      religion: Value(''),
+      orientacionSexual: Value('heterosexual'),
+      situacionSentimental: Value('soltero'),
+      religion: Value('catolica'),
+      idiomas: Value('Espa\u00f1ol'),
+      tatuajes: Value('no_tengo'),
+      ciudad: Value('La Habana'),
+      ubicacionLat: const Value(23.1200),
+      ubicacionLon: const Value(-82.3800),
       fotoVerificacion: Value('auto'),
       verificadoStatus: const Value(true),
       scorePopularidad: Value(90),
@@ -350,15 +286,22 @@ class GeneradorMock {
         '\ud83c\udfb8 Guitarra'
       ]),
       altura: Value('1.80'),
-      educacion: Value('Universidad'),
-      trabajo: Value('Fot\u00f3grafo freelance'),
+      educacion: Value('superior'),
+      trabajo: Value('independiente'),
       bebe: Value('no'),
       fuma: Value('social'),
       hijos: Value('no'),
       personalidad: Value('creativa'),
       signoZodiaco: Value('acuario'),
       mascotas: Value('perro'),
-      religion: Value(''),
+      orientacionSexual: Value('heterosexual'),
+      situacionSentimental: Value('soltero'),
+      religion: Value('cristiana'),
+      idiomas: Value('Espa\u00f1ol, Ingl\u00e9s'),
+      tatuajes: Value('no_tengo'),
+      ciudad: Value('La Habana'),
+      ubicacionLat: const Value(23.0800),
+      ubicacionLon: const Value(-82.3950),
       fotoVerificacion: Value('manual'),
       verificadoStatus: const Value(true),
       scorePopularidad: Value(80),
@@ -383,15 +326,22 @@ class GeneradorMock {
         '\u2615 Caf\u00e9'
       ]),
       altura: Value('1.58'),
-      educacion: Value('En curso'),
-      trabajo: Value('Estudiante de artes'),
+      educacion: Value('preuniversitaria'),
+      trabajo: Value('estudiante'),
       bebe: Value('no'),
       fuma: Value('si'),
       hijos: Value('no'),
       personalidad: Value('introvertida'),
       signoZodiaco: Value('piscis'),
       mascotas: Value('gato'),
-      religion: Value(''),
+      orientacionSexual: Value('bisexual'),
+      situacionSentimental: Value('soltero'),
+      religion: Value('espiritual'),
+      idiomas: Value('Espa\u00f1ol'),
+      tatuajes: Value('me_gustaria'),
+      ciudad: Value('Habana Vieja'),
+      ubicacionLat: const Value(23.1500),
+      ubicacionLon: const Value(-82.3450),
       fotoVerificacion: Value('auto'),
       verificadoStatus: const Value(true),
       scorePopularidad: Value(70),
@@ -415,15 +365,22 @@ class GeneradorMock {
         '\ud83d\udcda Libros'
       ]),
       altura: Value('1.75'),
-      educacion: Value('Universidad'),
-      trabajo: Value('Ingeniero de software'),
+      educacion: Value('superior'),
+      trabajo: Value('sector_privado'),
       bebe: Value('no'),
       fuma: Value('no'),
       hijos: Value('no'),
       personalidad: Value('extrovertida'),
       signoZodiaco: Value('tauro'),
       mascotas: Value(''),
-      religion: Value(''),
+      orientacionSexual: Value('heterosexual'),
+      situacionSentimental: Value('separado'),
+      religion: Value('agnostico'),
+      idiomas: Value('Espa\u00f1ol, Ingl\u00e9s, Franc\u00e9s'),
+      tatuajes: Value('tengo_alguno'),
+      ciudad: Value('Santiago de Cuba'),
+      ubicacionLat: const Value(23.0200),
+      ubicacionLon: const Value(-82.4200),
       fotoVerificacion: Value('manual'),
       verificadoStatus: const Value(false),
       scorePopularidad: Value(60),
@@ -447,15 +404,22 @@ class GeneradorMock {
         '\ud83c\udfa8 Pintura'
       ]),
       altura: Value('1.70'),
-      educacion: Value('Posgrado'),
-      trabajo: Value('Psic\u00f3loga'),
+      educacion: Value('postgrado'),
+      trabajo: Value('sector_publico'),
       bebe: Value('no'),
       fuma: Value('no'),
       hijos: Value('no'),
       personalidad: Value('emp\u00e1tica'),
       signoZodiaco: Value('cancer'),
       mascotas: Value(''),
-      religion: Value(''),
+      orientacionSexual: Value('pansexual'),
+      situacionSentimental: Value('soltero'),
+      religion: Value('budista'),
+      idiomas: Value('Espa\u00f1ol, Ingl\u00e9s, Portugu\u00e9s'),
+      tatuajes: Value('no_tengo'),
+      ciudad: Value('La Habana'),
+      ubicacionLat: const Value(23.1800),
+      ubicacionLon: const Value(-82.3000),
       fotoVerificacion: Value('auto'),
       verificadoStatus: const Value(true),
       scorePopularidad: Value(85),

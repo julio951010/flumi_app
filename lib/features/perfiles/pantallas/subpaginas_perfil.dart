@@ -4,6 +4,8 @@ import 'package:drift/drift.dart' hide Column;
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/base_datos_local/tables.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../widgets_comunes/flumi_loader.dart';
+import '../perfil_etiquetas.dart';
 import '../perfil_repositorio.dart';
 
 class CampoTextoPerfilPantalla extends StatefulWidget {
@@ -111,7 +113,7 @@ class _CampoTextoPerfilPantallaState extends State<CampoTextoPerfilPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -320,7 +322,7 @@ class _SelectorPerfilPantallaState extends State<SelectorPerfilPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -533,7 +535,7 @@ class _OrientacionSexualPantallaState extends State<OrientacionSexualPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -779,7 +781,7 @@ class _SituacionSentimentalPantallaState
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -976,7 +978,7 @@ class _NivelEducativoPantallaState extends State<NivelEducativoPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -1175,7 +1177,7 @@ class _TrabajoPantallaState extends State<TrabajoPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -1399,7 +1401,7 @@ class _HijosPantallaState extends State<HijosPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -1595,7 +1597,7 @@ class _TabacoPantallaState extends State<TabacoPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -1789,7 +1791,7 @@ class _AlcoholPantallaState extends State<AlcoholPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -2003,7 +2005,7 @@ class _MascotasPantallaState extends State<MascotasPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -2262,7 +2264,7 @@ class _ReligionPantallaState extends State<ReligionPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -2521,7 +2523,7 @@ class _TatuajesPantallaState extends State<TatuajesPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -2743,7 +2745,7 @@ class _EstaturaPantallaState extends State<EstaturaPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -3020,22 +3022,7 @@ class _SignoZodiacalPantallaState extends State<SignoZodiacalPantalla> {
     _cargar();
   }
 
-  String _signoSugerido(DateTime f) {
-    final m = f.month;
-    final d = f.day;
-    if ((m == 3 && d >= 21) || (m == 4 && d <= 19)) return 'aries';
-    if ((m == 4 && d >= 20) || (m == 5 && d <= 20)) return 'tauro';
-    if ((m == 5 && d >= 21) || (m == 6 && d <= 20)) return 'geminis';
-    if ((m == 6 && d >= 21) || (m == 7 && d <= 22)) return 'cancer';
-    if ((m == 7 && d >= 23) || (m == 8 && d <= 22)) return 'leo';
-    if ((m == 8 && d >= 23) || (m == 9 && d <= 22)) return 'virgo';
-    if ((m == 9 && d >= 23) || (m == 10 && d <= 22)) return 'libra';
-    if ((m == 10 && d >= 23) || (m == 11 && d <= 21)) return 'escorpio';
-    if ((m == 11 && d >= 22) || (m == 12 && d <= 21)) return 'sagitario';
-    if ((m == 12 && d >= 22) || (m == 1 && d <= 19)) return 'capricornio';
-    if ((m == 1 && d >= 20) || (m == 2 && d <= 18)) return 'acuario';
-    return 'piscis';
-  }
+  String _signoSugerido(DateTime f) => calcularSignoZodiacal(f) ?? 'piscis';
 
   (String, String, String)? _signoVisible() {
     final codigo = _signoGuardado ??
@@ -3047,17 +3034,50 @@ class _SignoZodiacalPantallaState extends State<SignoZodiacalPantalla> {
     return null;
   }
 
+  String _nombreSigno(String codigo) {
+    for (final s in _signos) {
+      if (s.$3 == codigo) return s.$1;
+    }
+    return codigo;
+  }
+
   Future<void> _cargar() async {
     final perfil = await widget.repositorio.obtenerPerfilPropio();
     if (!mounted) return;
-    setState(() {
-      final valor = perfil?.signoZodiaco ?? '';
-      _prefieroNoDecir = valor == 'prefiero_no_decirlo';
-      if (!_prefieroNoDecir) {
-        final esValido = _signos.any((s) => s.$3 == valor);
-        _signoGuardado = esValido ? valor : null;
+    final valor = perfil?.signoZodiaco ?? '';
+    final prefiero = valor == 'prefiero_no_decirlo';
+    final fecha = perfil?.fechaNacimiento;
+    String? calculado;
+    if (!prefiero && fecha != null) {
+      calculado = calcularSignoZodiacal(fecha);
+      // Si el signo guardado no coincide con el calculado de la fecha de
+      // nacimiento, lo corregimos automáticamente y avisamos al usuario.
+      if (calculado != null && calculado != valor && perfil != null) {
+        try {
+          await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+            uuid: Value(perfil.uuid),
+            signoZodiaco: Value(calculado),
+            pendienteDeSincronizar: const Value(true),
+          ));
+          if (!mounted) return;
+          NotificacionServicio.exito(
+              context,
+              'Tu signo se actualiz\u00f3 autom\u00e1ticamente: '
+              '${_nombreSigno(calculado)}');
+        } catch (_) {
+          // El guardado local casi nunca falla; si ocurre, el signo calculado
+          // se sigue mostrando en pantalla para guardarlo manualmente.
+        }
       }
-      _fechaNacimiento = perfil?.fechaNacimiento;
+    }
+    if (!mounted) return;
+    setState(() {
+      _prefieroNoDecir = prefiero;
+      final esValidoGuardado = _signos.any((s) => s.$3 == valor);
+      _signoGuardado = prefiero
+          ? null
+          : (calculado ?? (esValidoGuardado ? valor : null));
+      _fechaNacimiento = fecha;
       _cargando = false;
     });
   }
@@ -3118,7 +3138,7 @@ class _SignoZodiacalPantallaState extends State<SignoZodiacalPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -3446,7 +3466,7 @@ class _ProfesionPantallaState extends State<ProfesionPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -3670,6 +3690,8 @@ class _IdiomasPantallaState extends State<IdiomasPantalla> {
           .split(',')
           .map((v) => v.trim())
           .where((v) => v.isNotEmpty)
+          .map(_canonico)
+          .where((v) => v.isNotEmpty)
           .toSet();
       _cargando = false;
     });
@@ -3705,17 +3727,32 @@ class _IdiomasPantallaState extends State<IdiomasPantalla> {
     final consulta = _normalizar(_consulta.trim().toLowerCase());
     if (consulta.isEmpty) return const [];
     return _idiomasDisponibles
-        .where((i) =>
-            !_idiomas.contains(i) &&
-            _normalizar(i.toLowerCase()).contains(consulta))
+        .where((i) {
+          final normal = _normalizar(i.toLowerCase());
+          final yaElegido =
+              _idiomas.any((s) => _normalizar(s.toLowerCase()) == normal);
+          return !yaElegido && normal.contains(consulta);
+        })
         .toList();
+  }
+
+  /// Devuelve la ortografía canónica del idioma (p. ej. «español» → «Español»)
+  /// para evitar duplicados con distinta capitalización.
+  String _canonico(String valor) {
+    final limpio = valor.trim();
+    if (limpio.isEmpty) return '';
+    final normal = _normalizar(limpio.toLowerCase());
+    for (final i in _idiomasDisponibles) {
+      if (_normalizar(i.toLowerCase()) == normal) return i;
+    }
+    return limpio;
   }
 
   void _alCambiarTexto(String v) {
     setState(() {
       if (v.contains(',')) {
         for (final parte in v.split(',')) {
-          final p = parte.trim();
+          final p = _canonico(parte);
           if (p.isNotEmpty) _idiomas.add(p);
         }
         _textoCtrl.clear();
@@ -3785,7 +3822,7 @@ class _IdiomasPantallaState extends State<IdiomasPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -3839,9 +3876,13 @@ class _IdiomasPantallaState extends State<IdiomasPantalla> {
                             controller: _textoCtrl,
                             focusNode: _focusNode,
                             enabled: !_guardando,
+                            // Sin esto, tocar una sugerencia desenfoca el campo,
+                            // la lista desaparece antes del tap-up y el onTap
+                            // del ListTile nunca llega a dispararse.
+                            onTapOutside: (_) {},
                             onChanged: _alCambiarTexto,
                             onSubmitted: (v) {
-                              final p = v.trim();
+                              final p = _canonico(v);
                               if (p.isEmpty) return;
                               setState(() {
                                 _idiomas.add(p);
@@ -3890,7 +3931,7 @@ class _IdiomasPantallaState extends State<IdiomasPantalla> {
                                   style: const TextStyle(fontSize: 14)),
                               onTap: () {
                                 setState(() {
-                                  _idiomas.add(sugerencia);
+                                  _idiomas.add(_canonico(sugerencia));
                                   _textoCtrl.clear();
                                   _consulta = '';
                                 });
@@ -4008,7 +4049,7 @@ class _QueBuscaPantallaState extends State<QueBuscaPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -4282,7 +4323,7 @@ class _QuieroConocerPantallaState extends State<QuieroConocerPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -4466,7 +4507,7 @@ class _RangoEdadPantallaState extends State<RangoEdadPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -4817,7 +4858,7 @@ class _InteresesPerfilPantallaState extends State<InteresesPerfilPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -5043,7 +5084,7 @@ class _PersonalidadPantallaState extends State<PersonalidadPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -5228,7 +5269,7 @@ class _SobreMiPantallaState extends State<SobreMiPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -5529,7 +5570,7 @@ class _PreguntasPantallaState extends State<PreguntasPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(

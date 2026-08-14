@@ -371,7 +371,11 @@ class _DraggableCardState extends State<DraggableCard>
                           Positioned.fill(
                             child: Opacity(
                               opacity: _progresoLateral(),
-                              child: widget.nopeGradient,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                clipBehavior: Clip.antiAlias,
+                                child: widget.nopeGradient,
+                              ),
                             ),
                           ),
                         if (widget.likeGradient != null &&
@@ -379,7 +383,11 @@ class _DraggableCardState extends State<DraggableCard>
                           Positioned.fill(
                             child: Opacity(
                               opacity: _progresoLateral(),
-                              child: widget.likeGradient,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                clipBehavior: Clip.antiAlias,
+                                child: widget.likeGradient,
+                              ),
                             ),
                           ),
                         if (widget.superLikeGradient != null &&
@@ -387,7 +395,11 @@ class _DraggableCardState extends State<DraggableCard>
                           Positioned.fill(
                             child: Opacity(
                               opacity: _progresoVertical(),
-                              child: widget.superLikeGradient,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                clipBehavior: Clip.antiAlias,
+                                child: widget.superLikeGradient,
+                              ),
                             ),
                           ),
                         if (widget.likeTag != null &&
@@ -409,7 +421,8 @@ class _DraggableCardState extends State<DraggableCard>
                         if (widget.superLikeTag != null &&
                             slideRegion == SlideRegion.inSuperLikeRegion)
                           Positioned(
-                            top: -26,
+                            top: 0,
+                            bottom: 0,
                             left: 0,
                             right: 0,
                             child: Center(child: widget.superLikeTag),

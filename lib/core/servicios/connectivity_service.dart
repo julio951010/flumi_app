@@ -41,6 +41,14 @@ class ConnectivityService {
 
   bool get hayConexion => _estadoActual == EstadoConexion.conectado;
 
+  /// Fuerza una comprobación inmediata del estado de red y actualiza el stream.
+  /// Devuelve si hay conexión tras la comprobación.
+  Future<bool> comprobarAhora() async {
+    final resultado = await Connectivity().checkConnectivity();
+    _actualizarEstado(resultado);
+    return hayConexion;
+  }
+
   void dispose() {
     _suscripcion?.cancel();
     _controlador.close();

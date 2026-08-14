@@ -7,6 +7,7 @@ import '../../core/api/mock_data.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/constantes/constantes.dart';
 import '../../core/servicios/connectivity_service.dart';
+import '../../core/servicios/sync_service.dart';
 
 class PerfilChat {
   final Usuario usuario;
@@ -52,10 +53,11 @@ class ResumenConversacion {
 
 class ChatRepositorio {
   final AppDatabase _db;
+  final SyncService? _sync;
   StreamSubscription? _realtimeSub;
   StreamSubscription? _connectivitySub;
 
-  ChatRepositorio(this._db);
+  ChatRepositorio(this._db, [this._sync]);
 
   Stream<List<ResumenConversacion>> observarConversaciones(String miId) {
     late final StreamController<List<ResumenConversacion>> ctrl;
@@ -300,6 +302,17 @@ class ChatRepositorio {
       contenido: contenido,
       timestamp: DateTime.now(),
     ));
+    // Write-through: intenta subir el mensaje a Supabase de inmediato;
+    // si falla queda pendiente para el siguiente sync.
+    unawaited(_sync?.sincronizarMensajesPendientes());
+  }
+
+  Future<void> borrarConversacion(String otroUsuarioId, String miId) async {
+    await (_db.delete(_db.mensajes)
+          ..where((m) =>
+              (m.emisorId.equals(miId) & m.receptorId.equals(otroUsuarioId)) |
+              (m.emisorId.equals(otroUsuarioId) & m.receptorId.equals(miId))))
+        .go();
   }
 
   void suscribirseARealtime(String userId) {

@@ -44,9 +44,13 @@ dependencies:
   # --- Cámara / galería ---
   image_picker: ^1.1.2
 
+  # --- Procesado de imágenes (recorte, formato, compresión) ---
+  image: ^4.8.0
+  crop_your_image:
+    path: packages/crop_your_image
+
   # --- Georreferencia ---
   geolocator: ^13.0.1
-  geocoding: ^3.0.0
 
 dev_dependencies:
   flutter_test:
@@ -72,6 +76,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/images/gestos/
     - assets/data/
     - assets/icons/
     - assets/fotos_prueba/Alice/

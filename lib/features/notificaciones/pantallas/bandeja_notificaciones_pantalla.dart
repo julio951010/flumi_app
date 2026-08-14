@@ -233,20 +233,7 @@ class _BandejaNotificacionesPantallaState
 
     if (n.tipo == TipoNotificacion.match ||
         n.tipo == TipoNotificacion.mensaje) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatPantalla(
-            repositorio: _chatRepo,
-            otroUsuarioId: usuario.uuid,
-            miId: widget.miId,
-            nombreOtro: usuario.nombre,
-            online: usuario.ultimaSincronizacionTimestamp != null,
-            esMeGusta: n.tipo == TipoNotificacion.match ? false : true,
-            esMatch: esMatch,
-          ),
-        ),
-      );
+      _abrirChat(usuario, esMatch: esMatch, esMeGusta: n.tipo == TipoNotificacion.match ? false : true);
     } else {
       Navigator.push(
         context,
@@ -255,10 +242,28 @@ class _BandejaNotificacionesPantallaState
             usuario: usuario,
             esMeGusta: n.tipo == TipoNotificacion.meGusta,
             esMatch: esMatch,
+            onChat: () => _abrirChat(usuario),
           ),
         ),
       );
     }
+  }
+
+  void _abrirChat(Usuario usuario, {bool? esMatch, bool? esMeGusta}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPantalla(
+          repositorio: _chatRepo,
+          otroUsuarioId: usuario.uuid,
+          miId: widget.miId,
+          nombreOtro: usuario.nombre,
+          online: usuario.ultimaSincronizacionTimestamp != null,
+          esMeGusta: esMeGusta ?? false,
+          esMatch: esMatch ?? false,
+        ),
+      ),
+    );
   }
 
   @override

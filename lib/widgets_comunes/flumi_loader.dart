@@ -1,6 +1,20 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
+/// Loader sobre fondo blanco para pantallas que esperan datos de la red.
+/// No muestra contenido: ocupa toda el área disponible y centra el indicador.
+class CargandoBlanco extends StatelessWidget {
+  const CargandoBlanco({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Colors.white,
+      child: FlumiLoadingIndicator(),
+    );
+  }
+}
+
 class FlumiLoadingIndicator extends StatefulWidget {
   const FlumiLoadingIndicator({Key? key}) : super(key: key);
 

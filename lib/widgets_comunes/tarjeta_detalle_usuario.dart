@@ -1,9 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import '../core/utilidades/fotos_perfil.dart';
 import '../core/base_datos_local/database.dart';
 import '../core/estilos/tema.dart';
 import '../features/perfiles/perfil_etiquetas.dart';
 import 'barra_progreso_rio.dart';
+import 'foto_perfil.dart';
+import 'visor_fotos_pantalla.dart';
 
 class TarjetaDetalleUsuario extends StatefulWidget {
   final Usuario usuario;
@@ -34,7 +36,8 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   State<TarjetaDetalleUsuario> createState() => _TarjetaDetalleUsuarioState();
 }
 
-class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
+class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
+    with SingleTickerProviderStateMixin {
   static const _fotosMock = 4;
 
   static const _mockGradientes = [
@@ -45,7 +48,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   ];
 
   List<String> get _fotos {
-    final fotos = widget.usuario.fotosLocalesRutas;
+    final fotos = fotosParaMostrar(widget.usuario);
     return fotos.isEmpty ? const [] : fotos;
   }
 
@@ -54,17 +57,28 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   int _fotoActual = 0;
   bool _scrolled = false;
   late final ScrollController _scrollCtrl;
+  late final AnimationController _tamanoCtrl;
+  late final Animation<double> _tamanoAnim;
 
   @override
   void initState() {
     super.initState();
     _scrollCtrl = ScrollController();
     _scrollCtrl.addListener(_onScroll);
+    _tamanoCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _tamanoAnim =
+        CurvedAnimation(parent: _tamanoCtrl, curve: Curves.easeOutCubic);
   }
 
   void _onScroll() {
     final scrolled = _scrollCtrl.hasClients ? _scrollCtrl.offset > 2 : false;
-    if (scrolled != _scrolled) setState(() => _scrolled = scrolled);
+    if (scrolled != _scrolled) {
+      setState(() => _scrolled = scrolled);
+      _tamanoCtrl.animateTo(scrolled ? 1 : 0);
+    }
   }
 
   @override
@@ -78,6 +92,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
 
   @override
   void dispose() {
+    _tamanoCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -193,7 +208,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                                 child: Stack(
                                   children: [
                                     _buildFoto(),
-                                    Positioned.fill(child: _buildTapZones()),
+                                    Positioned.fill(
+                                        child: _buildTapZones()),
                                   ],
                                 ),
                               ),
@@ -252,7 +268,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   Widget _buildBarraAcciones() {
-    final tamano = _scrolled ? 52.0 : 64.0;
     return Positioned(
       left: 0,
       right: 0,
@@ -267,33 +282,45 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
           ),
         ),
         alignment: Alignment.bottomCenter,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _fabImage(
-                asset: 'assets/icons/close.png',
-                size: tamano,
-                onTap: widget.soloVista ? null : widget.onRechazar,
+        child: AnimatedBuilder(
+          animation: _tamanoAnim,
+          builder: (context, _) {
+            final tamano =
+                64.0 + (52.0 - 64.0) * _tamanoAnim.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _fabImage(
+                    asset: 'assets/icons/close.png',
+                    size: tamano,
+                    color: Colors.grey,
+                    onTap: widget.soloVista ? null : widget.onRechazar,
+                  ),
+                  const SizedBox(width: 28),
+                  _fabImage(
+                    asset: 'assets/icons/chat.png',
+                    size: tamano,
+                    color: Colors.blueAccent,
+                    onTap: widget.soloVista ? null : widget.onChat,
+                  ),
+                  if (widget.soloVista ||
+                      (!widget.gusta &&
+                          !widget.esMeGusta &&
+                          !widget.esMatch)) ...[
+                    const SizedBox(width: 28),
+                    _fabImage(
+                      asset: 'assets/icons/heart.png',
+                      size: tamano,
+                      color: Colors.redAccent,
+                      onTap: widget.soloVista ? null : widget.onMeGusta,
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 28),
-              _fabImage(
-                asset: 'assets/icons/chat.png',
-                size: tamano,
-                onTap: widget.soloVista ? null : widget.onChat,
-              ),
-              if (widget.soloVista ||
-                  (!widget.gusta && !widget.esMeGusta && !widget.esMatch)) ...[
-                const SizedBox(width: 28),
-                _fabImage(
-                  asset: 'assets/icons/heart.png',
-                  size: tamano,
-                  onTap: widget.soloVista ? null : widget.onMeGusta,
-                ),
-              ],
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -302,6 +329,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   Widget _fabImage({
     required String asset,
     required double size,
+    required Color color,
     required VoidCallback? onTap,
   }) {
     return GestureDetector(
@@ -311,7 +339,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white,
+          color: color,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.3),
@@ -334,16 +362,15 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
   }
 
   Widget _buildFoto() {
-    if (_fotos.isNotEmpty &&
-        File(_fotos[_fotoActual % _fotos.length]).existsSync()) {
+    if (_fotos.isNotEmpty) {
       return AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
-        child: Image.file(
-          File(_fotos[_fotoActual % _fotos.length]),
+        child: Container(
           key: ValueKey(_fotoActual),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
+          child: SizedBox.expand(
+            child: imagenFoto(_fotos[_fotoActual % _fotos.length],
+                fit: BoxFit.cover, cacheWidth: 1080),
+          ),
         ),
       );
     }
@@ -371,11 +398,33 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
     );
   }
 
+  Future<void> _abrirVisor() async {
+    if (_fotos.isEmpty) return;
+    final indiceFinal = await Navigator.push<int>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VisorFotosPantalla(
+          fotos: _fotos,
+          indiceInicial: _fotoActual,
+        ),
+      ),
+    );
+    if (!mounted || indiceFinal == null || indiceFinal == _fotoActual) return;
+    setState(() => _fotoActual = indiceFinal);
+    widget.onFotoCambio?.call(_fotoActual);
+  }
+
   Widget _buildTapZones() {
     return Row(
       children: [
         Expanded(flex: 35, child: GestureDetector(onTap: _fotoAnterior)),
-        Expanded(flex: 30, child: GestureDetector()),
+        Expanded(
+          flex: 30,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _abrirVisor,
+          ),
+        ),
         Expanded(flex: 35, child: GestureDetector(onTap: _fotoSiguiente)),
       ],
     );
@@ -396,7 +445,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
               ),
             Flexible(
               child: Text(
-                '${u.nombre}, ${u.edad}',
+                u.ocultarEdad ? '${u.nombre}' : '${u.nombre}, ${u.edad}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.white,
@@ -413,7 +462,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
               const SizedBox(width: 6),
               const Icon(Icons.favorite, color: Colors.redAccent, size: 20),
             ],
-            if (u.ultimaSincronizacionTimestamp != null) ...[
+            if (_estaEnLinea(u)) ...[
               const SizedBox(width: 8),
               Container(
                 width: 14,
@@ -523,7 +572,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
       ],
       _seccionDetalle('\u00bfQu\u00e9 busco?', [
         _pill(null, opcionTexto(opcionesQueBusca, u.queBusca)),
-        _pillBuscaRango(u),
       ]),
       _seccionDetalle('Vida personal y creencias', [
         _pillIconoValor(Icons.favorite, orientacionTexto(u.orientacionSexual)),
@@ -578,17 +626,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
       return const SizedBox.shrink();
     }
     return _pill(icono, valor);
-  }
-
-  Widget _pillBuscaRango(Usuario u) {
-    final conocer = buscaGeneroTexto(u.buscaGenero);
-    final rango = rangoEdadTexto(u.preferenciaEdadMin, u.preferenciaEdadMax);
-    if (conocer.isEmpty || conocer == 'Sin definir') {
-      return const SizedBox.shrink();
-    }
-    final rangoParte =
-        (rango.isEmpty || rango == 'Sin definir') ? '' : ' de $rango';
-    return _pill(Icons.people, 'Tengo inter\u00e9s en $conocer$rangoParte');
   }
 
   bool _esPrefieroNoDecir(String texto) {
@@ -756,6 +793,13 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario> {
                 fontWeight: FontWeight.w500)),
       ],
     );
+  }
+
+  bool _estaEnLinea(Usuario u) {
+    if (u.ocultarEnLinea) return false;
+    final conexion = u.ultimaConexion;
+    if (conexion == null) return false;
+    return DateTime.now().difference(conexion).inMinutes < 5;
   }
 }
 

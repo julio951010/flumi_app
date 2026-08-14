@@ -47,26 +47,37 @@ class ProfilesHandler {
     try {
       final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
 
+      final texto = {
+        'nombre', 'biografia', 'genero', 'busca_genero', 'que_busca', 'ciudad',
+        'orientacion_sexual', 'situacion_sentimental', 'altura', 'educacion',
+        'trabajo', 'profesion', 'preferencia_relacion', 'bebe', 'fuma', 'hijos',
+        'personalidad', 'signo_zodiaco', 'mascotas', 'religion', 'idiomas',
+        'tatuajes', 'foto_verificacion',
+      };
+      final entero = {'edad', 'preferencia_edad_min', 'preferencia_edad_max', 'score_popularidad'};
+      final booleano = {'ocultar_en_linea', 'ocultar_edad', 'perfil_completado', 'verificado_status'};
+      final decimal = {'ubicacion_lat', 'ubicacion_lon'};
+      final fecha = {'fecha_nacimiento', 'ultima_conexion'};
+
       final updates = <String, dynamic>{};
-      for (final key in ['nombre', 'biografia', 'genero', 'busca_genero']) {
-        if (body.containsKey(key)) {
-          updates[key] = body[key];
+      for (final key in body.keys) {
+        if (!body.containsKey(key) || body[key] == null) continue;
+        if (texto.contains(key)) {
+          updates[key] = body[key].toString();
+        } else if (entero.contains(key)) {
+          updates[key] = _aInt(body[key]);
+        } else if (booleano.contains(key)) {
+          updates[key] = body[key] == true || body[key] == 'true';
+        } else if (decimal.contains(key)) {
+          updates[key] = _aDouble(body[key]);
+        } else if (fecha.contains(key)) {
+          final dt = DateTime.tryParse(body[key].toString());
+          if (dt != null) updates[key] = dt;
+        } else if (key == 'intereses') {
+          updates[key] = (body[key] as List).map((e) => e.toString()).toList();
+        } else if (key == 'preguntas_perfil') {
+          updates[key] = jsonEncode(body[key]);
         }
-      }
-      if (body.containsKey('fecha_nacimiento')) {
-        updates['fecha_nacimiento'] = body['fecha_nacimiento'];
-      }
-      if (body.containsKey('preferencia_edad_min')) {
-        updates['preferencia_edad_min'] = body['preferencia_edad_min'];
-      }
-      if (body.containsKey('preferencia_edad_max')) {
-        updates['preferencia_edad_max'] = body['preferencia_edad_max'];
-      }
-      if (body.containsKey('ubicacion_lat')) {
-        updates['ubicacion_lat'] = body['ubicacion_lat'];
-      }
-      if (body.containsKey('ubicacion_lon')) {
-        updates['ubicacion_lon'] = body['ubicacion_lon'];
       }
 
       if (updates.isNotEmpty) {
@@ -81,7 +92,7 @@ class ProfilesHandler {
       if (body.containsKey('nombre')) {
         await db.connection.execute(
           Sql.named('update flumi.users set nombre = @nombre where id = @id'),
-          parameters: {'nombre': body['nombre'], 'id': id},
+          parameters: {'nombre': body['nombre'].toString(), 'id': id},
         );
       }
 
@@ -98,3 +109,9 @@ class ProfilesHandler {
     }
   }
 }
+
+int _aInt(dynamic v) =>
+    v is int ? v : (v is num ? v.toInt() : int.tryParse(v.toString()) ?? 0);
+
+double _aDouble(dynamic v) =>
+    v is double ? v : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0.0);

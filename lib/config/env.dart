@@ -1,12 +1,15 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 bool get kUsarServidorLocal => false;
-bool get kUsarModoMock => true;
+bool get kUsarModoMock => false;
 bool get kEsPremium => false;
 
 String get kServidorLocalUrl {
-  if (Platform.isAndroid) return 'http://10.0.2.2:8081';
+  if (kIsWeb) return 'http://localhost:8081';
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    return 'http://10.0.2.2:8081';
+  }
   return 'http://localhost:8081';
 }
 

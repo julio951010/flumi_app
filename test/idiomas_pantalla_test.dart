@@ -4,11 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:drift/native.dart';
 
 import '../lib/core/base_datos_local/database.dart';
+import '../lib/core/servicios/sync_service.dart';
 import '../lib/features/perfiles/pantallas/subpaginas_perfil.dart';
 import '../lib/features/perfiles/perfil_repositorio.dart';
 
 class _FakeRepositorio extends PerfilRepositorio {
-  _FakeRepositorio() : super(AppDatabase(NativeDatabase.memory()));
+  _FakeRepositorio()
+      : super(
+          AppDatabase(NativeDatabase.memory()),
+          SyncService(AppDatabase(NativeDatabase.memory())),
+        );
 
   @override
   Future<Usuario?> obtenerPerfilPropio() async => null;

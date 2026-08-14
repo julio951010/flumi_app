@@ -58,6 +58,40 @@ class DatabaseManager {
       );
     ''');
 
+    // Columnas nuevas (idempotente para BDs de dev ya creadas)
+    const nuevasColumnasPerfil = [
+      'edad int default 18',
+      'que_busca text default \'\'',
+      'ciudad text default \'\'',
+      'ocultar_en_linea boolean default false',
+      'ocultar_edad boolean default false',
+      'perfil_completado boolean default false',
+      'orientacion_sexual text default \'\'',
+      'situacion_sentimental text default \'\'',
+      'intereses text[] default \'{}\'',
+      'altura text default \'\'',
+      'educacion text default \'\'',
+      'trabajo text default \'\'',
+      'profesion text default \'\'',
+      'preferencia_relacion text default \'\'',
+      'bebe text default \'\'',
+      'fuma text default \'\'',
+      'hijos text default \'\'',
+      'personalidad text default \'\'',
+      'signo_zodiaco text default \'\'',
+      'mascotas text default \'\'',
+      'religion text default \'\'',
+      'idiomas text default \'\'',
+      'tatuajes text default \'\'',
+      'preguntas_perfil jsonb default \'[]\'',
+      'foto_verificacion text default \'\'',
+    ];
+    for (final col in nuevasColumnasPerfil) {
+      await connection.execute(
+        'alter table if exists flumi.profiles add column if not exists $col;',
+      );
+    }
+
     await connection.execute('''
       create table if not exists flumi.matches (
         id text primary key,
@@ -98,6 +132,47 @@ class DatabaseManager {
         bloqueado_id text not null references flumi.profiles(id) on delete cascade,
         timestamp timestamptz default now(),
         unique (bloqueador_id, bloqueado_id)
+      );
+    ''');
+
+    await connection.execute('''
+      create table if not exists flumi.suscripciones (
+        usuario_id text primary key references flumi.profiles(id) on delete cascade,
+        plan text default 'gratis',
+        inicio timestamptz default now(),
+        vence timestamptz,
+        activa boolean default true
+      );
+    ''');
+
+    await connection.execute('''
+      create table if not exists flumi.usos_diarios (
+        usuario_id text not null references flumi.profiles(id) on delete cascade,
+        fecha date default current_date,
+        me_gustas_usados int default 0,
+        deshacer_usados int default 0,
+        superlikes_usados int default 0,
+        boosts_usados int default 0,
+        vistas_cerca_usadas int default 0,
+        primary key (usuario_id, fecha)
+      );
+    ''');
+
+    await connection.execute('''
+      create table if not exists flumi.visitas (
+        id text primary key,
+        visitante_id text not null references flumi.profiles(id) on delete cascade,
+        visitado_id text not null references flumi.profiles(id) on delete cascade,
+        timestamp timestamptz default now()
+      );
+    ''');
+
+    await connection.execute('''
+      create table if not exists flumi.historial_likes (
+        id text primary key,
+        usuario_id text not null references flumi.profiles(id) on delete cascade,
+        usuario_likeado_id text not null references flumi.profiles(id) on delete cascade,
+        timestamp timestamptz default now()
       );
     ''');
   }

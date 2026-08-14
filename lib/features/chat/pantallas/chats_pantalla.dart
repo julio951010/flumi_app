@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../config/env.dart';
 import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
-import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart'
-    show PerfilDetallePage;
+import '../../suscripcion/suscripcion_sheet.dart';
+import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
 import '../chat_repositorio.dart';
 import 'chat_pantalla.dart';
 
@@ -12,12 +13,14 @@ class ChatsPantalla extends StatefulWidget {
   final AppDatabase db;
   final ChatRepositorio repositorio;
   final String miId;
+  final SuscripcionServicio suscripcionServicio;
 
   const ChatsPantalla({
     super.key,
     required this.db,
     required this.repositorio,
     required this.miId,
+    required this.suscripcionServicio,
   });
 
   @override
@@ -88,6 +91,10 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   }
 
   void _abrirChat(ResumenConversacion conv) {
+    if (!widget.suscripcionServicio.tienePremium && !conv.esMatch) {
+      _mostrarBloqueoChatSinMatch();
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -99,6 +106,29 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
           online: conv.online,
           esMeGusta: conv.esMeGusta,
           esMatch: conv.esMatch,
+        ),
+      ),
+    );
+  }
+
+  void _mostrarBloqueoChatSinMatch() {
+    mostrarBloqueoSuscripcion(
+      context,
+      funcionalidad: 'Enviar mensaje',
+      planMinimo: PlanTipo.premium,
+      descripcion:
+          'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
+      onSuscribir: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const DetallePlanPantalla(
+            nombre: 'Flumi Premium',
+            periodo: 'mensual',
+            precio: '500 cup',
+            icono: Icons.workspace_premium,
+            detalle: 'Acceso total',
+            destacado: false,
+          ),
         ),
       ),
     );
@@ -140,7 +170,7 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
                     _banner(noLeidos: noLeidos, totalMatches: totalMatches),
                   const SizedBox(height: 4),
                   if (perfiles.isNotEmpty) ...[
-                    _encabezadoSeccion('Perfiles', key: _perfilesKey),
+                    _encabezadoSeccion('Personas', key: _perfilesKey),
                     const SizedBox(height: 4),
                     _filaPerfiles(perfiles),
                     const SizedBox(height: 14),
@@ -289,31 +319,17 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
 
     return GestureDetector(
       onTap: () {
-        if (perfil.esMatch) {
-          _abrirChat(ResumenConversacion(
-            otroUsuarioId: usuario.uuid,
-            nombre: nombre,
-            ultimoMensaje: '',
-            ultimoEsMio: false,
-            timestamp: perfil.timestamp,
-            noLeidos: 0,
-            online: usuario.ultimaSincronizacionTimestamp != null,
-            esMeGusta: perfil.esMeGusta,
-            esMatch: perfil.esMatch,
-          ));
-        } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PerfilDetallePage(
-                usuario: usuario,
-                gusta: true,
-                esMatch: perfil.esMatch,
-                esMeGusta: perfil.esMeGusta,
-              ),
-            ),
-          );
-        }
+        _abrirChat(ResumenConversacion(
+          otroUsuarioId: usuario.uuid,
+          nombre: nombre,
+          ultimoMensaje: '',
+          ultimoEsMio: false,
+          timestamp: perfil.timestamp,
+          noLeidos: 0,
+          online: usuario.ultimaSincronizacionTimestamp != null,
+          esMeGusta: perfil.esMeGusta,
+          esMatch: perfil.esMatch,
+        ));
       },
       child: SizedBox(
         width: 72,

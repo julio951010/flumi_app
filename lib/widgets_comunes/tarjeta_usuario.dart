@@ -1,6 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import '../core/utilidades/fotos_perfil.dart';
 import '../core/base_datos_local/database.dart';
+import 'foto_perfil.dart';
+import 'imagen_difuminada.dart';
 
 class TarjetaUsuario extends StatelessWidget {
   final Usuario usuario;
@@ -8,6 +10,8 @@ class TarjetaUsuario extends StatelessWidget {
   final Widget? badge;
   final Widget? esquinaDerecha;
   final VoidCallback? onTap;
+  final bool imagenBorrosa;
+  final String? nombreMostrado;
 
   const TarjetaUsuario({
     super.key,
@@ -16,19 +20,22 @@ class TarjetaUsuario extends StatelessWidget {
     this.badge,
     this.esquinaDerecha,
     this.onTap,
+    this.imagenBorrosa = false,
+    this.nombreMostrado,
   });
 
   @override
   Widget build(BuildContext context) {
     final inicial =
         usuario.nombre.isNotEmpty ? usuario.nombre[0].toUpperCase() : '?';
+    final enLinea = _estaEnLinea(usuario);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         clipBehavior: Clip.hardEdge,
         decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
           children: [
@@ -36,8 +43,8 @@ class TarjetaUsuario extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ClipPath(
-                    clipper: const AlmohadillaClipper(),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
                     child: Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
@@ -56,11 +63,15 @@ class TarjetaUsuario extends StatelessWidget {
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold)),
                           ),
-                          if (usuario.fotosLocalesRutas.isNotEmpty &&
-                              File(usuario.fotosLocalesRutas.first)
-                                  .existsSync())
-                            Image.file(File(usuario.fotosLocalesRutas.first),
-                                fit: BoxFit.cover),
+                          if (fotosParaMostrar(usuario).isNotEmpty)
+                            imagenBorrosa
+                                ? ImagenDifuminada(
+                                    ruta: fotosParaMostrar(usuario).first,
+                                    sigma: 12,
+                                    fit: BoxFit.cover,
+                                  )
+                                : imagenFoto(fotosParaMostrar(usuario).first,
+                                    fit: BoxFit.cover),
                           if (imagenOverlay != null) imagenOverlay!,
                         ],
                       ),
@@ -93,7 +104,10 @@ class TarjetaUsuario extends StatelessWidget {
                             children: [
                               Flexible(
                                 child: Text(
-                                  '${usuario.nombre}, ${usuario.edad}',
+                                  nombreMostrado ??
+                                      (usuario.ocultarEdad
+                                          ? '${usuario.nombre}'
+                                          : '${usuario.nombre}, ${usuario.edad}'),
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                       fontSize: 17,
@@ -106,14 +120,23 @@ class TarjetaUsuario extends StatelessWidget {
                                 width: 8,
                                 height: 8,
                                 decoration: BoxDecoration(
-                                  color:
-                                      usuario.ultimaSincronizacionTimestamp !=
-                                              null
-                                          ? const Color(0xFF4CD964)
-                                          : Colors.grey[400],
+                                  color: enLinea
+                                      ? const Color(0xFF4CD964)
+                                      : Colors.grey[400],
                                   shape: BoxShape.circle,
                                 ),
                               ),
+                              if (enLinea) ...[
+                                const SizedBox(width: 4),
+                                const Text(
+                                  'En línea',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF4CD964),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -135,34 +158,11 @@ class TarjetaUsuario extends StatelessWidget {
       ),
     );
   }
-}
 
-class AlmohadillaClipper extends CustomClipper<Path> {
-  const AlmohadillaClipper();
-
-  static const double _radio = 30;
-  static const double _hundimiento = 7;
-
-  @override
-  Path getClip(Size size) {
-    final w = size.width;
-    final h = size.height;
-    const r = _radio;
-    const d = _hundimiento;
-
-    return Path()
-      ..moveTo(r, 0)
-      ..quadraticBezierTo(w / 2, d, w - r, 0)
-      ..quadraticBezierTo(w, 0, w, r)
-      ..quadraticBezierTo(w - d, h / 2, w, h - r)
-      ..quadraticBezierTo(w, h, w - r, h)
-      ..quadraticBezierTo(w / 2, h - d, r, h)
-      ..quadraticBezierTo(0, h, 0, h - r)
-      ..quadraticBezierTo(d, h / 2, 0, r)
-      ..quadraticBezierTo(0, 0, r, 0)
-      ..close();
+  bool _estaEnLinea(Usuario usuario) {
+    if (usuario.ocultarEnLinea) return false;
+    final conexion = usuario.ultimaConexion;
+    if (conexion == null) return false;
+    return DateTime.now().difference(conexion).inMinutes < 5;
   }
-
-  @override
-  bool shouldReclip(covariant AlmohadillaClipper oldClipper) => false;
 }

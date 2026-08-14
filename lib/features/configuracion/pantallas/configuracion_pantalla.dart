@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/sync_service.dart';
 import '../../auth/auth_service.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import 'administrar_suscripcion_pantalla.dart';
@@ -14,12 +17,18 @@ import 'sobre_nosotros_pantalla.dart';
 class ConfiguracionPantalla extends StatelessWidget {
   final AuthService authService;
   final PerfilRepositorio repositorio;
-  final VoidCallback? onCerrarSesion;
+  final AppDatabase db;
+  final SuscripcionServicio suscripcionServicio;
+  final SyncService syncService;
+  final Future<void> Function()? onCerrarSesion;
 
   const ConfiguracionPantalla({
     super.key,
     required this.authService,
     required this.repositorio,
+    required this.db,
+    required this.suscripcionServicio,
+    required this.syncService,
     this.onCerrarSesion,
   });
 
@@ -72,7 +81,11 @@ class ConfiguracionPantalla extends StatelessWidget {
                 onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const PrivacidadPantalla(),
+                        builder: (_) => PrivacidadPantalla(
+                          db: db,
+                          suscripcionServicio: suscripcionServicio,
+                          syncService: syncService,
+                        ),
                       ),
                     )),
             const Divider(height: 1),
@@ -80,7 +93,9 @@ class ConfiguracionPantalla extends StatelessWidget {
                 onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const ModoInvisiblePantalla(),
+                        builder: (_) => ModoInvisiblePantalla(
+                          suscripcionServicio: suscripcionServicio,
+                        ),
                       ),
                     )),
             const Divider(height: 1),
@@ -108,7 +123,51 @@ class ConfiguracionPantalla extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: onCerrarSesion,
+                onPressed: () async {
+                  // Capturamos el Navigator antes del await: tras cerrar sesión
+                  // el router reconstruye la pantalla de inicio, pero esta ruta
+                  // (Configuración) sigue montada y su Navigator sigue vivo.
+                  final nav = Navigator.of(context);
+                  final confirmado = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Cerrar sesión'),
+                      content: const Text('¿Estás seguro?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancelar'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Cerrar sesión'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmado != true) return;
+                  // Feedback mientras el signOut (red) se completa.
+                  showDialog<void>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) => const Center(
+                      child: Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                    ),
+                  );
+                  try {
+                    await onCerrarSesion?.call();
+                  } finally {
+                    // Cierra el diálogo de progreso y luego esta pantalla para
+                    // revelar el login que ya mostró el router vía el listener.
+                    if (context.mounted) Navigator.of(context).pop();
+                    nav.pop();
+                  }
+                },
                 icon: const Icon(Icons.logout, size: 20),
                 label: const Text(
                   'Cerrar sesión',

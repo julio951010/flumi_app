@@ -196,6 +196,24 @@ String signoTexto(String valor) {
       : opcionTexto(opcionesSigno, valor);
 }
 
+/// Código del signo zodiacal calculado a partir de la fecha de nacimiento.
+String? calcularSignoZodiacal(DateTime f) {
+  final m = f.month;
+  final d = f.day;
+  if ((m == 3 && d >= 21) || (m == 4 && d <= 19)) return 'aries';
+  if ((m == 4 && d >= 20) || (m == 5 && d <= 20)) return 'tauro';
+  if ((m == 5 && d >= 21) || (m == 6 && d <= 20)) return 'geminis';
+  if ((m == 6 && d >= 21) || (m == 7 && d <= 22)) return 'cancer';
+  if ((m == 7 && d >= 23) || (m == 8 && d <= 22)) return 'leo';
+  if ((m == 8 && d >= 23) || (m == 9 && d <= 22)) return 'virgo';
+  if ((m == 9 && d >= 23) || (m == 10 && d <= 22)) return 'libra';
+  if ((m == 10 && d >= 23) || (m == 11 && d <= 21)) return 'escorpio';
+  if ((m == 11 && d >= 22) || (m == 12 && d <= 21)) return 'sagitario';
+  if ((m == 12 && d >= 22) || (m == 1 && d <= 19)) return 'capricornio';
+  if ((m == 1 && d >= 20) || (m == 2 && d <= 18)) return 'acuario';
+  return 'piscis';
+}
+
 const _orientacionesLegacy = {
   'homosexual': 'Gay',
   'otro': 'Otro',

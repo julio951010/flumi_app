@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 enum TipoNotificacion { alerta, advertencia, exito }
@@ -64,6 +66,7 @@ class _NotificacionWidgetState extends State<_NotificacionWidget>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _anim;
+  Timer? _timer;
 
   @override
   void initState() {
@@ -75,16 +78,19 @@ class _NotificacionWidgetState extends State<_NotificacionWidget>
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
 
     _ctrl.forward();
-    Future.delayed(widget.duracion, _cerrar);
+    _timer = Timer(widget.duracion, _cerrar);
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
+    _timer = null;
     _ctrl.dispose();
     super.dispose();
   }
 
   void _cerrar() {
+    if (!mounted) return;
     _ctrl.reverse().then((_) {
       if (mounted) widget.onDismiss();
     });

@@ -1,24 +1,70 @@
-import 'dart:io';
-
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:sqlite3_flutter_libs/sqlite3_flutter_libs.dart';
 
+import 'conexion.dart';
 import 'tables.dart';
 
 part 'database.g.dart';
 
-@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos])
+@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase([QueryExecutor? executor]) : super(executor ?? _abrirConexion());
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+    beforeOpen: (details) async {
+      // Limpieza de seguridad: elimina filas viejas e incompletas (creadas
+      // por versiones anteriores de la app) que tengan NULL en columnas que
+      // el esquema actual exige no nulas. Leerlas haría crashear el mapeo de
+      // drift (Null check operator used on a null value). Es seguro borrarlas:
+      // el perfil real se vuelve a descargar de Supabase al iniciar sesión.
+      await customStatement('''
+        DELETE FROM usuarios
+        WHERE uuid IS NULL
+           OR nombre IS NULL
+           OR edad IS NULL
+           OR biografia IS NULL
+           OR fotos_locales_rutas IS NULL
+           OR fotos_urls IS NULL
+           OR preferencia_edad_min IS NULL
+           OR preferencia_edad_max IS NULL
+           OR genero IS NULL
+           OR busca_genero IS NULL
+           OR que_busca IS NULL
+           OR ciudad IS NULL
+           OR ubicacion_lat IS NULL
+           OR ubicacion_lon IS NULL
+           OR ocultar_en_linea IS NULL
+           OR ocultar_edad IS NULL
+           OR verificado_status IS NULL
+           OR score_popularidad IS NULL
+           OR pendiente_de_sincronizar IS NULL
+           OR es_perfil_propio IS NULL
+           OR perfil_completado IS NULL
+           OR orientacion_sexual IS NULL
+           OR situacion_sentimental IS NULL
+           OR intereses IS NULL
+           OR altura IS NULL
+           OR educacion IS NULL
+           OR trabajo IS NULL
+           OR profesion IS NULL
+           OR preferencia_relacion IS NULL
+           OR bebe IS NULL
+           OR fuma IS NULL
+           OR hijos IS NULL
+           OR personalidad IS NULL
+           OR signo_zodiaco IS NULL
+           OR mascotas IS NULL
+           OR religion IS NULL
+           OR idiomas IS NULL
+           OR tatuajes IS NULL
+           OR preguntas_perfil IS NULL
+           OR foto_verificacion IS NULL
+           OR creado_en IS NULL;
+      ''');
+    },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
         await m.addColumn(usuarios, usuarios.perfilCompletado);
@@ -58,17 +104,17 @@ class AppDatabase extends _$AppDatabase {
       if (from < 8) {
         await m.addColumn(usuarios, usuarios.preguntasPerfil);
       }
+      if (from < 9) {
+        await m.createTable(suscripciones);
+        await m.createTable(usosDiarios);
+      }
+      if (from < 10) {
+        await m.createTable(visitas);
+        await m.createTable(historialLikes);
+        await m.addColumn(usuarios, usuarios.ultimaConexion);
+        await m.addColumn(usuarios, usuarios.ocultarEnLinea);
+        await m.addColumn(usuarios, usuarios.ocultarEdad);
+      }
     },
   );
-
-  static QueryExecutor _abrirConexion() {
-    return LazyDatabase(() async {
-      final dir = await getApplicationDocumentsDirectory();
-      final archivo = File(p.join(dir.path, 'flumi.sqlite'));
-
-      await applyWorkaroundToOpenSqlite3OnOldAndroidVersions();
-
-      return NativeDatabase.createInBackground(archivo);
-    });
-  }
 }

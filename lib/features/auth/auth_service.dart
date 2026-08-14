@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
@@ -94,7 +94,17 @@ class AuthService {
     _localStreamCtrl ??= StreamController<AuthState>.broadcast();
     if (kUsarModoMock || kUsarServidorLocal) return _localStreamCtrl!.stream;
     return sb.Supabase.instance.client.auth.onAuthStateChange.map(
-      (e) => AuthState(e.event.name, user: e.session?.user.toJson()),
+      // Los eventos de supabase_flutter llegan en camelCase (signedIn,
+      // initialSession, userUpdated...) y se normalizan a MAYÚSCULAS con
+      // guion bajo (SIGNED_IN, INITIAL_SESSION, USER_UPDATED...) para que
+      // los listeners de la app los comparen como siempre lo han hecho.
+      (e) => AuthState(
+        e.event.name
+            .replaceAllMapped(
+                RegExp(r'[A-Z]'), (m) => '_${m.group(0)}')
+            .toUpperCase(),
+        user: e.session?.user.toJson(),
+      ),
     );
   }
 
@@ -110,6 +120,7 @@ class AuthService {
         _localStreamCtrl ??= StreamController<AuthState>.broadcast();
         _localStreamCtrl!.add(AuthState('INITIAL_SESSION', user: user));
       }
+      await registrarConexion();
       return;
     }
     if (kUsarServidorLocal) {
@@ -120,6 +131,25 @@ class AuthService {
         _localStreamCtrl ??= StreamController<AuthState>.broadcast();
         _localStreamCtrl!.add(AuthState('INITIAL_SESSION', user: user));
       }
+      await registrarConexion();
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Registrar conexión (estado en línea)
+  // -----------------------------------------------------------
+  Future<void> registrarConexion() async {
+    try {
+      final filas =
+          (db.select(db.usuarios)..where((u) => u.esPerfilPropio.equals(true))..limit(1))
+              .get();
+      final usuario = await filas;
+      if (usuario.isEmpty) return;
+      await (db.update(db.usuarios)
+            ..where((u) => u.uuid.equals(usuario.first.uuid)))
+          .write(UsuariosCompanion(ultimaConexion: Value(DateTime.now())));
+    } catch (_) {
+      // Best-effort: no bloquear el flujo de auth si falla el registro.
     }
   }
 
@@ -146,6 +176,7 @@ class AuthService {
           await LocalTokenStore.guardarUsuario(_localUser!);
           _localStreamCtrl ??= StreamController<AuthState>.broadcast();
           _localStreamCtrl!.add(AuthState('SIGNED_IN', user: _localUser));
+          await registrarConexion();
           return data;
         }
         if (res.statusCode == 401) throw CredencialesInvalidasException();
@@ -385,6 +416,7 @@ class AuthService {
     await LocalTokenStore.guardarUsuario(_localUser!);
     _localStreamCtrl ??= StreamController<AuthState>.broadcast();
     _localStreamCtrl!.add(AuthState('SIGNED_IN', user: _localUser));
+    await registrarConexion();
     return {'user': _localUser!, 'token': 'mock-token'};
   }
 
@@ -400,8 +432,6 @@ class AuthService {
   Future<T> _localHttp<T>(Future<T> Function() llamada) async {
     try {
       return await llamada();
-    } on SocketException {
-      throw ErrorServidorException();
     } on http.ClientException {
       throw ErrorServidorException();
     } catch (e) {
@@ -418,12 +448,6 @@ class AuthService {
   Future<T> _ejecutar<T>(Future<T> Function() llamada) async {
     try {
       return await llamada();
-    } on SocketException {
-      throw ErrorServidorException();
-    } on HandshakeException {
-      throw ErrorServidorException();
-    } on HttpException {
-      throw ErrorServidorException();
     } on sb.AuthRetryableFetchException {
       throw ErrorServidorException();
     } on sb.AuthException catch (e) {

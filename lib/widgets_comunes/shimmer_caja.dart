@@ -22,7 +22,7 @@ class _ShimmerCajaState extends State<ShimmerCaja>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
       ..repeat();
   }
 
@@ -37,17 +37,24 @@ class _ShimmerCajaState extends State<ShimmerCaja>
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, _) {
-        final opacidad = 0.3 +
-            0.2 *
-                (_ctrl.value < 0.5
-                    ? _ctrl.value * 2
-                    : (1 - _ctrl.value) * 2);
+        // Barrido de brillo: el foco recorre la caja de izquierda a derecha,
+        // con el resto del área en gris base (el gradiente rellena toda la
+        // caja y los extremos se repiten fuera del segmento).
+        final dx = -1.4 + 2.8 * _ctrl.value; // -1.4 .. 1.4
         return Container(
           width: widget.width,
           height: widget.height,
           decoration: BoxDecoration(
-            color: Colors.grey[300]!.withValues(alpha: opacidad),
             borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment(dx, 0),
+              end: Alignment(dx + 0.9, 0),
+              colors: [
+                Colors.grey[300]!,
+                Colors.grey[100]!,
+                Colors.grey[300]!,
+              ],
+            ),
           ),
         );
       },

@@ -1,7 +1,7 @@
 export 'config.dart';
 
 const String appNombre = 'Flumi';
-const String appTagline = 'Déjate llevar por la corriente';
+const String appTagline = 'Deja que todo fluya';
 
 const int sincronizacionIntentosMaximos = 5;
 const int feedRadioMetrosDefault = 20000;

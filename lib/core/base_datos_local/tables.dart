@@ -56,6 +56,10 @@ class Usuarios extends Table {
       .map(const ListaStringConverter())
       .withDefault(const Constant('[]'))();
 
+  TextColumn get fotosUrls => text()
+      .map(const ListaStringConverter())
+      .withDefault(const Constant('[]'))();
+
   IntColumn get preferenciaEdadMin => integer().withDefault(const Constant(18))();
   IntColumn get preferenciaEdadMax => integer().withDefault(const Constant(99))();
 
@@ -70,6 +74,10 @@ class Usuarios extends Table {
   RealColumn get ubicacionLon => real().withDefault(const Constant(0.0))();
 
   DateTimeColumn get ultimaSincronizacionTimestamp => dateTime().nullable()();
+
+  DateTimeColumn get ultimaConexion => dateTime().nullable()();
+  BoolColumn get ocultarEnLinea => boolean().withDefault(const Constant(false))();
+  BoolColumn get ocultarEdad => boolean().withDefault(const Constant(false))();
 
   BoolColumn get verificadoStatus => boolean().withDefault(const Constant(false))();
   IntColumn get scorePopularidad => integer().withDefault(const Constant(0))();
@@ -160,6 +168,54 @@ class Bloqueos extends Table {
   TextColumn get bloqueadorId => text()();
   TextColumn get bloqueadoId => text()();
   DateTimeColumn get timestamp => dateTime()();
+
+  BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {uuid};
+}
+
+class Suscripciones extends Table {
+  TextColumn get usuarioId => text()();
+  TextColumn get plan => text().withDefault(const Constant('gratis'))();
+  DateTimeColumn get inicio => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get vence => dateTime().nullable()();
+  BoolColumn get activa => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {usuarioId};
+}
+
+class UsosDiarios extends Table {
+  TextColumn get usuarioId => text()();
+  DateTimeColumn get fecha => dateTime()();
+  IntColumn get meGustasUsados => integer().withDefault(const Constant(0))();
+  IntColumn get deshacerUsados => integer().withDefault(const Constant(0))();
+  IntColumn get superlikesUsados => integer().withDefault(const Constant(0))();
+  IntColumn get boostsUsados => integer().withDefault(const Constant(0))();
+  IntColumn get vistasCercaUsadas => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {usuarioId, fecha};
+}
+
+class Visitas extends Table {
+  TextColumn get uuid => text()();
+  TextColumn get visitanteId => text()();
+  TextColumn get visitadoId => text()();
+  DateTimeColumn get timestamp => dateTime().withDefault(currentDateAndTime)();
+
+  BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {uuid};
+}
+
+class HistorialLikes extends Table {
+  TextColumn get uuid => text()();
+  TextColumn get usuarioId => text()();
+  TextColumn get usuarioLikeadoId => text()();
+  DateTimeColumn get timestamp => dateTime().withDefault(currentDateAndTime)();
 
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
 

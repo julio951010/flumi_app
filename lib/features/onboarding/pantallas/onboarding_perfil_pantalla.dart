@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geocoding/geocoding.dart';
+import '../../../core/utilidades/ubicacion_util.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../core/servicios/perfil_foto_servicio.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
+import '../../../widgets_comunes/foto_perfil.dart';
 import '../../perfiles/perfil_etiquetas.dart';
 
 class OnboardingPerfilPantalla extends StatefulWidget {
@@ -42,7 +44,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   String _genero = '';
   String _queBusca = '';
   final List<String> _fotos = [];
-  bool _verificacionIniciada = false;
   String? _errorFecha;
   Map<String, List<String>> _provincias = const {};
   List<String> _opcionesUbicacion = const [];
@@ -52,7 +53,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
 
   static const _rutaJsonUbicacion = 'assets/data/cuba_provincias_municipios.json';
 
-  int get _totalPasos => 8;
+  int get _totalPasos => 7;
 
   @override
   void initState() {
@@ -114,10 +115,15 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     super.dispose();
   }
 
+  static final _regexNombre = RegExp(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ'\- ]+$");
+
   bool get _pasoValido {
     switch (_paso) {
       case 1:
-        return _nombreCtrl.text.trim().length >= 2;
+        final nombre = _nombreCtrl.text.trim();
+        return nombre.length >= 2 &&
+            nombre.length <= 30 &&
+            _regexNombre.hasMatch(nombre);
       case 2:
         return _errorFecha == null && _fechaValida;
       case 3:
@@ -126,6 +132,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         return _queBusca.isNotEmpty;
       case 5:
         return _ubicacionCtrl.text.trim().isNotEmpty;
+      case 6:
+        return _fotos.isNotEmpty;
       default:
         return true;
     }
@@ -136,8 +144,9 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     final m = int.tryParse(_mesCtrl.text);
     final a = int.tryParse(_anioCtrl.text);
     if (d == null || m == null || a == null) return false;
-    if (d < 1 || d > 31 || m < 1 || m > 12) return false;
-    return true;
+    if (d < 1 || d > 31 || m < 1 || m > 12 || a < 1900) return false;
+    final fecha = DateTime(a, m, d);
+    return fecha.day == d && fecha.month == m;
   }
 
   void _validarFecha() {
@@ -148,11 +157,15 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       setState(() => _errorFecha = null);
       return;
     }
-    if (d < 1 || d > 31 || m < 1 || m > 12) {
+    if (d < 1 || d > 31 || m < 1 || m > 12 || a < 1900) {
       setState(() => _errorFecha = 'Fecha inválida');
       return;
     }
     final fecha = DateTime(a, m, d);
+    if (fecha.day != d || fecha.month != m) {
+      setState(() => _errorFecha = 'Fecha inválida');
+      return;
+    }
     final hoy = DateTime.now();
     final edad = hoy.year - fecha.year -
         ((hoy.month < fecha.month || (hoy.month == fecha.month && hoy.day < fecha.day)) ? 1 : 0);
@@ -163,14 +176,37 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     }
   }
 
+  String? get _razonInvalida {
+    switch (_paso) {
+      case 1:
+        final nombre = _nombreCtrl.text.trim();
+        if (nombre.isEmpty) return 'Ingresa tu nombre';
+        if (nombre.length < 2) return 'El nombre debe tener al menos 2 caracteres';
+        if (nombre.length > 30) return 'El nombre no puede superar los 30 caracteres';
+        if (!_regexNombre.hasMatch(nombre)) {
+          return 'Solo letras, espacios, guiones y apóstrofes';
+        }
+        return null;
+      case 2:
+        return _errorFecha ?? 'Ingresa una fecha válida';
+      case 3:
+        return 'Selecciona tu género para continuar';
+      case 4:
+        return 'Selecciona qué estás buscando para continuar';
+      case 5:
+        return 'Ingresa tu ubicación para continuar';
+      case 6:
+        return 'Agrega al menos una foto para continuar';
+      default:
+        return null;
+    }
+  }
+
   Future<void> _siguiente() async {
-    if (_paso == 6) {
-      if (_fotos.isEmpty) {
-        setState(() => _paso++);
-        _pageCtrl.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
-        return;
-      }
-      await _tomarFoto();
+    if (!_pasoValido) return;
+
+    if (_paso == 6 && _fotos.isNotEmpty) {
+      await _subirFotosOnboarding();
     }
 
     if (_paso >= _totalPasos - 1) {
@@ -178,7 +214,121 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       return;
     }
 
+    await _guardarPaso();
+    if (!mounted) return;
     _pageCtrl.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+  }
+
+  Future<void> _asegurarFilaLocal() async {
+    final existe = await (widget.db.select(widget.db.usuarios)
+          ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+        .getSingleOrNull();
+    if (existe == null) {
+      await widget.db.into(widget.db.usuarios).insertOnConflictUpdate(
+            UsuariosCompanion(
+              uuid: Value(widget.usuarioUuid),
+              nombre: const Value(''),
+              edad: const Value(0),
+              genero: const Value(''),
+              buscaGenero: const Value(''),
+              esPerfilPropio: const Value(true),
+            ),
+          );
+    }
+  }
+
+  UsuariosCompanion? _companionDelPaso(int paso) {
+    switch (paso) {
+      case 1:
+        return UsuariosCompanion(
+          nombre: Value(_nombreCtrl.text.trim()),
+          pendienteDeSincronizar: const Value(true),
+        );
+      case 2:
+        final d = int.tryParse(_diaCtrl.text);
+        final m = int.tryParse(_mesCtrl.text);
+        final a = int.tryParse(_anioCtrl.text);
+        if (d == null || m == null || a == null) return null;
+        final fecha = DateTime(a, m, d);
+        return UsuariosCompanion(
+          fechaNacimiento: Value(fecha),
+          edad: Value(_calcularEdad(fecha)),
+          pendienteDeSincronizar: const Value(true),
+        );
+      case 3:
+        return UsuariosCompanion(
+          genero: Value(_genero.toLowerCase()),
+          pendienteDeSincronizar: const Value(true),
+        );
+      case 4:
+        String codigo = _queBusca;
+        for (final o in opcionesQueBusca) {
+          if (o.$1 == _queBusca) {
+            codigo = o.$2;
+            break;
+          }
+        }
+        return UsuariosCompanion(
+          queBusca: Value(codigo),
+          pendienteDeSincronizar: const Value(true),
+        );
+      case 5:
+        return UsuariosCompanion(
+          ciudad: Value(_ubicacionCtrl.text.trim()),
+          pendienteDeSincronizar: const Value(true),
+        );
+      default:
+        return null;
+    }
+  }
+
+  int _calcularEdad(DateTime nacimiento) {
+    final hoy = DateTime.now();
+    var edad = hoy.year - nacimiento.year;
+    if (hoy.month < nacimiento.month ||
+        (hoy.month == nacimiento.month && hoy.day < nacimiento.day)) {
+      edad--;
+    }
+    return edad;
+  }
+
+  Future<void> _guardarPaso() async {
+    final companion = _companionDelPaso(_paso);
+    if (companion == null) return;
+    await _asegurarFilaLocal();
+    await (widget.db.update(widget.db.usuarios)
+          ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+        .write(companion);
+  }
+
+  Future<void> _subirFotosOnboarding() async {
+    await _asegurarFilaLocal();
+    final perfil = await (widget.db.select(widget.db.usuarios)
+          ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+        .getSingleOrNull();
+    if (perfil == null) return;
+    final locales = [...perfil.fotosLocalesRutas];
+    final urls = [...perfil.fotosUrls];
+    for (final ruta in _fotos) {
+      if (locales.contains(ruta)) continue;
+      locales.add(ruta);
+      final url = await PerfilFotoServicio.subirFotoPerfil(
+        usuarioId: widget.usuarioUuid,
+        archivo: XFile(ruta),
+      );
+      if (url != null) {
+        urls.add(url);
+      }
+    }
+    await (widget.db.update(widget.db.usuarios)
+          ..where((u) => u.uuid.equals(widget.usuarioUuid)))
+        .write(
+          UsuariosCompanion(
+            fotosLocalesRutas: Value(locales),
+            fotosUrls: Value(urls),
+            pendienteDeSincronizar: const Value(true),
+          ),
+        );
   }
 
   Future<void> _tomarFoto() async {
@@ -213,7 +363,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
                   _pasoQueBusca(primario),
                   _pasoUbicacion(primario),
                   _pasoFotos(primario),
-                  _pasoVerificacion(primario),
                 ],
               ),
             ),
@@ -272,6 +421,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         child: TextFormField(
           controller: _nombreCtrl,
           onChanged: (_) => setState(() {}),
+          maxLength: 30,
+          textCapitalization: TextCapitalization.words,
           style: const TextStyle(color: Colors.black87, fontSize: 15),
           textAlign: TextAlign.start,
           decoration: InputDecoration(
@@ -432,66 +583,100 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   Widget _pasoFotos(Color primario) {
     return _pasoLayout(
       icono: Icons.add_a_photo_outlined,
-      titulo: 'Agrega una foto',
-      subtitulo: 'Las fotos ayudan a que te conozcan mejor.',
+      titulo: 'Agrega tus fotos',
+      subtitulo: 'Sube al menos una foto (máx. 2). La primera será tu foto de perfil.',
       child: Column(
         children: [
-          if (_fotos.isNotEmpty)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _fotos.map((path) {
-                return Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        File(path),
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    Positioned(
-                      top: -4,
-                      right: -4,
-                      child: GestureDetector(
-                        onTap: () => setState(() => _fotos.remove(path)),
-                        child: const Icon(Icons.cancel, color: Colors.red, size: 22),
-                      ),
-                    ),
-                  ],
-                );
-              }).toList(),
-            ),
-          const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: _tomarFoto,
-            icon: Icon(Icons.add_photo_alternate_outlined, color: primario, size: 22),
-            label: Text('Seleccionar foto', style: TextStyle(color: primario)),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1,
+            children: List.generate(2, (index) {
+              final tieneFoto = index < _fotos.length;
+              return _celdaFotoOnboarding(index, tieneFoto ? _fotos[index] : null, primario);
+            }),
           ),
-          const SizedBox(height: 4),
-          TextButton(
-            onPressed: () => _pageCtrl.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut),
-            child: Text('Omitir', style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+          const SizedBox(height: 12),
+          Text(
+            'Toca un recuadro para agregar una foto. Mínimo 1 obligatoria.',
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _pasoVerificacion(Color primario) {
-    return _pasoLayout(
-      icono: Icons.verified_outlined,
-      titulo: 'Verifica tu perfil',
-      subtitulo:
-          'Confirma tu identidad para aumentar la confianza y obtener más coincidencias.',
-      child: _permisoBoton(
-        icono: _verificacionIniciada ? Icons.check_circle : Icons.verified_outlined,
-        label: _verificacionIniciada ? 'Perfil en proceso de verificación' : 'Verificar perfil',
-        activo: _verificacionIniciada,
-        primario: primario,
-        onTap: _verificacionIniciada ? null : () => setState(() => _verificacionIniciada = true),
+  Widget _celdaFotoOnboarding(int index, String? ruta, Color primario) {
+    final tieneFoto = ruta != null;
+    return GestureDetector(
+      onTap: () async {
+        final picker = ImagePicker();
+        try {
+          final foto = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024);
+          if (foto != null) {
+            setState(() {
+              if (tieneFoto) {
+                _fotos[index] = foto.path;
+              } else if (_fotos.length <= index) {
+                _fotos.add(foto.path);
+              } else {
+                _fotos[index] = foto.path;
+              }
+            });
+          }
+        } catch (_) {}
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: tieneFoto ? null : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: tieneFoto ? Colors.transparent : primario.withValues(alpha: 0.3),
+            width: 2,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (tieneFoto)
+                imagenOrigen(ruta!, fit: BoxFit.cover)
+              else
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_a_photo_outlined, color: primario.withValues(alpha: 0.5), size: 32),
+                    const SizedBox(height: 8),
+                    Text(
+                      index == 0 ? 'Foto de perfil' : 'Foto extra',
+                      style: TextStyle(fontSize: 12, color: primario.withValues(alpha: 0.5)),
+                    ),
+                  ],
+                ),
+              if (tieneFoto)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: GestureDetector(
+                    onTap: () => setState(() => _fotos.removeAt(index)),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close, color: Colors.white, size: 16),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -688,51 +873,24 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           timeLimit: Duration(seconds: 20),
         ),
       );
-      final placemarks = await placemarkFromCoordinates(
-        posicion.latitude,
-        posicion.longitude,
+      final nombre = await resolverNombreUbicacion(
+        latitud: posicion.latitude,
+        longitud: posicion.longitude,
+        provincias: _provincias,
       );
-      if (placemarks.isNotEmpty) {
-        final pm = placemarks.first;
-        final nombresPosibles = [
-          pm.locality,
-          pm.subAdministrativeArea,
-          pm.administrativeArea,
-        ].whereType<String>().where((n) => n.trim().isNotEmpty).toList();
-        String? encontrado;
-        for (final opcion in _opcionesUbicacion) {
-          final normal = _normalizar(opcion.toLowerCase());
-          final match = nombresPosibles.any((n) =>
-              _normalizar(n.toLowerCase()).contains(normal) ||
-              normal.contains(_normalizar(n.toLowerCase())));
-          if (match) {
-            encontrado = opcion;
-            break;
-          }
-        }
-        if (!mounted) return;
-        final textoFinal = encontrado ?? nombresPosibles.first;
-        _ubicacionCtrl.text = textoFinal;
-        _autocompleteCtrl?.text = textoFinal;
-        setState(() {});
-        if (encontrado != null) {
-          NotificacionServicio.exito(
-            context,
-            'Ubicación establecida: $textoFinal',
-          );
-        } else {
-          NotificacionServicio.advertencia(
-            context,
-            'Ubicación detectada: $textoFinal. Verifícala y edítala si es necesario.',
-          );
-        }
-      } else {
+      if (nombre == null || nombre.isEmpty) {
         if (!mounted) return;
         NotificacionServicio.alerta(
           context,
-          'No se pudo obtener la dirección a partir de las coordenadas. Intenta de nuevo o escribe la ubicación manualmente.',
+          'No se pudo obtener la ubicación. Intenta de nuevo o escríbela manualmente.',
         );
+        return;
       }
+      if (!mounted) return;
+      _ubicacionCtrl.text = nombre;
+      _autocompleteCtrl?.text = nombre;
+      setState(() {});
+      NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
     } on PlatformException catch (e) {
       if (!mounted) return;
       String mensaje;
@@ -753,12 +911,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           mensaje = 'Error del GPS. Intenta de nuevo.';
       }
       NotificacionServicio.alerta(context, mensaje);
-    } on SocketException {
-      if (!mounted) return;
-      NotificacionServicio.alerta(
-        context,
-        'Sin conexión a internet. El GPS funciona, pero la geocodificación inversa (convertir coordenadas a dirección) requiere internet. Escribe la ubicación manualmente o intenta más tarde.',
-      );
     } on TimeoutException {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -901,7 +1053,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     final esUltimo = _paso >= _totalPasos - 1;
     String texto = 'Continuar';
     if (_paso == 0) texto = 'Empezar';
-    else if (esUltimo) texto = 'Continuar';
 
     return SafeArea(
       child: Padding(
@@ -916,6 +1067,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               elevation: 0,
+              disabledBackgroundColor: primario.withValues(alpha: 0.3),
+              disabledForegroundColor: Colors.white.withValues(alpha: 0.5),
             ),
             child: Text(texto, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           ),

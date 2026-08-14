@@ -18,7 +18,7 @@ class _OnboardingPantallaState extends State<OnboardingPantalla> {
     _DatosPagina(
       color: Color(0xFF3D9DF2),
       titulo: 'Bienvenido a Flumi',
-      descripcion: 'Déjate llevar por la corriente.\nEncuentra personas afines a ti.',
+      descripcion: 'Deja que todo fluya.\nEncuentra personas afines a ti.',
     ),
     _DatosPagina(
       color: Color(0xFFFF6B8A),

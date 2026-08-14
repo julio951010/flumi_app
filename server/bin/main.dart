@@ -10,6 +10,9 @@ import '../lib/messages_handler.dart';
 import '../lib/matches_handler.dart';
 import '../lib/reports_handler.dart';
 import '../lib/blocks_handler.dart';
+import '../lib/visitas_handler.dart';
+import '../lib/likes_handler.dart';
+import '../lib/suscripciones_handler.dart';
 
 Future<void> main() async {
   final db = await DatabaseManager.create();
@@ -22,6 +25,9 @@ Future<void> main() async {
   final matchesHandler = MatchesHandler(db);
   final reportsHandler = ReportsHandler(db);
   final blocksHandler = BlocksHandler(db);
+  final visitasHandler = VisitasHandler(db);
+  final likesHandler = LikesHandler(db);
+  final suscripcionesHandler = SuscripcionesHandler(db);
 
   final app = Router()
     ..post('/api/auth/signup', authHandler.signup)
@@ -44,6 +50,14 @@ Future<void> main() async {
     ..get('/api/blocks', blocksHandler.list)
     ..post('/api/blocks', blocksHandler.create)
     ..delete('/api/blocks/<id>', blocksHandler.remove)
+    ..get('/api/visits', visitasHandler.list)
+    ..post('/api/visits', visitasHandler.create)
+    ..get('/api/likes', likesHandler.list)
+    ..post('/api/likes', likesHandler.create)
+    ..get('/api/subscription', suscripcionesHandler.get)
+    ..put('/api/subscription', suscripcionesHandler.upsert)
+    ..get('/api/usages', suscripcionesHandler.getUsages)
+    ..put('/api/usages', suscripcionesHandler.upsertUsages)
     ..get('/api/health', (req) => Response.ok('{"status":"ok"}', headers: {'content-type': 'application/json'}));
 
   final corsMiddleware = createMiddleware(

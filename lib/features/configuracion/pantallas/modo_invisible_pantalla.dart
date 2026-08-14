@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../features/perfiles/pantallas/detalle_plan_pantalla.dart';
+import '../../../widgets_comunes/bloqueo_suscripcion_sheet.dart';
+
 class ModoInvisiblePantalla extends StatefulWidget {
-  const ModoInvisiblePantalla({super.key});
+  final SuscripcionServicio suscripcionServicio;
+
+  const ModoInvisiblePantalla({super.key, required this.suscripcionServicio});
 
   @override
   State<ModoInvisiblePantalla> createState() => _ModoInvisiblePantallaState();
@@ -14,6 +20,7 @@ class _ModoInvisiblePantallaState extends State<ModoInvisiblePantalla> {
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
+    final bloqueado = !widget.suscripcionServicio.tienePremium;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -39,6 +46,7 @@ class _ModoInvisiblePantallaState extends State<ModoInvisiblePantalla> {
               'Tu perfil no aparecerá en los resultados de otras personas',
               _ocultarPerfil,
               (v) => setState(() => _ocultarPerfil = v),
+              bloqueado,
             ),
             const Divider(height: 1),
             _fila(
@@ -48,6 +56,7 @@ class _ModoInvisiblePantallaState extends State<ModoInvisiblePantalla> {
               'Nadie podrá ver que visitaste su perfil',
               _ocultarVisitas,
               (v) => setState(() => _ocultarVisitas = v),
+              bloqueado,
             ),
           ],
         ),
@@ -62,21 +71,59 @@ class _ModoInvisiblePantallaState extends State<ModoInvisiblePantalla> {
     String descripcion,
     bool valor,
     ValueChanged<bool> onCambio,
+    bool bloqueado,
   ) {
-    return SwitchListTile(
-      value: valor,
-      onChanged: onCambio,
-      activeTrackColor: primario,
-      secondary: Icon(icono, color: primario.withValues(alpha: 0.7)),
+    return GestureDetector(
+      onTap: bloqueado ? () => _mostrarBloqueoPremium(titulo) : null,
+      child: SwitchListTile(
+        value: valor,
+        onChanged: bloqueado ? null : onCambio,
+        activeTrackColor: primario,
+      secondary: Icon(
+        icono,
+        color: bloqueado ? Colors.grey : primario.withValues(alpha: 0.7),
+      ),
       title: Text(
         titulo,
-        style: const TextStyle(fontSize: 15, color: Colors.black87),
+        style: TextStyle(
+          fontSize: 15,
+          color: bloqueado ? Colors.grey : Colors.black87,
+        ),
       ),
       subtitle: Text(
         descripcion,
-        style: const TextStyle(fontSize: 13, color: Colors.black54),
+        style: TextStyle(
+          fontSize: 13,
+          color: bloqueado ? Colors.grey : Colors.black54,
+        ),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      ),
+    );
+  }
+
+  void _mostrarBloqueoPremium(String funcionalidad) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => BloqueoSuscripcionSheet(
+        titulo: 'Requiere Flumi Premium',
+        descripcion: '$funcionalidad es una función exclusiva de Flumi Premium.',
+        onSuscribir: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const DetallePlanPantalla(
+              nombre: 'Flumi Premium',
+              periodo: 'mensual',
+              precio: '500 cup',
+              icono: Icons.workspace_premium,
+              detalle: 'Acceso total',
+              destacado: false,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -90,13 +90,17 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Recuperar Contraseña',
-                        style: TextStyle(
-                          color: primario,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
+                      SizedBox(
+                        width: double.infinity,
+                        child: Text(
+                          'Recuperar Contraseña',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: primario,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),

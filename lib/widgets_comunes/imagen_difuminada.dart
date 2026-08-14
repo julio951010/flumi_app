@@ -1,7 +1,8 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
+import 'foto_perfil.dart';
 
 class ImagenDifuminada extends StatefulWidget {
   final String ruta;
@@ -31,7 +32,7 @@ class _ImagenDifuminadaState extends State<ImagenDifuminada> {
 
   Future<void> _procesar() async {
     try {
-      final bytes = await File(widget.ruta).readAsBytes();
+      final bytes = await bytesDeArchivo(widget.ruta);
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       final original = frame.image;

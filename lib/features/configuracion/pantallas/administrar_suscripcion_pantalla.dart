@@ -31,10 +31,14 @@ class _AdministrarSuscripcionPantallaState
   ];
 
   static const _beneficios = [
-    'Ver quién te gusta y quién te visitó',
-    'Boosts semanales para destacar tu perfil',
-    'Filtros avanzados de búsqueda',
-    'Lee tu recibo de lectura en los mensajes',
+    'Me Gustas ilimitados',
+    '10 Superlikes por d\u00eda',
+    '1 Boost al mes',
+    '100 perfiles en Cerca de ti',
+    'Ver qui\u00e9n te gusta y qui\u00e9n te visit\u00f3',
+    'Deshacer el \u00faltimo swipe',
+    'Ocultar tu edad',
+    'Filtros extra de b\u00fasqueda',
   ];
 
   int _planSeleccionado = 0;

@@ -1,0 +1,1 @@
+export 'fotos_mock_io.dart' if (dart.library.js_interop) 'fotos_mock_web.dart';

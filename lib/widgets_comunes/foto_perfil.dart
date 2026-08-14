@@ -1,0 +1,1 @@
+export 'foto_perfil_io.dart' if (dart.library.js_interop) 'foto_perfil_web.dart';

@@ -1,17 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
+import '../../../core/utilidades/ubicacion_util.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../perfiles/perfil_etiquetas.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../widgets_comunes/flumi_loader.dart';
 
 class InformacionBasicaPantalla extends StatefulWidget {
   final PerfilRepositorio repositorio;
@@ -78,7 +78,7 @@ class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: [
@@ -241,7 +241,7 @@ class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -522,7 +522,7 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -785,7 +785,7 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -1104,51 +1104,24 @@ Future<void> _establecerUbicacion() async {
           timeLimit: Duration(seconds: 20),
         ),
       );
-      final placemarks = await placemarkFromCoordinates(
-        posicion.latitude,
-        posicion.longitude,
+      final nombre = await resolverNombreUbicacion(
+        latitud: posicion.latitude,
+        longitud: posicion.longitude,
+        provincias: _provincias,
       );
-      if (placemarks.isNotEmpty) {
-        final pm = placemarks.first;
-        final nombresPosibles = [
-          pm.locality,
-          pm.subAdministrativeArea,
-          pm.administrativeArea,
-        ].whereType<String>().where((n) => n.trim().isNotEmpty).toList();
-        String? encontrado;
-        for (final opcion in _opciones) {
-          final normal = _normalizar(opcion.toLowerCase());
-          final match = nombresPosibles.any((n) =>
-              _normalizar(n.toLowerCase()).contains(normal) ||
-              normal.contains(_normalizar(n.toLowerCase())));
-          if (match) {
-            encontrado = opcion;
-            break;
-          }
-        }
-        if (!mounted) return;
-        final textoFinal = encontrado ?? nombresPosibles.first;
-        _ubicacionCtrl.text = textoFinal;
-        _autocompleteCtrl?.text = textoFinal;
-        setState(() {});
-        if (encontrado != null) {
-          NotificacionServicio.exito(
-            context,
-            'Ubicación establecida: $textoFinal',
-          );
-        } else {
-          NotificacionServicio.advertencia(
-            context,
-            'Ubicación detectada: $textoFinal. Verifícala y edítala si es necesario.',
-          );
-        }
-      } else {
+      if (nombre == null || nombre.isEmpty) {
         if (!mounted) return;
         NotificacionServicio.alerta(
           context,
-          'No se pudo obtener la dirección a partir de las coordenadas. Intenta de nuevo o escribe la ubicación manualmente.',
+          'No se pudo obtener la ubicación. Intenta de nuevo o escríbela manualmente.',
         );
+        return;
       }
+      if (!mounted) return;
+      _ubicacionCtrl.text = nombre;
+      _autocompleteCtrl?.text = nombre;
+      setState(() {});
+      NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
     } on PlatformException catch (e) {
       if (!mounted) return;
       String mensaje;
@@ -1169,12 +1142,6 @@ Future<void> _establecerUbicacion() async {
           mensaje = 'Error del GPS. Intenta de nuevo.';
       }
       NotificacionServicio.alerta(context, mensaje);
-    } on SocketException {
-      if (!mounted) return;
-      NotificacionServicio.alerta(
-        context,
-        'Sin conexión a internet. El GPS funciona, pero la geocodificación inversa (convertir coordenadas a dirección) requiere internet. Escribe la ubicación manualmente o intenta más tarde.',
-      );
     } on TimeoutException {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -1211,7 +1178,7 @@ Future<void> _establecerUbicacion() async {
       body: SafeArea(
         top: false,
         child: _cargando
-            ? const Center(child: CircularProgressIndicator())
+            ? const CargandoBlanco()
             : LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(

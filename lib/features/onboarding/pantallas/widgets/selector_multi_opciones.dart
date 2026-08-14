@@ -147,6 +147,9 @@ class _SelectorMultiOpcionesState extends State<SelectorMultiOpciones> {
                   child: TextField(
                     controller: _textoCtrl,
                     focusNode: _focusNode,
+                    // Tocar una sugerencia no debe desenfocar el campo: si se
+                    // oculta la lista antes del tap-up, el onTap nunca dispara.
+                    onTapOutside: (_) {},
                     onChanged: (v) {
                       setState(() => _consulta = v);
                     },

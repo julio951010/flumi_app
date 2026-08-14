@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:drift/native.dart';
 
 import 'package:Flumi/core/base_datos_local/database.dart';
+import 'package:Flumi/core/servicios/sync_service.dart';
 import 'package:Flumi/features/configuracion/pantallas/informacion_basica_pantalla.dart';
 import 'package:Flumi/features/onboarding/pantallas/cuestionario_perfil_pantalla.dart';
 import 'package:Flumi/features/perfiles/pantallas/subpaginas_perfil.dart';
@@ -22,7 +23,11 @@ Future<void> _cargarFuentes() async {
 }
 
 class _FakeRepositorio extends PerfilRepositorio {
-  _FakeRepositorio() : super(AppDatabase(NativeDatabase.memory()));
+  _FakeRepositorio()
+      : super(
+          AppDatabase(NativeDatabase.memory()),
+          SyncService(AppDatabase(NativeDatabase.memory())),
+        );
 
   @override
   Future<Usuario?> obtenerPerfilPropio() async => null;

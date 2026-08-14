@@ -87,13 +87,17 @@ class _RestablecerContrasenaPantallaState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Restablecer Contraseña',
-                        style: TextStyle(
-                          color: primario,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
+                      SizedBox(
+                        width: double.infinity,
+                        child: Text(
+                          'Restablecer Contraseña',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: primario,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),

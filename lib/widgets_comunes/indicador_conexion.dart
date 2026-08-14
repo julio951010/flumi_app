@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/servicios/connectivity_service.dart';
 import '../core/servicios/notificacion_servicio.dart';
+import 'sin_conexion_pantalla.dart';
 
 class IndicadorConexion extends StatefulWidget {
   final Widget child;
@@ -24,22 +25,21 @@ class _IndicadorConexionState extends State<IndicadorConexion> {
       if (ahora == _conectado) return;
       setState(() => _conectado = ahora);
 
-      if (!ahora) {
-        NotificacionServicio.advertencia(
-          context,
-          'Sin conexión — los cambios se sincronizarán después',
-        );
-      } else {
-        NotificacionServicio.exito(
-          context,
-          'Conexión restablecida',
-        );
+      if (ahora) {
+        NotificacionServicio.exito(context, 'Conexión restablecida');
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return widget.child;
+    if (_conectado) return widget.child;
+    return SinConexionPantalla(
+      onReintentar: () {
+        if (ConnectivityService.instancia.hayConexion && mounted) {
+          setState(() => _conectado = true);
+        }
+      },
+    );
   }
 }

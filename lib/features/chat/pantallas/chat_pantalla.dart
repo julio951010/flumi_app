@@ -70,6 +70,24 @@ class _ChatPantallaState extends State<ChatPantalla> {
           usuario: u,
           esMatch: widget.esMatch,
           esMeGusta: widget.esMeGusta,
+          onChat: () => _abrirChatDirecto(),
+        ),
+      ),
+    );
+  }
+
+  void _abrirChatDirecto() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPantalla(
+          repositorio: widget.repositorio,
+          otroUsuarioId: widget.otroUsuarioId,
+          miId: widget.miId,
+          nombreOtro: widget.nombreOtro,
+          online: widget.online,
+          esMeGusta: widget.esMeGusta,
+          esMatch: widget.esMatch,
         ),
       ),
     );
@@ -96,6 +114,12 @@ class _ChatPantallaState extends State<ChatPantalla> {
               ),
             ),
             ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.black87),
+              title: const Text('Borrar conversación',
+                  style: TextStyle(fontSize: 15, color: Colors.black87)),
+              onTap: () => Navigator.pop(ctx, 'borrar'),
+            ),
+            ListTile(
               leading: const Icon(Icons.flag_outlined, color: Colors.black87),
               title: const Text('Reportar este perfil',
                   style: TextStyle(fontSize: 15)),
@@ -113,6 +137,34 @@ class _ChatPantallaState extends State<ChatPantalla> {
       ),
     );
     if (!mounted || opcion == null) return;
+    if (opcion == 'borrar') {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Borrar conversación'),
+          content: const Text(
+              '¿Seguro que quieres borrar esta conversación? Esta acción no se puede deshacer.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Borrar',
+                  style: TextStyle(color: Colors.redAccent)),
+            ),
+          ],
+        ),
+      );
+      if (confirm == true) {
+        await widget.repositorio
+            .borrarConversacion(widget.otroUsuarioId, widget.miId);
+        if (!mounted) return;
+        Navigator.pop(context);
+      }
+      return;
+    }
     final mensaje = opcion == 'reportar'
         ? 'Reporte enviado. \u00a1Gracias por ayudarnos!'
         : 'Usuario bloqueado';
@@ -319,7 +371,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 color: Colors.grey[100],
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.more_horiz, color: Colors.black87, size: 22),
+              child: const Icon(Icons.more_vert, color: Colors.black87, size: 22),
             ),
           ),
         ],
