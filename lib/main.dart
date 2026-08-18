@@ -9,11 +9,12 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/env.dart';
-import 'core/api/mock_data.dart';
 import 'core/base_datos_local/database.dart';
 import 'core/constantes/constantes.dart';
 import 'core/estilos/tema.dart';
 import 'core/servicios/connectivity_service.dart';
+import 'core/servicios/estado_servidor_servicio.dart';
+import 'core/servicios/notificacion_servicio.dart';
 import 'core/servicios/sync_service.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
@@ -41,6 +42,7 @@ import 'widgets_comunes/barra_navegacion.dart';
 import 'core/servicios/suscripcion_servicio.dart';
 import 'core/servicios/visitas_historial_servicio.dart';
 import 'core/servicios/votos_servicio.dart';
+import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/indicador_conexion.dart';
 import 'widgets_comunes/logo_flotante.dart';
 import 'widgets_comunes/encabezado_pagina.dart';
@@ -75,6 +77,10 @@ void main() async {
   syncService = SyncService(database);
 
   await ConnectivityService.instancia.iniciar();
+  EstadoServidorServicio.instancia.iniciarSondeo();
+  // Push móvil (FCM): no bloquea el arranque y no lanza si Firebase aún no
+  // está configurado.
+  unawaited(inicializarPush());
   ConnectivityService.instancia.stream.listen((estado) {
     if (estado == EstadoConexion.conectado) {
       syncService.sincronizarTodo(alIniciarSesion: true);
@@ -86,7 +92,7 @@ void main() async {
   suscripcionServicio = SuscripcionServicio(database, syncService);
   visitasServicio = VisitasServicio(database, syncService);
   historialLikesServicio = HistorialLikesServicio(database, syncService);
-  votosServicio = VotosServicio();
+  votosServicio = VotosServicio(database, syncService);
   await suscripcionServicio.cargarSuscripcion();
 
   runApp(const FlumiApp());
@@ -275,11 +281,16 @@ bool _esperandoSincronizacion = false;
           _iniciarEsperaSincronizacion();
           await syncService.sincronizarTodo(userId: idSesion, alIniciarSesion: true);
           await _verificarPerfilCompletado(idSesion);
+          unawaited(registrarTokenPush());
           _terminarEsperaSincronizacion();
           return;
         }
         await syncService.sincronizarTodo(userId: idSesion, alIniciarSesion: true);
         await _verificarPerfilCompletado(idSesion);
+        unawaited(registrarTokenPush());
+      }
+      if (estado.event == 'SIGNED_OUT') {
+        unawaited(eliminarTokenPush());
       }
       setState(() {
         _autenticado = estado.user != null;
@@ -470,50 +481,6 @@ bool _esperandoSincronizacion = false;
   }
 
   Future<void> _verificarPerfilCompletado([String? userId]) async {
-    if (kUsarModoMock) {
-      try {
-        List<Usuario> propios;
-        try {
-          propios = await (database.select(database.usuarios)
-                ..where((u) => u.esPerfilPropio.equals(true)))
-              .get();
-        } catch (_) {
-          propios = [];
-        }
-
-        if (propios.isEmpty) {
-          final nombre = authService.usuarioActual?['nombre'] as String? ?? '';
-          final usuario = await GeneradorMock.crearUsuarioPropio(database, nombre);
-          authService.actualizarIdLocal(usuario.uuid);
-          if (mounted) setState(() => _perfilCompletado = true);
-          return;
-        }
-
-        // Alinear la sesión local con un perfil propio real: la app escribe
-        // (nombre, perfilCompletado) usando authService.usuarioActual['id'].
-        final sesionId = authService.usuarioActual?['id'] as String?;
-        Usuario? porSesion;
-        for (final p in propios) {
-          if (p.uuid == sesionId) {
-            porSesion = p;
-            break;
-          }
-        }
-        final propio = porSesion ?? propios.first;
-        if (propio.uuid != sesionId) {
-          authService.actualizarIdLocal(propio.uuid);
-          final usr = authService.usuarioActual;
-          if (usr != null) await LocalTokenStore.guardarUsuario(usr);
-        }
-        if (mounted) {
-          setState(() => _perfilCompletado = propio.perfilCompletado);
-        }
-      } catch (_) {
-        if (mounted) setState(() => _perfilCompletado = true);
-      }
-      return;
-    }
-
     // App real (Supabase): garantizamos el perfil local y leemos si está
     // completado para decidir si mostrar el onboarding de perfil/cuestionario.
     try {
@@ -684,12 +651,35 @@ class _NavegacionPrincipal extends StatefulWidget {
 
 class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   int _indice = 1;
+  int _indiceMeGusta = 0;
   FiltrosEncuentros _filtros = FiltrosEncuentros();
   final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
   final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
+  /// Pendientes REALES (mensajes + sociales): alimenta el chip de la campana
+  /// dentro de la página de Chats, que nunca se apaga al entrar.
+  final ValueNotifier<int> _notificacionesPendientes = ValueNotifier<int>(0);
+  final ValueNotifier<int> _socialesNoLeidas = ValueNotifier<int>(0);
+  int _chatsNoLeidos = 0;
   final ValueNotifier<int> _meGustaNoLeidas = ValueNotifier<int>(0);
-  final ContadorMeGusta _contadorMeGusta = ContadorMeGusta();
+  final ContadorMeGusta _contadorMeGusta = ContadorMeGusta(db: database);
   StreamSubscription? _convSub;
+  StreamSubscription? _likesRealtimeSub;
+  StreamSubscription? _visitasRealtimeSub;
+  StreamSubscription? _likesWatchSub;
+  StreamSubscription? _visitasWatchSub;
+  StreamSubscription? _matchesSub;
+  final Set<String> _badgeLikes = <String>{};
+  final Set<String> _badgeVisitas = <String>{};
+  final Set<String> _badgeMatches = <String>{};
+  final Set<String> _badgeMisLikes = <String>{};
+  final Set<String> _idsMatch = <String>{};
+  bool _likesSembrado = false;
+  bool _visitasSembrado = false;
+  bool _matchesSembrado = false;
+  bool _misLikesSembrado = false;
+  int _genRealtime = 0;
+  int _reintentosRealtime = 0;
+  static const int _realtimeMaxReintentos = 10;
 
   static const _nombresPaginas = [
     'Cerca de ti',
@@ -704,42 +694,323 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     super.initState();
     final miId = authService.usuarioActual!['id'] as String;
     _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) {
-      _notificacionesNoLeidas.value =
+      _chatsNoLeidos =
           resumenes.fold<int>(0, (acc, r) => acc + r.noLeidos);
+      _actualizarBadgeNotificaciones();
     });
-    _inicializarContadoresMeGusta();
+    // Fase 5: los badges de Me Gusta se derivan de la BD local (dedupe por
+    // uuid), así funcionan aunque el socket de Realtime de este navegador se
+    // caiga o tarde: lo que llegue por sync también incrementa.
+    _observarInteraccionesLocales(miId);
+    _iniciarRealtimeInteracciones(miId);
+    // Fase 4: chat en vivo app-wide (mensajes y matches); la conexión de
+    // cada pantalla de chat es redundante e idempotente (upsert por uuid).
+    chatRepositorio.suscribirseARealtime(miId);
+    chatRepositorio.iniciarPresencia(miId);
+    unawaited(votosServicio.inicializar());
+    unawaited(_inicializarContadoresMeGusta(miId));
+    unawaited(solicitarPermisoNotificaciones());
+    // Se restaura el feedback cuando el servidor vuelve a responder.
+    EstadoServidorServicio.instancia.addListener(_alCambiarEstadoServidor);
   }
 
-  Future<void> _inicializarContadoresMeGusta() async {
-    // Inicializar contadores de Me Gusta desde la BD real (no mock)
+  bool _servidorAvisoRestaurado = false;
+
+  void _alCambiarEstadoServidor() {
+    if (!mounted) return;
+    if (EstadoServidorServicio.instancia.servidorDisponible) {
+      if (_servidorAvisoRestaurado) {
+        _servidorAvisoRestaurado = false;
+        NotificacionServicio.exito(
+            context, 'Conexión con el servidor restablecida');
+      }
+    } else {
+      if (!_servidorAvisoRestaurado) {
+        _servidorAvisoRestaurado = true;
+        NotificacionServicio.advertencia(
+          context,
+          'Fallo de conexión con el servidor. '
+          'Los cambios se guardarán cuando se recupere.',
+        );
+      }
+    }
+  }
+
+  /// Badge de la pestaña Chats = mensajes no leídos + notificaciones nuevas
+  /// (likes, visitas y matches) que aún no se revisaron en la bandeja.
+  void _actualizarBadgeNotificaciones() {
+    final total = _chatsNoLeidos + _socialesNoLeidas.value;
+    _notificacionesPendientes.value = total;
+    // Mientras se está viendo la pestaña Chats el indicador del nav queda
+    // apagado; el chip de la campana (pendientes reales) se mantiene.
+    _notificacionesNoLeidas.value = _indice == 3 ? 0 : total;
+  }
+
+  /// Registra una notificación social nueva: sube el badge de Chats, refresca
+  /// la pestaña Me Gusta y avisa con una notificación del navegador si el
+  /// usuario no está mirando la app.
+  Future<void> _registrarNotificacionSocial(
+      String tipo, String usuarioId) async {
+    _socialesNoLeidas.value++;
+    _actualizarBadgeNotificaciones();
+    final u = await (database.select(database.usuarios)
+          ..where((u) => u.uuid.equals(usuarioId))
+          ..limit(1))
+        .getSingleOrNull();
+    final nombre = u?.nombre ?? 'Un usuario';
+    final texto = switch (tipo) {
+      'like' => '$nombre le dio Me Gusta a tu perfil',
+      'visita' => '$nombre visit\u00f3 tu perfil',
+      _ => '\u00a1Hiciste match con $nombre!',
+    };
+    await notificarNavegador('Flumi', texto);
+  }
+
+  /// Observa la BD local (alimentada por Realtime y por sync) e incrementa
+  /// el badge solo con interacciones NUEVAS (dedupe por uuid). El primer
+  /// evento de cada watch siembra el estado previo sin contar nada.
+  void _observarInteraccionesLocales(String miId) {
+    _likesWatchSub =
+        database.select(database.historialLikes).watch().listen((filas) {
+      final recibidos =
+          filas.where((h) => h.usuarioLikeadoId == miId).toList();
+      // Mis likes enviados: incrementan el badge de la sección "Mis Likes"
+      // en vivo, cuando le doy Me Gusta a alguien.
+      final enviados = filas.where((h) => h.usuarioId == miId).toList();
+      if (!_likesSembrado) {
+        _likesSembrado = true;
+        _misLikesSembrado = true;
+        _badgeLikes.addAll(recibidos.map((h) => h.uuid));
+        _badgeMisLikes.addAll(enviados.map((h) => h.uuid));
+        return;
+      }
+      for (final h in recibidos) {
+        if (_badgeLikes.add(h.uuid)) {
+          // Si ya es match su tarjeta vive en Matches: no cuenta aquí.
+          if (_idsMatch.contains(h.usuarioId)) continue;
+          _meGustaNoLeidas.value++;
+          _contadorMeGusta.incrementarLikes();
+          unawaited(_registrarNotificacionSocial('like', h.usuarioId));
+        }
+      }
+      if (_misLikesSembrado) {
+        for (final h in enviados) {
+          if (_badgeMisLikes.add(h.uuid)) {
+            _contadorMeGusta.incrementarMisLikes();
+          }
+        }
+      } else {
+        _misLikesSembrado = true;
+        _badgeMisLikes.addAll(enviados.map((h) => h.uuid));
+      }
+    });
+    _visitasWatchSub = database.select(database.visitas).watch().listen((filas) {
+      final recibidas = filas.where((v) => v.visitadoId == miId).toList();
+      if (!_visitasSembrado) {
+        _visitasSembrado = true;
+        _badgeVisitas.addAll(recibidas.map((v) => v.uuid));
+        return;
+      }
+      for (final v in recibidas) {
+        if (_badgeVisitas.add(v.uuid)) {
+          // Visitas de un match no cuentan: su tarjeta está en Matches.
+          if (_idsMatch.contains(v.visitanteId)) continue;
+          _meGustaNoLeidas.value++;
+          _contadorMeGusta.incrementarVisitas();
+          unawaited(_registrarNotificacionSocial('visita', v.visitanteId));
+        }
+      }
+    });
+    _matchesSub = database.select(database.matches).watch().listen((filas) {
+      final mios =
+          filas.where((m) => m.usuarioAId == miId || m.usuarioBId == miId);
+      if (!_matchesSembrado) {
+        _matchesSembrado = true;
+        _badgeMatches.addAll(mios.map((m) => m.uuid));
+        _idsMatch.addAll(mios.map((m) =>
+            m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId));
+        return;
+      }
+      for (final m in mios) {
+        if (_badgeMatches.add(m.uuid)) {
+          _meGustaNoLeidas.value++;
+          _contadorMeGusta.incrementarMatches(1);
+          final otroId = m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId;
+          _idsMatch.add(otroId);
+          _contadorMeGusta.marcarMatch(otroId);
+          unawaited(_registrarNotificacionSocial('match', otroId));
+        }
+      }
+    });
+  }
+
+  /// Fase 3: recibe en vivo los Me Gusta recibidos y las visitas. Solo
+  /// persiste en SQLite (el badge lo actualiza el watch de la BD). Si el
+  /// socket se cae (pestaña vieja, navegador dormido), se reconecta solo.
+  void _iniciarRealtimeInteracciones(String miId) {
+    if (kUsarServidorLocal) return;
+    final gen = ++_genRealtime;
+    final client = Supabase.instance.client;
+    final likesSub = client
+        .from('historial_likes')
+        .stream(primaryKey: ['id'])
+        .eq('usuario_likeado_id', miId)
+        .listen((eventos) async {
+      for (final fila in eventos) {
+        final id = fila['id'] as String?;
+        if (id == null) continue;
+        try {
+          await database.into(database.historialLikes).insertOnConflictUpdate(
+                HistorialLikesCompanion.insert(
+                  uuid: id,
+                  usuarioId: fila['usuario_id'] as String,
+                  usuarioLikeadoId: miId,
+                  timestamp: Value(DateTime.parse(fila['timestamp'] as String)),
+                  pendienteDeSincronizar: const Value(false),
+                ),
+              );
+        } catch (_) {}
+      }
+    }, onError: (Object _) => _reconectarRealtime(miId, gen));
+    if (gen != _genRealtime) {
+      likesSub.cancel();
+      return;
+    }
+    _likesRealtimeSub?.cancel();
+    _likesRealtimeSub = likesSub;
+
+    final visitasSub = client
+        .from('visitas')
+        .stream(primaryKey: ['id'])
+        .eq('visitado_id', miId)
+        .listen((eventos) async {
+      for (final fila in eventos) {
+        final id = fila['id'] as String?;
+        if (id == null) continue;
+        try {
+          await database.into(database.visitas).insertOnConflictUpdate(
+                VisitasCompanion.insert(
+                  uuid: id,
+                  visitanteId: fila['visitante_id'] as String,
+                  visitadoId: miId,
+                  timestamp: Value(DateTime.parse(fila['timestamp'] as String)),
+                  pendienteDeSincronizar: const Value(false),
+                ),
+              );
+        } catch (_) {}
+      }
+    }, onError: (Object _) => _reconectarRealtime(miId, gen));
+    if (gen != _genRealtime) {
+      visitasSub.cancel();
+      return;
+    }
+    _visitasRealtimeSub?.cancel();
+    _visitasRealtimeSub = visitasSub;
+  }
+
+  void _reconectarRealtime(String miId, int gen) {
+    if (gen != _genRealtime) return;
+    if (_reintentosRealtime >= _realtimeMaxReintentos) return;
+    _reintentosRealtime++;
+    Timer(const Duration(seconds: 3), () {
+      if (mounted && gen == _genRealtime) {
+        _iniciarRealtimeInteracciones(miId);
+      }
+    });
+  }
+
+  /// Amplía la búsqueda cuando no hay resultados: quita distancia, amplía el
+  /// rango de edad al máximo y pide un radio mayor al servidor.
+  void _ampliarBusqueda() {
+    setState(() {
+      _filtros = FiltrosEncuentros(
+        edadRango: const RangeValues(18, 99),
+        distanciaKm: 0,
+      );
+    });
+    (database.select(database.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true))
+          ..limit(1))
+        .getSingleOrNull()
+        .then((p) {
+          if (p != null && (p.ubicacionLat != 0 || p.ubicacionLon != 0)) {
+            return syncService.sincronizarFeedCercano(
+              lat: p.ubicacionLat,
+              lon: p.ubicacionLon,
+              radioMetros: 50000,
+              filtros: SyncService.filtrosARpcJson(ampliar: true),
+            );
+          }
+        })
+        .catchError((_) {});
+  }
+
+  Future<void> _inicializarContadoresMeGusta(String miId) async {
+    // Restaura las tarjetas ya vistas para que al recargar no vuelvan a
+    // contar como nuevas en los chips de la página Me Gusta.
+    unawaited(_contadorMeGusta.cargarVistos());
+    // Refresca el espejo local para que el watch de la BD tenga la foto real
+    // y el badge cuente los likes/visitas pendientes desde la última vista.
+    try {
+      await syncService.sincronizarHistorialLikes(miId);
+      await syncService.sincronizarVisitas(miId);
+    } catch (_) {}
     final gustados = await historialLikesServicio.obtenerHistorial(limite: 1000);
-    final misLikesCount = gustados.length;
-    final visitasCount = await visitasServicio.contarVisitas();
-    // Likes recibidos y matches requieren datos de otros usuarios que se sincronizan
-    // vía sync; si no hay datos locales, se muestran como 0 hasta que el sync traiga info.
-    final recibidosCount = 0;
-    final matchesCount = 0;
+    // Quita del conteo de Me gustan los que ya son match (viven en su pestaña).
+    final matchesLocales = await database.select(database.matches).get();
+    final otrosMatch = <String>{
+      for (final m in matchesLocales)
+        if (m.usuarioAId == miId || m.usuarioBId == miId)
+          m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId,
+    };
+    final gustadosSinMatch =
+        gustados.where((h) => !otrosMatch.contains(h.usuarioLikeadoId)).length;
+    // Si llega en vivo un like/visita/match mientras este inicializador hace
+    // sus awaits (p. ej. match justo al arrancar), no debe pisar lo contado:
+    // aplica la foto inicial solo para categorías que el watch aún no maneja.
     _contadorMeGusta.inicializar(
-      likes: recibidosCount,
-      visitas: visitasCount,
-      misLikes: misLikesCount,
-      matches: matchesCount,
+      likes: (_likesSembrado || _badgeLikes.isNotEmpty)
+          ? _contadorMeGusta.likesNoLeidos
+          : 0,
+      visitas: (_visitasSembrado || _badgeVisitas.isNotEmpty)
+          ? _contadorMeGusta.visitasNoLeidas
+          : 0,
+      misLikes: gustadosSinMatch,
+      matches: (_matchesSembrado || _badgeMatches.isNotEmpty)
+          ? _contadorMeGusta.matchesNoLeidos
+          : 0,
     );
-    _meGustaNoLeidas.value = recibidosCount + visitasCount + matchesCount;
   }
 
   @override
   void dispose() {
+    chatRepositorio.cancelarRealtime();
     _convSub?.cancel();
     _convSub = null;
+    _likesRealtimeSub?.cancel();
+    _likesRealtimeSub = null;
+    _visitasRealtimeSub?.cancel();
+    _visitasRealtimeSub = null;
+    _likesWatchSub?.cancel();
+    _likesWatchSub = null;
+    _visitasWatchSub?.cancel();
+    _visitasWatchSub = null;
+    _matchesSub?.cancel();
+    _matchesSub = null;
     _undoSignal.dispose();
     _contadorMeGusta.dispose();
     _meGustaNoLeidas.dispose();
+    _socialesNoLeidas.dispose();
     _notificacionesNoLeidas.dispose();
+    _notificacionesPendientes.dispose();
+    EstadoServidorServicio.instancia.removeListener(_alCambiarEstadoServidor);
     super.dispose();
   }
 
   void _abrirBandejaNotificaciones() {
+    // Chrome ignora requestPermission() sin gesto de usuario: el tap sobre la
+    // campana es el momento natural para pedirlo.
+    unawaited(solicitarPermisoNotificaciones());
     final miId = authService.usuarioActual!['id'] as String;
     Navigator.push(
       context,
@@ -747,25 +1018,47 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         builder: (_) => BandejaNotificacionesPantalla(
           db: database,
           miId: miId,
+          visitasServicio: visitasServicio,
+          historialLikesServicio: historialLikesServicio,
+          suscripcionServicio: suscripcionServicio,
           onAbierto: _marcarBandejaVista,
+          onNavegarA: (tab, subindice) {
+            setState(() {
+              _indice = tab;
+              _indiceMeGusta = subindice;
+            });
+            if (tab == 2) _meGustaNoLeidas.value = 0;
+            _actualizarBadgeNotificaciones();
+          },
         ),
       ),
     );
   }
 
   void _marcarBandejaVista() {
-    _meGustaNoLeidas.value = 0;
-    _notificacionesNoLeidas.value = 0;
+    // Solo la bandeja de notificaciones: sus notificaciones sociales se
+    // revisan aquí. El corazón de Me Gusta no se toca (se limpia al
+    // revisar la página o con "Marcar todos como vistos").
+    _socialesNoLeidas.value = 0;
+    _actualizarBadgeNotificaciones();
   }
 
   void _marcarNotificacionesVistas() {
+    // Solo limpia lo de la página Me gusta (chips del contador e indicador
+    // del corazón en el bottom nav). Los chats y la bandeja de
+    // notificaciones se limpian al abrirlos.
     _contadorMeGusta.marcarTodasVistas();
-    _marcarBandejaVista();
+    _meGustaNoLeidas.value = 0;
   }
 
   void _manejarOpcionNotificaciones(String opcion) {
-    if (opcion == 'marcar_leidos' || opcion == 'marcar_vistos') {
+    if (opcion == 'marcar_vistos') {
+      // Desde la página Me Gusta: limpia solo su página.
       _marcarNotificacionesVistas();
+    } else if (opcion == 'marcar_leidos') {
+      // Desde la pestaña Chats: marca solo las conversaciones como leídas.
+      final miId = authService.usuarioActual!['id'] as String;
+      unawaited(chatRepositorio.marcarTodasConversacionesLeidas(miId));
     }
   }
 
@@ -840,20 +1133,24 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         db: database,
         miId: miId,
         filtros: _filtros,
+        syncService: syncService,
         suscripcionServicio: suscripcionServicio,
         visitasServicio: visitasServicio,
         historialLikesServicio: historialLikesServicio,
         votosServicio: votosServicio,
+        onAmpliarBusqueda: _ampliarBusqueda,
       ),
       EncuentrosPantalla(
         db: database,
         miId: miId,
         filtros: _filtros,
         undoSignal: _undoSignal,
+        syncService: syncService,
         suscripcionServicio: suscripcionServicio,
         visitasServicio: visitasServicio,
         historialLikesServicio: historialLikesServicio,
         votosServicio: votosServicio,
+        onAmpliarBusqueda: _ampliarBusqueda,
       ),
       MeGustaPantalla(
         db: database,
@@ -862,6 +1159,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         suscripcionServicio: suscripcionServicio,
         visitasServicio: visitasServicio,
         historialLikesServicio: historialLikesServicio,
+        indiceInicial: _indiceMeGusta,
       ),
       ChatsPantalla(
         db: database,
@@ -924,7 +1222,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                           )
                         : _indice == 3
                         ? ValueListenableBuilder<int>(
-                            valueListenable: _notificacionesNoLeidas,
+                            valueListenable: _notificacionesPendientes,
                             builder: (context, total, _) => Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -976,6 +1274,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                               )
                         : null,
               ),
+              // Feedback de fallos de conexión/timeout con el servidor:
+              // aviso transitorio (notificación flotante) cuando Supabase no
+              // responde; al recuperarse se avisa con la notificación de éxito.
               Expanded(child: pantallas[_indice]),
             ],
           ),
@@ -996,7 +1297,24 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
             builder: (context, chatsCount, _) {
               return BarraNavegacion(
                 indiceActual: _indice,
-                onCambio: (i) => setState(() => _indice = i),
+                onCambio: (i) {
+                  setState(() => _indice = i);
+                  // Al abrir cada página se limpia su indicador del nav:
+                  // Me Gusta → corazón; Chats → mensajes no leídos.
+                  if (i == 2) {
+                    // Desde el nav se vuelve a la sub-pestaña inicial; la
+                    // sub-pestaña exacta solo la eligen las notificaciones.
+                    _indiceMeGusta = 0;
+                    _meGustaNoLeidas.value = 0;
+                  }
+                  if (i == 3) {
+                    // Solo se apaga el indicador del nav: los chats NO se
+                    // marcan leídos (eso ocurre al abrir la conversación).
+                    _notificacionesNoLeidas.value = 0;
+                  } else {
+                    _actualizarBadgeNotificaciones();
+                  }
+                },
                 meGustaNoLeidas: meGustaCount,
                 chatsNoLeidos: chatsCount,
               );

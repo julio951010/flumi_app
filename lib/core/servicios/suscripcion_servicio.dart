@@ -197,32 +197,65 @@ class SuscripcionServicio with ChangeNotifier {
     }
   }
 
-  Future<bool> puedeUsarMeGusta() async {
+  /// Revalida de inmediato el espejo de usos contra el servidor (best-effort:
+  /// sin conexión o error, se queda con lo local). El servidor es la fuente
+  /// de verdad (el RPC valida el límite diario); el contador local es solo
+  /// un espejo para no depender de la red en la UI.
+  Future<void> _refrescarUsosDesdeRemoto(String userId) async {
+    try {
+      await _sync.sincronizarUsosDiarios(userId);
+      await _cargarUsosHoy(userId);
+    } catch (_) {}
+  }
+
+  Future<bool> puedeUsarMeGusta({bool revalidar = false}) async {
+    if (revalidar) await _revalidarSiNecesario();
     if (!limites.meGustasPorDia.isNegative) {
-      return _usosHoy!.meGustasUsados < limites.meGustasPorDia;
+      return (_usosHoy?.meGustasUsados ?? 0) < limites.meGustasPorDia;
     }
     return true;
   }
 
   Future<bool> puedeUsarDeshacer() async {
     if (!limites.deshacerPorDia.isNegative) {
-      return _usosHoy!.deshacerUsados < limites.deshacerPorDia;
+      return (_usosHoy?.deshacerUsados ?? 0) < limites.deshacerPorDia;
     }
     return true;
   }
 
-  Future<bool> puedeUsarSuperlike() async {
+  Future<bool> puedeUsarSuperlike({bool revalidar = false}) async {
+    if (revalidar) await _revalidarSiNecesario();
     if (!limites.superlikesPorDia.isNegative) {
-      return _usosHoy!.superlikesUsados < limites.superlikesPorDia;
+      return (_usosHoy?.superlikesUsados ?? 0) < limites.superlikesPorDia;
     }
     return true;
   }
 
   Future<bool> puedeVerCerca() async {
     if (!limites.vistasCercaPorDia.isNegative) {
-      return _usosHoy!.vistasCercaUsadas < limites.vistasCercaPorDia;
+      return (_usosHoy?.vistasCercaUsadas ?? 0) < limites.vistasCercaPorDia;
     }
     return true;
+  }
+
+  Future<void> _revalidarSiNecesario() async {
+    final userList = await (_db.select(_db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true))
+          ..limit(1))
+        .get();
+    final userId = userList.isNotEmpty ? userList.first.uuid : null;
+    if (userId == null) return;
+    // Revalida solo si el espejo local dice "sin cupo", para no bloquear
+    // por un contador rancio (p. ej. tras limpiar el remoto de pruebas).
+    final meGustasBloqueadoPorEspejo =
+        !limites.meGustasPorDia.isNegative &&
+            (_usosHoy?.meGustasUsados ?? 0) >= limites.meGustasPorDia;
+    final superlikesBloqueadoPorEspejo =
+        !limites.superlikesPorDia.isNegative &&
+            (_usosHoy?.superlikesUsados ?? 0) >= limites.superlikesPorDia;
+    if (meGustasBloqueadoPorEspejo || superlikesBloqueadoPorEspejo) {
+      await _refrescarUsosDesdeRemoto(userId);
+    }
   }
 
   Future<bool> puedeVerVisitas(int visitasActuales) async {

@@ -1,12 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/constantes/constantes.dart';
+import '../../../core/servicios/connectivity_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
 import '../../../widgets_comunes/banner_gradiente.dart';
+import '../../../widgets_comunes/estado_vacio_encuentros.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/tarjeta_detalle_usuario.dart';
 import '../../../widgets_comunes/tarjeta_usuario.dart';
@@ -19,20 +25,24 @@ class CercaDeTiPantalla extends StatefulWidget {
   final AppDatabase db;
   final String miId;
   final FiltrosEncuentros filtros;
+  final SyncService syncService;
   final SuscripcionServicio suscripcionServicio;
   final VisitasServicio visitasServicio;
   final HistorialLikesServicio historialLikesServicio;
   final VotosServicio votosServicio;
+  final VoidCallback? onAmpliarBusqueda;
 
   const CercaDeTiPantalla({
     super.key,
     required this.db,
     required this.miId,
     required this.filtros,
+    required this.syncService,
     required this.suscripcionServicio,
     required this.visitasServicio,
     required this.historialLikesServicio,
     required this.votosServicio,
+    this.onAmpliarBusqueda,
   });
 
   @override
@@ -40,13 +50,22 @@ class CercaDeTiPantalla extends StatefulWidget {
 }
 
 class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
+  static const _loteTamanio = 10;
+  static const _umbralScroll = 400.0;
+
   List<Usuario> _usuarios = [];
   List<Usuario> _filtrados = [];
+  Usuario? _propio;
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
   double _miLat = 0;
   double _miLon = 0;
   bool _cargando = true;
+  int _offset = 0;
+  bool _hayMasRemoto = true;
+  bool _cargandoMas = false;
+  bool _amplitudAplicada = false;
+  final ScrollController _scrollCtrl = ScrollController();
   late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
   late final VisitasServicio _visitas = widget.visitasServicio;
@@ -57,12 +76,16 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   void initState() {
     super.initState();
     widget.votosServicio.addListener(_aplicarFiltros);
+    _scrollCtrl.addListener(_alHacerScroll);
     _cargar();
   }
 
   @override
   void dispose() {
     widget.votosServicio.removeListener(_aplicarFiltros);
+    _scrollCtrl
+      ..removeListener(_alHacerScroll)
+      ..dispose();
     super.dispose();
   }
 
@@ -76,22 +99,48 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
 
   Future<void> _cargar() async {
     try {
-      final todos = await (widget.db.select(widget.db.usuarios)).get();
-      final propios =
-          todos.where((u) => u.uuid == widget.miId || u.esPerfilPropio).toList();
-      final propio = propios.isEmpty ? null : propios.first;
-      todos.removeWhere((u) => u.uuid == widget.miId || u.esPerfilPropio);
-      final idsGustados =
-          GeneradorMock.obtenerMisLikes().map((i) => i.usuarioId).toSet();
-      final idsRecibidos = GeneradorMock.obtenerLikesRecibidos()
-          .map((i) => i.usuarioId)
-          .toSet();
-      todos.removeWhere((u) => idsGustados.contains(u.uuid));
+      _offset = 0;
+      _hayMasRemoto = true;
+      _cargandoMas = false;
+      _amplitudAplicada = false;
+
+      final propio = await (widget.db.select(widget.db.usuarios)
+            ..where((u) => u.esPerfilPropio.equals(true))
+            ..limit(1))
+          .getSingleOrNull();
+
+      // Fase 5: datos reales de interacción (adiós al mock).
+      final gustados = await widget.historialLikesServicio.obtenerIdsGustados();
+      final recibidos = await widget.historialLikesServicio.obtenerLikesRecibidos();
+      _idsGustados = gustados;
+      _idsRecibidos = recibidos;
+
+      // Fase 1: primer lote del RPC + llenado mínimo para mostrar la grilla
+      // pronto. Fase 2: si el RPC vuelve vacío con los filtros actuales, se
+      // reintenta con ampliación en el servidor antes de rendirse; las
+      // exclusiones (rechazos, gustados, bloqueos) se mantienen en ambos
+      // modos.
+      final acumulados = <Usuario>[];
+      while (acumulados.length < _loteTamanio && _hayMasRemoto) {
+        final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
+        if (lote.isEmpty) {
+          if (!_amplitudAplicada) {
+            _amplitudAplicada = true;
+            _offset = 0;
+            continue;
+          }
+          _hayMasRemoto = false;
+          break;
+        }
+        _offset += lote.length;
+        _hayMasRemoto = lote.length == _loteTamanio;
+        acumulados.addAll(_filtrar(lote, conAmpliacion: _amplitudAplicada));
+      }
+
       if (mounted) {
         setState(() {
-          _usuarios = todos;
-          _idsGustados = idsGustados;
-          _idsRecibidos = idsRecibidos;
+          _usuarios = acumulados;
+          _propio = propio;
           _miLat = propio?.ubicacionLat ?? 0;
           _miLon = propio?.ubicacionLon ?? 0;
           _cargando = false;
@@ -103,27 +152,111 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     }
   }
 
-  void _aplicarFiltros() {
+  /// Siguiente lote desde el RPC `perfiles_cercanos` (paginación por offset
+  /// en el servidor, ordenado por distancia). Con `conAmpliacion` el servidor
+  /// relaja todo menos las exclusiones (sin distancia, edad ni filtros).
+  Future<List<Usuario>> _siguienteLote({bool conAmpliacion = false}) async {
     final f = widget.filtros;
-    var lista = List<Usuario>.from(_usuarios);
+    final radioMetros = conAmpliacion
+        ? -1
+        : (f.distanciaKm > 0
+            ? (f.distanciaKm * 1000).round()
+            : feedRadioMetrosDefault);
+    return widget.syncService.consultarFeedRemoto(
+      lat: _miLat,
+      lon: _miLon,
+      radioMetros: radioMetros,
+      filtros: SyncService.filtrosARpcJson(
+        generos: f.generos,
+        edadMin: f.edadRango.start,
+        edadMax: f.edadRango.end,
+        enLineaAhora: f.enLineaAhora,
+        perfilesVerificados: f.perfilesVerificados,
+        ciudad: f.ubicacion,
+        ampliar: conAmpliacion,
+        orden: 'distancia',
+      ),
+      desde: _offset,
+      cuantos: _loteTamanio,
+    );
+  }
 
-    if (f.generos.isNotEmpty) {
+  /// Carga predictiva: al acercarse al final del scroll se trae el siguiente
+  /// lote en segundo plano (Fase 2).
+  Future<void> _cargarMas() async {
+    if (_cargandoMas || !_hayMasRemoto || _cargando) return;
+    _cargandoMas = true;
+    try {
+      while (_hayMasRemoto) {
+        final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
+        if (lote.isEmpty) {
+          if (!_amplitudAplicada) {
+            _amplitudAplicada = true;
+            _offset = 0;
+            continue;
+          }
+          _hayMasRemoto = false;
+          break;
+        }
+        _offset += lote.length;
+        _hayMasRemoto = lote.length == _loteTamanio;
+        final nuevas = _filtrar(lote, conAmpliacion: _amplitudAplicada);
+        if (nuevas.isEmpty) continue;
+        if (!mounted) return;
+        final existentes = _usuarios.map((u) => u.uuid).toSet();
+        _usuarios.addAll(nuevas.where((u) => !existentes.contains(u.uuid)));
+        break;
+      }
+      if (mounted && _cargandoMas) _aplicarFiltros();
+    } finally {
+      _cargandoMas = false;
+    }
+  }
+
+  void _alHacerScroll() {
+    if (_cargandoMas || !_hayMasRemoto || _cargando) return;
+    final pos = _scrollCtrl.position;
+    if (pos.pixels >= pos.maxScrollExtent - _umbralScroll) {
+      unawaited(_cargarMas());
+    }
+  }
+
+  /// Aplica los filtros a [entrada]. Con `conAmpliacion` se relaja la
+  /// búsqueda (sin distancia, en línea, rango de edad del filtro, etc.)
+  /// tal y como exige el estado límite de la Fase 3; el género y el rango
+  /// de edad ideal del perfil nunca se relajan.
+  List<Usuario> _filtrar(List<Usuario> entrada, {bool conAmpliacion = false}) {
+    final f = widget.filtros;
+    var lista = List<Usuario>.from(entrada);
+
+    // Criterios base del perfil ("¿A quién quieres conocer?" y rango de edad
+    // ideal): se respetan SIEMPRE, también en la ampliación de la Fase 3.
+    final propio = _propio;
+    if (propio != null) {
+      lista.removeWhere((u) => !cumpleCriteriosPerfil(propio, u));
+    }
+
+    if (!conAmpliacion && f.generos.isNotEmpty) {
       lista.removeWhere((u) =>
           !f.generos.any((g) => normalizarGenero(u.genero) == normalizarGenero(g)));
     }
 
-    lista.removeWhere((u) => u.edad < f.edadRango.start.toInt() ||
-        u.edad > f.edadRango.end.toInt());
+    final edadMin = conAmpliacion ? 18 : f.edadRango.start.toInt();
+    final edadMax = conAmpliacion ? 99 : f.edadRango.end.toInt();
+    lista.removeWhere((u) => u.edad < edadMin || u.edad > edadMax);
 
-    if (f.enLineaAhora) {
+    if (!conAmpliacion && f.enLineaAhora) {
       lista.removeWhere((u) => !_estaEnLinea(u));
     }
 
-    if (f.perfilesVerificados) {
+    if (!conAmpliacion && f.perfilesVerificados) {
       lista.removeWhere((u) => !u.verificadoStatus);
     }
 
-    if (f.distanciaKm > 0 && _miLat != 0 && _miLon != 0) {
+    if (!conAmpliacion &&
+        f.distanciaKm > 0 &&
+        _miLat != 0 &&
+        _miLon != 0) {
       lista.removeWhere((u) {
         if (u.ubicacionLat == 0 && u.ubicacionLon == 0) return false;
         return distanciaKmEntre(_miLat, _miLon, u.ubicacionLat, u.ubicacionLon) >
@@ -131,33 +264,70 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       });
     }
 
-    lista.removeWhere((u) => !cumpleFiltrosAvanzados(f, u));
+    if (!conAmpliacion) {
+      lista.removeWhere((u) => !cumpleFiltrosAvanzados(f, u));
+    }
 
-    lista.removeWhere((u) => widget.votosServicio.esRechazado(u.uuid));
+    lista.removeWhere((u) => _idsGustados.contains(u.uuid));
+    lista.removeWhere((u) => widget.votosServicio.esExcluidoPermanente(u.uuid));
 
-    if (mounted) setState(() => _filtrados = lista);
+    return lista;
+  }
+
+  void _aplicarFiltros() {
+    var lista = _filtrar(_usuarios, conAmpliacion: _amplitudAplicada);
+
+    // Fase 3: si se agotó la BD con el filtro actual, ampliamos
+    // automáticamente (sin distancia ni rango de edad) antes de rendirnos.
+    if (lista.isEmpty &&
+        _usuarios.isNotEmpty &&
+        !_hayMasRemoto &&
+        !_amplitudAplicada) {
+      final ampliados = _filtrar(_usuarios, conAmpliacion: true);
+      if (ampliados.isNotEmpty) {
+        _amplitudAplicada = true;
+        lista = ampliados;
+      }
+    }
+
+    // El orden por distancia ya lo aplica el servidor (orden='distancia').
+    // Regla de reciclaje de Nopes: nuevos primero; si quedan menos de 5 se
+    // agregan al final los rechazos reciclables (más antiguos primero). Los
+    // reciclados ya pasaron el filtro de distancia de _filtrar.
+
+    if (mounted) setState(() => _filtrados = widget.votosServicio.componerDeck(lista));
+  }
+
+  void _ampliarBusqueda() {
+    widget.onAmpliarBusqueda?.call();
+    setState(() => _cargando = true);
+    _cargar();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_cargando) return _esqueleto();
     if (_filtrados.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.people_outline, size: 80, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('No hay usuarios cerca',
-                style: TextStyle(fontSize: 18, color: Colors.grey[500])),
-          ],
-        ),
+      if (_hayMasRemoto) {
+        unawaited(_cargarMas());
+      }
+      return EstadoVacioEncuentros(
+        mensaje: 'No hay usuarios cerca con tus filtros',
+        icono: Icons.people_outline,
+        onAmpliarBusqueda: widget.onAmpliarBusqueda != null
+            ? () async => _ampliarBusqueda()
+            : null,
+        onRecargar: () async {
+          setState(() => _cargando = true);
+          await _cargar();
+        },
       );
     }
 
     return RefreshIndicator(
       onRefresh: _cargar,
       child: CustomScrollView(
+        controller: _scrollCtrl,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(child: _bannerAd()),
@@ -218,7 +388,8 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
           onChat: () => _abrirChat(usuario),
           onMeGusta: () => _meGusta(usuario),
           onRechazar: () {
-            widget.votosServicio.registrarRechazo(usuario.uuid);
+            // El "No me gusta" en Cerca de ti no registra rechazo: el perfil
+            // se mantiene en el feed (los rechazos solo aplican al mazo).
             Navigator.pop(context);
           },
         ),
@@ -227,22 +398,37 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   }
 
   Future<bool> _meGusta(Usuario usuario) async {
-    final puede = await _suscripcion.puedeUsarMeGusta();
+    final puede = await _suscripcion.puedeUsarMeGusta(revalidar: true);
     if (!puede) {
       _mostrarBloqueoMeGusta();
       return false;
     }
+    // Fase 3: el RPC valida el límite diario y confirma el match.
+    final resultado = await _historialLikes.registrarLike(usuario.uuid);
+    if (resultado?.limite == true) {
+      _mostrarBloqueoMeGusta();
+      return false;
+    }
+    if (resultado == null && ConnectivityService.instancia.hayConexion) {
+      // RPC falló teniendo red: el Me Gusta no se guardó ni se encoló.
+      if (mounted) {
+        NotificacionServicio.advertencia(context,
+            'Fallo de conexión: el Me Gusta no se guardó. Inténtalo de nuevo.');
+      }
+      return false;
+    }
     _suscripcion.registrarMeGusta();
-    _historialLikes.registrarLike(usuario.uuid);
-    widget.votosServicio.quitarRechazo(usuario.uuid);
+    widget.votosServicio.quitarRechazo(usuario.uuid, comoDeshacer: false);
     if (mounted) {
       setState(() => _idsGustados.add(usuario.uuid));
+      // Quita el perfil gustado de la grilla de inmediato.
+      _aplicarFiltros();
     }
     if (!mounted) return true;
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
-    if (_idsRecibidos.contains(usuario.uuid)) {
+    if (resultado?.match ?? _idsRecibidos.contains(usuario.uuid)) {
       _abrirMatch(usuario);
     }
     return true;

@@ -1,10 +1,14 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
+import '../../config/env.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/servicios/connectivity_service.dart';
 import '../../core/servicios/sync_service.dart';
+import '../../core/utilidades/perfil_mapeo.dart';
 
 class PerfilRepositorio {
   final AppDatabase _db;
@@ -12,53 +16,83 @@ class PerfilRepositorio {
 
   final ValueNotifier<Usuario?> perfilPropio = ValueNotifier(null);
 
-  /// Última vez que se disparó un refresco remoto, para no lanzar un sync
-  /// en cada lectura (varias pantallas llaman a obtenerPerfilPropio a la vez).
+  /// Última vez que se leyó el perfil propio de la fuente de verdad, para no
+  /// golpear la red en cada lectura (varias pantallas llaman a la vez).
   DateTime? _ultimoRefrescoRemoto;
+
+  static const _frescuraMaxima = Duration(seconds: 15);
 
   PerfilRepositorio(this._db, this._sync);
 
-  bool get _debeRefrescar {
+  bool get _perfilFresco {
     final ahora = DateTime.now();
-    if (_ultimoRefrescoRemoto == null) return true;
-    return ahora.difference(_ultimoRefrescoRemoto!) >
-        const Duration(seconds: 20);
+    if (_ultimoRefrescoRemoto == null) return false;
+    return ahora.difference(_ultimoRefrescoRemoto!) < _frescuraMaxima;
   }
 
+  /// Perfil propio online-first: la fuente de verdad es Supabase y la lectura
+  /// es directa (sin pasar por colas de sincronización). La caché local solo
+  /// es el espejo que consume el resto de la app. Sin red usa la caché.
   Future<Usuario?> obtenerPerfilPropio() async {
-    // Online-first sin bloquear la UI: si hay red, dispara un refresco en
-    // segundo plano (sube pendientes y descarga la fuente de verdad) y la
-    // lectura local devuelve al instante. Sin red usa la caché local.
-    if (ConnectivityService.instancia.hayConexion &&
-        !_sync.estaSincronizando &&
-        _debeRefrescar) {
-      _ultimoRefrescoRemoto = DateTime.now();
-      unawaited(_sync.sincronizarTodo(
-        userId: _sync.userIdActual,
-        alIniciarSesion: true,
-      ));
+    if (_perfilFresco && perfilPropio.value != null) {
+      return perfilPropio.value;
     }
-    final props = await (_db.select(_db.usuarios)
-          ..where((u) => u.esPerfilPropio.equals(true)))
-        .get();
-    if (props.isEmpty) {
+
+    // Rama servidor local (legacy): se conserva la lectura por caché.
+    if (kUsarServidorLocal) {
+      return _leerPerfilLocal();
+    }
+
+    final id = sb.Supabase.instance.client.auth.currentUser?.id;
+    if (id == null) {
       perfilPropio.value = null;
       return null;
     }
-    // Descendente: la fila más reciente corresponde a la cuenta que entró
-    // por última vez; si por cualquier motivo hubiera varias, preferimos la
-    // nueva (datos actuales) sobre la vieja (restos de otra cuenta).
-    props.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
-    final perfil = props.first;
-    perfilPropio.value = perfil;
-    return perfil;
+
+    if (ConnectivityService.instancia.hayConexion) {
+      try {
+        final remoto = await sb.Supabase.instance.client
+            .from('profiles')
+            .select()
+            .eq('id', id)
+            .maybeSingle();
+        if (remoto != null) {
+          await _db.into(_db.usuarios).insertOnConflictUpdate(
+                PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true),
+              );
+          await _limpiarPerfilesDeOtrasCuentas(id);
+          final perfil = await _leerPerfilLocal(id);
+          if (perfil != null) {
+            _ultimoRefrescoRemoto = DateTime.now();
+            perfilPropio.value = perfil;
+            return perfil;
+          }
+        }
+      } catch (_) {
+        // Error de red o RLS: se continúa con la caché local.
+      }
+    }
+
+    final perfil = await _leerPerfilLocal(id);
+    if (perfil != null) {
+      _ultimoRefrescoRemoto = DateTime.now();
+      perfilPropio.value = perfil;
+      return perfil;
+    }
+
+    // Sin caché: respaldo derivado del usuario autenticado (el trigger
+    // handle_new_user ya crea el perfil remoto al registrarse).
+    await _sync.asegurarPerfilPropio(id);
+    final respaldo = await _leerPerfilLocal(id);
+    perfilPropio.value = respaldo;
+    return respaldo;
   }
 
   Future<Usuario?> obtenerPerfilPorUuid(String uuid) async {
     // Online-first sin bloquear: refresca el perfil remoto en segundo plano.
     if (ConnectivityService.instancia.hayConexion &&
         !_sync.estaSincronizando &&
-        _debeRefrescar) {
+        !_perfilFresco) {
       _ultimoRefrescoRemoto = DateTime.now();
       unawaited(_sync.refrescarPerfilRemoto(uuid));
     }
@@ -67,24 +101,77 @@ class PerfilRepositorio {
         .getSingleOrNull();
   }
 
+  /// Guarda el perfil escribiendo de inmediato en Supabase (fuente de verdad)
+  /// y actualizando el espejo local. Sin red, queda local marcado pendiente
+  /// para que la sincronización lo suba después.
   Future<void> guardarOCambiarPerfil(UsuariosCompanion perfil) async {
     final uuid = perfil.uuid.present ? perfil.uuid.value : null;
     if (uuid == null) {
       throw ArgumentError('Se requiere un uuid para guardar el perfil.');
     }
-    final existe =
-        await (_db.select(_db.usuarios)
-            ..where((u) => u.uuid.equals(uuid)))
+
+    final existe = await (_db.select(_db.usuarios)
+          ..where((u) => u.uuid.equals(uuid)))
         .getSingleOrNull();
-    if (existe == null) {
-      await _db.into(_db.usuarios).insert(perfil);
+
+    final remoto = PerfilMapeo.perfilARemotoDesdeCompanion(perfil, base: existe);
+    remoto['id'] = uuid;
+
+    var pendiente = false;
+    if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
+      try {
+        await sb.Supabase.instance.client.from('profiles').upsert(remoto);
+      } catch (e) {
+        // Sin red (o RLS/CHECK): se queda marcado pendiente de sincronizar.
+        print('[perfil] Error al subir el perfil: $e');
+        pendiente = true;
+      }
     } else {
-      await (_db.update(_db.usuarios)
-            ..where((u) => u.uuid.equals(uuid)))
-          .write(perfil);
+      pendiente = true;
     }
-    await obtenerPerfilPropio();
-    // Subir a Supabase de inmediato (fire-and-forget) tras guardar localmente.
-    _sync.sincronizarPerfil();
+
+    final uidActual = kUsarServidorLocal
+        ? null
+        : sb.Supabase.instance.client.auth.currentUser?.id;
+    final esPropio = uuid == uidActual;
+
+    var companion = PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: esPropio)
+        .copyWith(pendienteDeSincronizar: Value(pendiente));
+    if (existe != null) {
+      companion = companion.copyWith(creadoEn: Value(existe.creadoEn));
+    }
+    await _db.into(_db.usuarios).insertOnConflictUpdate(companion);
+
+    final actualizado = await (_db.select(_db.usuarios)
+          ..where((u) => u.uuid.equals(uuid)))
+        .getSingleOrNull();
+    if (actualizado != null && esPropio) {
+      _ultimoRefrescoRemoto = DateTime.now();
+      perfilPropio.value = actualizado;
+    }
+  }
+
+  Future<Usuario?> _leerPerfilLocal([String? id]) async {
+    if (!kUsarServidorLocal) {
+      await _limpiarPerfilesDeOtrasCuentas(id);
+    }
+    return (_db.select(_db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true)))
+        .getSingleOrNull();
+  }
+
+  /// Descarta en la caché local los perfiles propios que no correspondan a la
+  /// cuenta autenticada (restos de otros logins), para que getSingleOrNull no
+  /// lance MultipleResultException.
+  Future<void> _limpiarPerfilesDeOtrasCuentas([String? id]) async {
+    final uid = id ??
+        (kUsarServidorLocal
+            ? null
+            : sb.Supabase.instance.client.auth.currentUser?.id);
+    if (uid == null) return;
+    await (_db.delete(_db.usuarios)
+          ..where((u) =>
+              u.esPerfilPropio.equals(true) & u.uuid.equals(uid).not()))
+        .go();
   }
 }

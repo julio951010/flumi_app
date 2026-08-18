@@ -26,6 +26,9 @@ Future<Uint8List> _descargarBytes(String ruta) {
   });
 }
 
+/// Bytes de una foto remota, con el mismo caché en memoria de FotoDesdeRed.
+Future<Uint8List> bytesDeRed(String ruta) => _descargarBytes(ruta);
+
 /// Carga fotos remotas descargando los bytes con `package:http`
 /// (funciona igual en web, Android e iOS) en lugar del motor de
 /// `Image.network`, que en web se queda cargando eternamente con

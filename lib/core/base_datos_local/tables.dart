@@ -219,6 +219,49 @@ class HistorialLikes extends Table {
 
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
 
+  /// Hasta qué mensaje el receptor ha leído la conversación sin match
+  /// (like-only). Espejo de matches.leido_hasta para que el badge de no
+  /// leídos funcione también sin match.
+  DateTimeColumn get leidoHasta => dateTime().nullable()();
+
   @override
   Set<Column> get primaryKey => {uuid};
+}
+
+class Rechazos extends Table {
+  TextColumn get uuid => text()();
+  TextColumn get usuarioId => text()();
+  TextColumn get rechazadoId => text()();
+  DateTimeColumn get timestamp => dateTime().withDefault(currentDateAndTime)();
+
+  BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {uuid};
+}
+
+/// Conversaciones que el usuario borró SOLO para él (estilo WhatsApp): el
+/// match y los mensajes siguen en el servidor y en el otro cliente; esta
+/// tabla local oculta la conversación de la lista sin que reaparezca al
+/// sincronizar. Cuando cualquiera de los dos escribe de nuevo, la conversación
+/// vuelve a mostrarse pero el historial anterior al borrado sigue oculto
+/// (el corte es permanente; solo se ven los mensajes posteriores al borrado).
+class ConversacionesEliminadas extends Table {
+  TextColumn get otroUsuarioId => text()();
+  DateTimeColumn get eliminadoEn => dateTime().withDefault(currentDateAndTime)();
+  /// true cuando la conversación retomó actividad: ya no se oculta de la
+  /// lista, pero eliminadoEn sigue filtrando el historial anterior al borrado.
+  BoolColumn get reactivada => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {otroUsuarioId};
+}
+
+class NotificacionesAbiertas extends Table {
+  /// Id de la notificación de bandeja ya abierta (ej. 'mensaje:<uuid>:<millis>').
+  TextColumn get notificacionId => text()();
+  DateTimeColumn get abiertaEn => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {notificacionId};
 }

@@ -10,9 +10,7 @@ import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../features/perfiles/perfil_etiquetas.dart';
-import '../../suscripcion/suscripcion_sheet.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
-import '../../../core/servicios/suscripcion_servicio.dart';
 
 class FiltrosEncuentros {
   List<String> generos;
@@ -26,7 +24,7 @@ class FiltrosEncuentros {
   FiltrosEncuentros({
     this.generos = const [],
     this.edadRango = const RangeValues(18, 60),
-    this.distanciaKm = 50,
+    this.distanciaKm = 0,
     this.enLineaAhora = false,
     this.ubicacion = '',
     this.perfilesVerificados = false,
@@ -176,7 +174,7 @@ class _FiltrosEncuentrosPantallaState
     setState(() {
       _generos = [];
       _edad = const RangeValues(18, 60);
-      _distancia = 50;
+      _distancia = 0;
       _enLinea = false;
       _ubicacion = '';
       _avanzado = <String, List<String>>{};
@@ -197,7 +195,8 @@ class _FiltrosEncuentrosPantallaState
 
   String get _textoEdad => '${_edad.start.toInt()} - ${_edad.end.toInt()} años';
 
-  String get _textoDistancia => '${_distancia.toInt()} km';
+  String get _textoDistancia =>
+      _distancia <= 0 ? 'Sin l\u00edmite' : '${_distancia.toInt()} km';
 
   String get _textoUbicacion =>
       _ubicacion.trim().isEmpty ? 'Sin definir' : _ubicacion;
@@ -1040,7 +1039,7 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
                         icono: Icons.near_me_outlined,
                         titulo: 'Distancia',
                         valor: _textoDistancia,
-                        porDefecto: _distancia == 50,
+                        porDefecto: _distancia == 0,
                         onAbrir: () => setState(() =>
                             _distanciaExpandido = !_distanciaExpandido),
                       ),
@@ -1144,7 +1143,9 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${_distancia.toInt()} km',
+            _distancia <= 0
+                ? 'Sin l\u00edmite'
+                : '${_distancia.toInt()} km',
             style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -1152,12 +1153,14 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
           ),
           Slider(
             value: _distancia,
-            min: 1,
+            min: 0,
             max: 200,
-            divisions: 199,
+            divisions: 200,
             activeColor: primario,
             inactiveColor: primario.withValues(alpha: 0.2),
-            label: '${_distancia.toInt()} km',
+            label: _distancia <= 0
+                ? 'Sin l\u00edmite'
+                : '${_distancia.toInt()} km',
             onChanged: (v) => setState(() => _distancia = v),
           ),
         ],
@@ -1368,6 +1371,48 @@ bool cumpleFiltrosAvanzados(FiltrosEncuentros filtros, Usuario usuario) {
   return true;
 }
 
+/// Criterios base de búsqueda del perfil propio: "interesado en"
+/// (busca_genero) y "rango de edad" (preferencia_edad_min/max). Se aplican
+/// SIEMPRE, antes de los filtros que el usuario configure en la app.
+bool cumpleCriteriosPerfil(Usuario propio, Usuario candidato) {
+  final busca = (propio.buscaGenero ?? '').trim().toLowerCase();
+  final sinRestriccion = busca.isEmpty ||
+      busca == 'todos' ||
+      busca == 'ambos' ||
+      busca == 'prefiero_no_decirlo' ||
+      busca == 'otro';
+  if (!sinRestriccion) {
+    final opciones = busca.split(',').map((g) => g.trim()).toSet();
+    final generoCandidato = normalizarGenero(candidato.genero);
+    final coincide = opciones.any((g) {
+      switch (normalizarGenero(g)) {
+        case 'hombres':
+        case 'hombre':
+          return generoCandidato == 'hombre' ||
+              generoCandidato == 'hombretrans';
+        case 'mujeres':
+        case 'mujer':
+          return generoCandidato == 'mujer' ||
+              generoCandidato == 'mujertrans';
+        case 'nobinarias':
+        case 'nobinario':
+          return generoCandidato == 'nobinario' ||
+              generoCandidato == 'generofluido';
+        default:
+          return generoCandidato == normalizarGenero(g);
+      }
+    });
+    if (!coincide) return false;
+  }
+
+  final min = propio.preferenciaEdadMin;
+  final max = propio.preferenciaEdadMax;
+  if (candidato.edad > 0 && (candidato.edad < min || candidato.edad > max)) {
+    return false;
+  }
+  return true;
+}
+
 class _ParametroFiltro {
   final String id;
   final IconData icono;
@@ -1416,11 +1461,11 @@ class SuscripcionServicioMock with ChangeNotifier implements SuscripcionServicio
   @override
   bool get esPremium => true;
   @override
-  Future<bool> puedeUsarMeGusta() async => true;
+  Future<bool> puedeUsarMeGusta({bool revalidar = false}) async => true;
   @override
   Future<bool> puedeUsarDeshacer() async => true;
   @override
-  Future<bool> puedeUsarSuperlike() async => true;
+  Future<bool> puedeUsarSuperlike({bool revalidar = false}) async => true;
   @override
   Future<bool> puedeVerCerca() async => true;
   @override

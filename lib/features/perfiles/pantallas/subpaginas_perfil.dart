@@ -129,7 +129,6 @@ class _CampoTextoPerfilPantallaState extends State<CampoTextoPerfilPantalla> {
                             children: [
                   Form(
                     key: _formKey,
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     child: Column(
                       children: [
                         TextFormField(

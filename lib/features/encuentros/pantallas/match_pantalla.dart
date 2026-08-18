@@ -64,7 +64,7 @@ class _MatchPantallaState extends State<MatchPantalla>
           otroUsuarioId: widget.usuario.uuid,
           miId: widget.miId,
           nombreOtro: widget.usuario.nombre,
-          online: widget.usuario.ultimaSincronizacionTimestamp != null,
+          online: ChatRepositorio.estaEnLinea(widget.usuario),
           esMeGusta: true,
           esMatch: true,
         ),

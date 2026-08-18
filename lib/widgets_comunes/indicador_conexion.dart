@@ -33,13 +33,22 @@ class _IndicadorConexionState extends State<IndicadorConexion> {
 
   @override
   Widget build(BuildContext context) {
+    // La navegación siempre permanece montada: si se reemplazara el child,
+    // un parpadeo de conexión desmontaría todo el State y los indicadores
+    // del bottom nav (ValueNotifiers) se reiniciarían a 0. La pantalla de
+    // sin conexión se superpone encima sin tocar el árbol de abajo.
     if (_conectado) return widget.child;
-    return SinConexionPantalla(
-      onReintentar: () {
-        if (ConnectivityService.instancia.hayConexion && mounted) {
-          setState(() => _conectado = true);
-        }
-      },
+    return Stack(
+      children: [
+        widget.child,
+        SinConexionPantalla(
+          onReintentar: () {
+            if (ConnectivityService.instancia.hayConexion && mounted) {
+              setState(() => _conectado = true);
+            }
+          },
+        ),
+      ],
     );
   }
 }

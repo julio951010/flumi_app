@@ -39,6 +39,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   final TextEditingController _mesCtrl = TextEditingController();
   final TextEditingController _anioCtrl = TextEditingController();
   final _ubicacionCtrl = TextEditingController();
+  double? _ubicacionLat;
+  double? _ubicacionLon;
   final _formKeyUbicacion = GlobalKey<FormState>();
   final _focusUbicacion = FocusNode();
   String _genero = '';
@@ -69,6 +71,10 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     if (perfil != null && mounted) {
       _nombreCtrl.text = perfil.nombre;
       _ubicacionCtrl.text = perfil.ciudad;
+      if (perfil.ubicacionLat != 0 || perfil.ubicacionLon != 0) {
+        _ubicacionLat = perfil.ubicacionLat;
+        _ubicacionLon = perfil.ubicacionLon;
+      }
     }
   }
 
@@ -273,10 +279,20 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           pendienteDeSincronizar: const Value(true),
         );
       case 5:
-        return UsuariosCompanion(
+        var companion = UsuariosCompanion(
           ciudad: Value(_ubicacionCtrl.text.trim()),
           pendienteDeSincronizar: const Value(true),
         );
+        final coords = (_ubicacionLat != null && _ubicacionLon != null)
+            ? (_ubicacionLat!, _ubicacionLon!)
+            : _coordsDesdeTexto(_ubicacionCtrl.text);
+        if (coords != null) {
+          companion = companion.copyWith(
+            ubicacionLat: Value(coords.$1),
+            ubicacionLon: Value(coords.$2),
+          );
+        }
+        return companion;
       default:
         return null;
     }
@@ -691,7 +707,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Form(
           key: _formKeyUbicacion,
-          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: _cargandoUbicacion
               ? const SizedBox(
                   height: 40,
@@ -831,6 +846,11 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       },
       onSelected: (opcion) {
         _ubicacionCtrl.text = _etiqueta(opcion);
+        final coord = coordenadasParaOpcion(opcion, _provincias);
+        if (coord != null) {
+          _ubicacionLat = coord.$1;
+          _ubicacionLon = coord.$2;
+        }
         setState(() {});
       },
     );
@@ -889,6 +909,8 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       if (!mounted) return;
       _ubicacionCtrl.text = nombre;
       _autocompleteCtrl?.text = nombre;
+      _ubicacionLat = posicion.latitude;
+      _ubicacionLon = posicion.longitude;
       setState(() {});
       NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
     } on PlatformException catch (e) {
@@ -946,6 +968,24 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         .map((e) => e.key)
         .firstOrNull;
     return provincia == null ? opcion : '$opcion, $provincia';
+  }
+
+  /// Si el usuario escribió la ubicación a mano sin tocar ninguna sugerencia
+  /// de la lista (o el toque no llegó a disparar `onSelected`), no hay
+  /// lat/lon capturados. Antes de guardar, intentamos resolverlos igual
+  /// comparando el texto final contra las opciones conocidas.
+  (double, double)? _coordsDesdeTexto(String texto) {
+    final normalizado = _normalizar(texto.trim().toLowerCase());
+    if (normalizado.isEmpty) return null;
+    for (final opcion in _opcionesUbicacion) {
+      final coincideOpcion = _normalizar(opcion.toLowerCase()) == normalizado;
+      final coincideEtiqueta =
+          _normalizar(_etiqueta(opcion).toLowerCase()) == normalizado;
+      if (coincideOpcion || coincideEtiqueta) {
+        return coordenadasParaOpcion(opcion, _provincias);
+      }
+    }
+    return null;
   }
 
   Widget _permisoBoton({

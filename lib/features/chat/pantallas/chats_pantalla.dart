@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../config/env.dart';
-import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../widgets_comunes/avatar_usuario.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../suscripcion/suscripcion_sheet.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
@@ -28,36 +27,12 @@ class ChatsPantalla extends StatefulWidget {
 }
 
 class _ChatsPantallaState extends State<ChatsPantalla> {
-  static const _paletaAvatares = [
-    [Color(0xFF6C63FF), Color(0xFFFF6584)],
-    [Color(0xFF4ECDC4), Color(0xFF2ecc71)],
-    [Color(0xFF667eea), Color(0xFF764ba2)],
-    [Color(0xFFf093fb), Color(0xFFf5576c)],
-    [Color(0xFF3AA5ED), Color(0xFF7B2CBF)],
-  ];
-
-  bool _sembrado = false;
   final _scrollCtrl = ScrollController();
-  final _perfilesKey = GlobalKey();
-  final _conversacionesKey = GlobalKey();
-
-  @override
-  void initState() {
-    super.initState();
-    _sembrar();
-  }
 
   @override
   void dispose() {
     _scrollCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _sembrar() async {
-    if (kUsarModoMock && !_sembrado) {
-      _sembrado = true;
-      await GeneradorMock.sembrarConversacionesSiVacio(widget.db, widget.miId);
-    }
   }
 
   String _formatoHora(DateTime dt) {
@@ -75,18 +50,21 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
     return '${dt.day}/${dt.month}/${dt.year}';
   }
 
-  Color _colorAvatar(String nombre) {
-    final lista = _paletaAvatares[nombre.hashCode.abs() % _paletaAvatares.length];
-    return Color.lerp(lista[0], lista[1], 0.5)!;
-  }
+  Color _colorAvatar(String nombre) => colorDeAvatar(nombre);
 
-  Future<void> _irASeccion(GlobalKey key) async {
-    final ctx = key.currentContext;
-    if (ctx == null) return;
-    await Scrollable.ensureVisible(
-      ctx,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
+  /// Convierte un perfil de "Personas" en una conversación para abrir el chat.
+  ResumenConversacion _resumenDePerfil(PerfilChat perfil) {
+    final usuario = perfil.usuario;
+    return ResumenConversacion(
+      otroUsuarioId: usuario.uuid,
+      nombre: usuario.nombre,
+      ultimoMensaje: '',
+      ultimoEsMio: false,
+      timestamp: perfil.timestamp,
+      noLeidos: 0,
+      online: ChatRepositorio.estaEnLinea(usuario),
+      esMeGusta: perfil.esMeGusta,
+      esMatch: perfil.esMatch,
     );
   }
 
@@ -149,12 +127,19 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
         }
         final conversaciones = snapshot.data;
         if (conversaciones == null) return _esqueleto();
-        if (conversaciones.isEmpty) return _vacio();
 
         return StreamBuilder<List<PerfilChat>>(
           stream: widget.repositorio.observarPerfiles(widget.miId),
           builder: (context, snapPerf) {
             final perfiles = snapPerf.data ?? const <PerfilChat>[];
+            // El vacío solo se muestra cuando no hay conversaciones NI
+            // perfiles: la sección "Personas" sigue visible con matches,
+            // aunque hayas borrado la última conversación.
+            if (conversaciones.isEmpty &&
+                snapPerf.hasData &&
+                perfiles.isEmpty) {
+              return _vacio();
+            }
             final noLeidos = conversaciones.fold<int>(
                 0, (acc, c) => acc + c.noLeidos);
             final totalMatches = perfiles.where((p) => p.esMatch).length;
@@ -167,17 +152,37 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
                 children: [
                   if (noLeidos > 0 || totalMatches > 0)
-                    _banner(noLeidos: noLeidos, totalMatches: totalMatches),
+                    _banner(
+                      noLeidos: noLeidos,
+                      totalMatches: totalMatches,
+                      onAction: () {
+                        if (noLeidos > 0) {
+                          // "Ver mensajes": abre la conversación con mensajes
+                          // no leídos más reciente.
+                          final conv = conversaciones.firstWhere(
+                            (c) => c.noLeidos > 0,
+                            orElse: () => conversaciones.first,
+                          );
+                          _abrirChat(conv);
+                        } else if (perfiles.isNotEmpty) {
+                          // "Ver perfiles": abre el chat del primer match.
+                          final match = perfiles.firstWhere(
+                            (p) => p.esMatch,
+                            orElse: () => perfiles.first,
+                          );
+                          _abrirChat(_resumenDePerfil(match));
+                        }
+                      },
+                    ),
                   const SizedBox(height: 4),
                   if (perfiles.isNotEmpty) ...[
-                    _encabezadoSeccion('Personas', key: _perfilesKey),
+                    _encabezadoSeccion('Personas'),
                     const SizedBox(height: 4),
                     _filaPerfiles(perfiles),
                     const SizedBox(height: 14),
                   ],
                   if (conversaciones.isNotEmpty) ...[
-                    _encabezadoSeccion(
-                        'Conversaciones', key: _conversacionesKey),
+                    _encabezadoSeccion('Conversaciones'),
                     const SizedBox(height: 8),
                     for (final conv in conversaciones)
                       Padding(
@@ -194,9 +199,8 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
     );
   }
 
-  Widget _encabezadoSeccion(String titulo, {Key? key}) {
+  Widget _encabezadoSeccion(String titulo) {
     return Padding(
-      key: key,
       padding: const EdgeInsets.only(top: 8),
       child: Text(
         titulo,
@@ -209,7 +213,11 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
     );
   }
 
-  Widget _banner({required int noLeidos, required int totalMatches}) {
+  Widget _banner({
+    required int noLeidos,
+    required int totalMatches,
+    required VoidCallback onAction,
+  }) {
     final hayMensajes = noLeidos > 0;
     final titulo = hayMensajes
         ? '\u00a1Tienes $noLeidos mensaje${noLeidos == 1 ? '' : 's'} nuevo${noLeidos == 1 ? '' : 's'}!'
@@ -217,8 +225,6 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
     final subtitulo =
         hayMensajes ? 'No te los pierdas' : 'Empieza a chatear';
     final etiqueta = hayMensajes ? 'Ver mensajes' : 'Ver perfiles';
-    final destino =
-        hayMensajes ? _conversacionesKey : _perfilesKey;
 
     return Container(
       width: double.infinity,
@@ -254,7 +260,7 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: () => _irASeccion(destino),
+            onTap: onAction,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
@@ -291,46 +297,9 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   Widget _perfilCirculo(PerfilChat perfil) {
     final usuario = perfil.usuario;
     final nombre = usuario.nombre;
-    final inicial = nombre.isNotEmpty ? nombre[0].toUpperCase() : '?';
-    final gradiente = _paletaAvatares[
-        nombre.hashCode.abs() % _paletaAvatares.length];
-
-    final avatar = Container(
-      width: 64,
-      height: 64,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: gradiente,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        inicial,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 24,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
 
     return GestureDetector(
-      onTap: () {
-        _abrirChat(ResumenConversacion(
-          otroUsuarioId: usuario.uuid,
-          nombre: nombre,
-          ultimoMensaje: '',
-          ultimoEsMio: false,
-          timestamp: perfil.timestamp,
-          noLeidos: 0,
-          online: usuario.ultimaSincronizacionTimestamp != null,
-          esMeGusta: perfil.esMeGusta,
-          esMatch: perfil.esMatch,
-        ));
-      },
+      onTap: () => _abrirChat(_resumenDePerfil(perfil)),
       child: SizedBox(
         width: 72,
         child: Column(
@@ -338,35 +307,14 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                if (perfil.esMatch)
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: gradiente,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      shape: BoxShape.circle,
-                    ),
-                    child: avatar,
-                  )
-                else
-                  avatar,
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 15,
-                    height: 15,
-                    decoration: BoxDecoration(
-                      color: usuario.ultimaSincronizacionTimestamp != null
-                          ? const Color(0xFF4CD964)
-                          : Colors.grey[400],
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                  ),
+                AvatarUsuario(
+                  nombre: nombre,
+                  fotoUrl: usuario.fotosUrls.isNotEmpty
+                      ? usuario.fotosUrls.first
+                      : null,
+                  size: 64,
+                  online: ChatRepositorio.estaEnLinea(usuario),
+                  anilloMatch: perfil.esMatch,
                 ),
                 if (perfil.esMatch || perfil.esMeGusta)
                   Positioned(
@@ -417,7 +365,6 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   }
 
   Widget _fila(ResumenConversacion conv) {
-    final inicial = conv.nombre.isNotEmpty ? conv.nombre[0].toUpperCase() : '?';
     final preview = conv.ultimoEsMio
         ? 'T\u00fa: ${conv.ultimoMensaje}'
         : conv.ultimoMensaje;
@@ -431,47 +378,11 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: _paletaAvatares[
-                            conv.nombre.hashCode.abs() % _paletaAvatares.length],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      inicial,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 15,
-                      height: 15,
-                      decoration: BoxDecoration(
-                        color: conv.online
-                            ? const Color(0xFF4CD964)
-                            : Colors.grey[400],
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                    ),
-                  ),
-                ],
+              AvatarUsuario(
+                nombre: conv.nombre,
+                fotoUrl: conv.fotoUrl,
+                size: 52,
+                online: conv.online,
               ),
               const SizedBox(width: 12),
               Expanded(

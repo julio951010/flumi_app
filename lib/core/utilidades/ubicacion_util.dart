@@ -5,7 +5,10 @@ import 'dart:math';
 /// Permiten determinar la provincia más cercana a unas coordenadas GPS de
 /// forma 100% local y offline, sin depender de Google Maps ni de ningún
 /// servicio de terceros (la resolución de nombre se hace por distancia).
-const Map<String, (double lat, double lng)> _coordenadasProvinciasCuba = {
+/// También se usa en sentido inverso: para aproximar lat/lon cuando el
+/// usuario elige su ubicación a mano (sin GPS) desde la lista de
+/// provincias/municipios.
+const Map<String, (double lat, double lng)> coordenadasProvinciasCuba = {
   'Pinar del Río': (22.4170, -83.6970),
   'Artemisa': (22.8080, -82.7640),
   'La Habana': (23.1130, -82.3660),
@@ -23,6 +26,28 @@ const Map<String, (double lat, double lng)> _coordenadasProvinciasCuba = {
   'Guantánamo': (20.1400, -75.2100),
   'Isla de la Juventud': (21.7200, -82.8500),
 };
+
+/// Aproxima lat/lon para una opción elegida a mano (provincia o municipio),
+/// usando las coordenadas de la capital provincial como referencia. No es
+/// tan preciso como el GPS, pero es suficiente para el radio de búsqueda de
+/// "cerca de ti" (decenas de km) y evita dejar ubicacion_lat/lon en 0.
+///
+/// [provincias] es el mapa provincia -> lista de municipios (el mismo que
+/// usan las pantallas de ubicación para el autocompletado).
+(double lat, double lon)? coordenadasParaOpcion(
+  String opcion,
+  Map<String, List<String>> provincias,
+) {
+  final directa = coordenadasProvinciasCuba[opcion];
+  if (directa != null) return (directa.$1, directa.$2);
+  for (final entrada in provincias.entries) {
+    if (entrada.value.contains(opcion)) {
+      final coord = coordenadasProvinciasCuba[entrada.key];
+      if (coord != null) return (coord.$1, coord.$2);
+    }
+  }
+  return null;
+}
 
 /// Resuelve un nombre de ubicación conocido a partir de unas coordenadas.
 ///
@@ -48,7 +73,7 @@ String? _provinciaMasCercana(
   String? mejor;
   var mejorDistancia = double.infinity;
   for (final nombre in provincias.keys) {
-    final coord = _coordenadasProvinciasCuba[nombre];
+    final coord = coordenadasProvinciasCuba[nombre];
     if (coord == null) continue;
     final distancia = _distanciaKm(latitud, longitud, coord.$1, coord.$2);
     if (distancia < mejorDistancia) {

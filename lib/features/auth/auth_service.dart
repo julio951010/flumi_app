@@ -4,7 +4,6 @@ import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
-import '../../core/api/mock_data.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/servicios/connectivity_service.dart';
 
@@ -81,18 +80,18 @@ class AuthService {
   // Propiedades
   // -----------------------------------------------------------
   Map<String, dynamic>? get usuarioActual {
-    if (kUsarModoMock || kUsarServidorLocal) return _localUser;
+    if (kUsarServidorLocal) return _localUser;
     return sb.Supabase.instance.client.auth.currentUser?.toJson();
   }
 
   bool get estaAutenticado {
-    if (kUsarModoMock || kUsarServidorLocal) return _localUser != null;
+    if (kUsarServidorLocal) return _localUser != null;
     return sb.Supabase.instance.client.auth.currentSession != null;
   }
 
   Stream<AuthState> get estadoStream {
     _localStreamCtrl ??= StreamController<AuthState>.broadcast();
-    if (kUsarModoMock || kUsarServidorLocal) return _localStreamCtrl!.stream;
+    if (kUsarServidorLocal) return _localStreamCtrl!.stream;
     return sb.Supabase.instance.client.auth.onAuthStateChange.map(
       // Los eventos de supabase_flutter llegan en camelCase (signedIn,
       // initialSession, userUpdated...) y se normalizan a MAYÚSCULAS con
@@ -112,17 +111,6 @@ class AuthService {
   // Inicializar
   // -----------------------------------------------------------
   Future<void> inicializar() async {
-    if (kUsarModoMock) {
-      await GeneradorMock.sembrarSiVacio(db);
-      final user = await LocalTokenStore.obtenerUsuario();
-      if (user != null) {
-        _localUser = user;
-        _localStreamCtrl ??= StreamController<AuthState>.broadcast();
-        _localStreamCtrl!.add(AuthState('INITIAL_SESSION', user: user));
-      }
-      await registrarConexion();
-      return;
-    }
     if (kUsarServidorLocal) {
       final token = await LocalTokenStore.obtenerToken();
       final user = await LocalTokenStore.obtenerUsuario();
@@ -160,7 +148,6 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    if (kUsarModoMock) return _mockAuth(email);
     _requerirConexion();
 
     if (kUsarServidorLocal) {
@@ -201,7 +188,6 @@ class AuthService {
     required String password,
     String? nombre,
   }) async {
-    if (kUsarModoMock) return _mockAuth(email, nombre: nombre);
     _requerirConexion();
 
     if (kUsarServidorLocal) {
@@ -238,7 +224,7 @@ class AuthService {
   // Cerrar sesión
   // -----------------------------------------------------------
   Future<void> cerrarSesion() async {
-    if (kUsarModoMock || kUsarServidorLocal) {
+    if (kUsarServidorLocal) {
       _localUser = null;
       await LocalTokenStore.limpiar();
       _localStreamCtrl ??= StreamController<AuthState>.broadcast();
@@ -258,7 +244,6 @@ class AuthService {
   // Email existe
   // -----------------------------------------------------------
   Future<bool> emailExiste(String email) async {
-    if (kUsarModoMock) return true;
     if (kUsarServidorLocal) {
       try {
         final res = await http.post(
@@ -287,7 +272,6 @@ class AuthService {
   // Solicitar recuperación
   // -----------------------------------------------------------
   Future<void> solicitarRecuperacion({required String email}) async {
-    if (kUsarModoMock) return;
     _requerirConexion();
     if (kUsarServidorLocal) {
       return _localHttp(() async {
@@ -307,7 +291,6 @@ class AuthService {
   // Actualizar password
   // -----------------------------------------------------------
   Future<void> actualizarPassword(String nuevaPassword) async {
-    if (kUsarModoMock) return;
     if (kUsarServidorLocal) {
       return _localHttp(() async {
         final res = await http.post(
@@ -328,11 +311,6 @@ class AuthService {
   // Actualizar email
   // -----------------------------------------------------------
   Future<void> actualizarEmail(String nuevoEmail) async {
-    if (kUsarModoMock) {
-      _localUser?['email'] = nuevoEmail;
-      await LocalTokenStore.guardarUsuario(_localUser!);
-      return;
-    }
     if (kUsarServidorLocal) {
       return _localHttp(() async {
         final res = await http.post(
@@ -356,7 +334,7 @@ class AuthService {
   // Eliminar cuenta
   // -----------------------------------------------------------
   Future<void> eliminarCuenta() async {
-    if (kUsarModoMock || kUsarServidorLocal) {
+    if (kUsarServidorLocal) {
       _localUser = null;
       await LocalTokenStore.limpiar();
       _localStreamCtrl ??= StreamController<AuthState>.broadcast();
@@ -393,31 +371,6 @@ class AuthService {
       }
       return sb.Supabase.instance.client.auth.signInWithOtp(email: email);
     });
-  }
-
-  // -----------------------------------------------------------
-  // Mock helpers
-  // -----------------------------------------------------------
-  Future<Map<String, dynamic>> _mockAuth(String email, {String? nombre}) async {
-    final id = 'mock-${email.hashCode.toRadixString(16)}';
-    _localUser = {
-      'id': id,
-      'email': email,
-      'nombre': (nombre != null && nombre.isNotEmpty)
-          ? nombre
-          : email.split('@').first,
-    };
-
-    if (_db != null) {
-      final usuario = await GeneradorMock.crearUsuarioPropio(_db!, _localUser!['nombre'] as String);
-      _localUser!['id'] = usuario.uuid;
-    }
-
-    await LocalTokenStore.guardarUsuario(_localUser!);
-    _localStreamCtrl ??= StreamController<AuthState>.broadcast();
-    _localStreamCtrl!.add(AuthState('SIGNED_IN', user: _localUser));
-    await registrarConexion();
-    return {'user': _localUser!, 'token': 'mock-token'};
   }
 
   // -----------------------------------------------------------

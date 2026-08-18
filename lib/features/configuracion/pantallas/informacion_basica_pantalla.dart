@@ -264,8 +264,6 @@ class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
                               const SizedBox(height: 20),
                               Form(
                                 key: _formKey,
-                                autovalidateMode:
-                                    AutovalidateMode.onUserInteraction,
                                 child: TextFormField(
                                   controller: _nombreCtrl,
                                   maxLength: 30,
@@ -987,6 +985,8 @@ class _ActualizarUbicacionPantallaState
       'assets/data/cuba_provincias_municipios.json';
 
   final _ubicacionCtrl = TextEditingController();
+  double? _ubicacionLat;
+  double? _ubicacionLon;
   TextEditingController? _autocompleteCtrl;
   final _formKey = GlobalKey<FormState>();
   final _focusNode = FocusNode();
@@ -1037,7 +1037,13 @@ class _ActualizarUbicacionPantallaState
     setState(() {
       _provincias = municipiosPorProvincia;
       _opciones = opciones.toList();
-      if (perfil != null) _ubicacionCtrl.text = perfil.ciudad;
+      if (perfil != null) {
+        _ubicacionCtrl.text = perfil.ciudad;
+        if (perfil.ubicacionLat != 0 || perfil.ubicacionLon != 0) {
+          _ubicacionLat = perfil.ubicacionLat;
+          _ubicacionLon = perfil.ubicacionLon;
+        }
+      }
       _cargando = false;
     });
   }
@@ -1051,11 +1057,21 @@ class _ActualizarUbicacionPantallaState
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;
       }
-      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+      var companion = UsuariosCompanion(
         uuid: Value(perfil.uuid),
         ciudad: Value(_ubicacionCtrl.text.trim()),
         pendienteDeSincronizar: const Value(true),
-      ));
+      );
+      final coords = (_ubicacionLat != null && _ubicacionLon != null)
+          ? (_ubicacionLat!, _ubicacionLon!)
+          : _coordsDesdeTexto(_ubicacionCtrl.text);
+      if (coords != null) {
+        companion = companion.copyWith(
+          ubicacionLat: Value(coords.$1),
+          ubicacionLon: Value(coords.$2),
+        );
+      }
+      await widget.repositorio.guardarOCambiarPerfil(companion);
       if (!mounted) return;
       NotificacionServicio.exito(context, 'Ubicación actualizada correctamente.');
       Navigator.pop(context);
@@ -1120,6 +1136,8 @@ Future<void> _establecerUbicacion() async {
       if (!mounted) return;
       _ubicacionCtrl.text = nombre;
       _autocompleteCtrl?.text = nombre;
+      _ubicacionLat = posicion.latitude;
+      _ubicacionLon = posicion.longitude;
       setState(() {});
       NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
     } on PlatformException catch (e) {
@@ -1201,8 +1219,6 @@ Future<void> _establecerUbicacion() async {
                               const SizedBox(height: 20),
                               Form(
                                 key: _formKey,
-                                autovalidateMode:
-                                    AutovalidateMode.onUserInteraction,
                                 child: Column(
                                   children: [
                                     _campoUbicacion(
@@ -1398,6 +1414,12 @@ Future<void> _establecerUbicacion() async {
       },
       onSelected: (opcion) {
         _ubicacionCtrl.text = _etiqueta(opcion);
+        final coord = coordenadasParaOpcion(opcion, _provincias);
+        if (coord != null) {
+          _ubicacionLat = coord.$1;
+          _ubicacionLon = coord.$2;
+        }
+        setState(() {});
       },
     );
   }
@@ -1422,5 +1444,22 @@ Future<void> _establecerUbicacion() async {
         .map((e) => e.key)
         .firstOrNull;
     return provincia == null ? opcion : '$opcion, $provincia';
+  }
+
+  /// Igual que en el onboarding: si el usuario escribió la ubicación a mano
+  /// sin tocar una sugerencia, intentamos resolver lat/lon comparando el
+  /// texto final contra las opciones conocidas antes de guardar.
+  (double, double)? _coordsDesdeTexto(String texto) {
+    final normalizado = _normalizar(texto.trim().toLowerCase());
+    if (normalizado.isEmpty) return null;
+    for (final opcion in _opciones) {
+      final coincideOpcion = _normalizar(opcion.toLowerCase()) == normalizado;
+      final coincideEtiqueta =
+          _normalizar(_etiqueta(opcion).toLowerCase()) == normalizado;
+      if (coincideOpcion || coincideEtiqueta) {
+        return coordenadasParaOpcion(opcion, _provincias);
+      }
+    }
+    return null;
   }
 }

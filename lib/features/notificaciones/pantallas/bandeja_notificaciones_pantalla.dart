@@ -1,7 +1,11 @@
+import 'dart:async';
+
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
-import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
@@ -13,13 +17,23 @@ enum TipoNotificacion { meGusta, visita, match, mensaje }
 class BandejaNotificacionesPantalla extends StatefulWidget {
   final AppDatabase db;
   final String miId;
+  final VisitasServicio visitasServicio;
+  final HistorialLikesServicio historialLikesServicio;
+  final SuscripcionServicio suscripcionServicio;
   final VoidCallback? onAbierto;
+  /// Navega a la pestaña principal correspondiente (2 = Me Gusta, 3 = Chats)
+  /// cuando la notificación no se puede abrir sin plan.
+  final void Function(int tab, int subindice)? onNavegarA;
 
   const BandejaNotificacionesPantalla({
     super.key,
     required this.db,
     required this.miId,
+    required this.visitasServicio,
+    required this.historialLikesServicio,
+    required this.suscripcionServicio,
     this.onAbierto,
+    this.onNavegarA,
   });
 
   @override
@@ -34,6 +48,7 @@ class _NotificacionInbox {
   final String nombre;
   final DateTime timestamp;
   final String? preview;
+  final int visitasConteo;
 
   const _NotificacionInbox({
     required this.id,
@@ -42,6 +57,7 @@ class _NotificacionInbox {
     required this.nombre,
     required this.timestamp,
     this.preview,
+    this.visitasConteo = 1,
   });
 }
 
@@ -60,6 +76,11 @@ class _BandejaNotificacionesPantallaState
   bool _cargando = true;
   bool _marcadoVisto = false;
   late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
+  late final VisitasServicio _visitasServicio = widget.visitasServicio;
+  late final HistorialLikesServicio _historialLikesServicio =
+      widget.historialLikesServicio;
+  final Set<String> _idsGustados = {};
+  final Set<String> _idsRecibidos = {};
 
   @override
   void initState() {
@@ -75,27 +96,33 @@ class _BandejaNotificacionesPantallaState
       final miId = widget.miId;
       final items = <_NotificacionInbox>[];
 
-      for (final i in GeneradorMock.obtenerLikesRecibidos()) {
-        final u = mapa[i.usuarioId];
+      final recibidos =
+          await _historialLikesServicio.obtenerLikesRecibidosDetalle();
+      for (final h in recibidos) {
+        final u = mapa[h.usuarioId];
         if (u == null) continue;
         items.add(_NotificacionInbox(
-          id: 'meGusta:${u.uuid}',
+          id: 'meGusta:${u.uuid}:${h.timestamp.millisecondsSinceEpoch}',
           tipo: TipoNotificacion.meGusta,
           usuario: u,
           nombre: u.nombre,
-          timestamp: i.timestamp,
+          timestamp: h.timestamp,
         ));
       }
 
-      for (final i in GeneradorMock.obtenerVisitas()) {
-        final u = mapa[i.usuarioId];
+      final visitasList = await _visitasServicio.obtenerVisitas();
+      final visitasConteo =
+          await _visitasServicio.contarPorVisitante();
+      for (final v in visitasList) {
+        final u = mapa[v.visitanteId];
         if (u == null) continue;
         items.add(_NotificacionInbox(
-          id: 'visita:${u.uuid}',
+          id: 'visita:${u.uuid}:${v.timestamp.millisecondsSinceEpoch}',
           tipo: TipoNotificacion.visita,
           usuario: u,
           nombre: u.nombre,
-          timestamp: i.timestamp,
+          timestamp: v.timestamp,
+          visitasConteo: visitasConteo[u.uuid] ?? 1,
         ));
       }
 
@@ -106,7 +133,7 @@ class _BandejaNotificacionesPantallaState
         final u = mapa[otroId];
         if (u == null) continue;
         items.add(_NotificacionInbox(
-          id: 'match:${u.uuid}',
+          id: 'match:${u.uuid}:${m.timestampMatch.millisecondsSinceEpoch}',
           tipo: TipoNotificacion.match,
           usuario: u,
           nombre: u.nombre,
@@ -114,12 +141,22 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
+      final cortes = await (widget.db.select(widget.db.conversacionesEliminadas))
+          .get();
+      final cortesMap = {
+        for (final t in cortes) t.otroUsuarioId: t.eliminadoEn
+      };
+
       final mensajes =
           await (widget.db.select(widget.db.mensajes)
                 ..where((m) => m.receptorId.equals(miId)))
               .get();
       final ultimosPorEmisor = <String, Mensaje>{};
       for (final ms in mensajes) {
+        final corte = cortesMap[ms.emisorId];
+        if (corte != null && !ms.timestamp.isAfter(corte)) {
+          continue;
+        }
         final prev = ultimosPorEmisor[ms.emisorId];
         if (prev == null || prev.timestamp.isBefore(ms.timestamp)) {
           ultimosPorEmisor[ms.emisorId] = ms;
@@ -129,7 +166,7 @@ class _BandejaNotificacionesPantallaState
         final u = mapa[ms.emisorId];
         if (u == null) continue;
         items.add(_NotificacionInbox(
-          id: 'mensaje:${u.uuid}',
+          id: 'mensaje:${u.uuid}:${ms.timestamp.millisecondsSinceEpoch}',
           tipo: TipoNotificacion.mensaje,
           usuario: u,
           nombre: u.nombre,
@@ -138,9 +175,21 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
+      final gustados = await _historialLikesServicio.obtenerHistorial();
+      final abiertas = await (widget.db.select(widget.db.notificacionesAbiertas))
+          .get()
+          .then((fs) => fs.map((f) => f.notificacionId).toSet());
+
       if (mounted) {
         setState(() {
+          _idsGustados
+            ..clear()
+            ..addAll(gustados.map((h) => h.usuarioLikeadoId));
+          _idsRecibidos
+            ..clear()
+            ..addAll(recibidos.map((h) => h.usuarioId));
           items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+          items.removeWhere((n) => abiertas.contains(n.id));
           _items = items;
           if (!_marcadoVisto) {
             _marcadoVisto = true;
@@ -171,6 +220,11 @@ class _BandejaNotificacionesPantallaState
       case TipoNotificacion.meGusta:
         return 'A ${n.nombre} le gust\u00f3 tu perfil';
       case TipoNotificacion.visita:
+        // Primera visita: "visitó tu perfil"; si te ha visitado más de una
+        // vez, la notificación escala a "está interesado en ti".
+        if (n.visitasConteo > 1) {
+          return '${n.nombre} est\u00e1 interesado en ti';
+        }
         return '${n.nombre} visit\u00f3 tu perfil';
       case TipoNotificacion.match:
         return '\u00a1Hiciste match con ${n.nombre}!';
@@ -220,20 +274,62 @@ class _BandejaNotificacionesPantallaState
       _leidas.add(n.id);
       _items.removeWhere((item) => item.id == n.id && item.timestamp == n.timestamp);
     });
+    // Persiste el borrado: al reabrir la bandeja la notificación ya no aparece.
+    unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
+      NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
+      mode: InsertMode.insertOrIgnore,
+    ));
     final usuario = n.usuario;
     if (usuario == null) return;
     final esMatch = n.tipo == TipoNotificacion.match ||
         (n.tipo == TipoNotificacion.meGusta &&
-            GeneradorMock.obtenerLikesRecibidos()
-                .map((i) => i.usuarioId)
-                .contains(usuario.uuid) &&
-            GeneradorMock.obtenerMisLikes()
-                .map((i) => i.usuarioId)
-                .contains(usuario.uuid));
+            _idsRecibidos.contains(usuario.uuid) &&
+            _idsGustados.contains(usuario.uuid));
 
-    if (n.tipo == TipoNotificacion.match ||
-        n.tipo == TipoNotificacion.mensaje) {
-      _abrirChat(usuario, esMatch: esMatch, esMeGusta: n.tipo == TipoNotificacion.match ? false : true);
+    final conPlan = widget.suscripcionServicio.tienePlus;
+
+    // El match siempre abre los detalles del usuario, tenga o no plan.
+    if (esMatch) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PerfilDetallePage(
+            usuario: usuario,
+            esMeGusta: n.tipo == TipoNotificacion.meGusta,
+            esMatch: true,
+            onChat: () => _abrirChat(usuario),
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!conPlan) {
+      // Sin plan la notificación lleva a la pestaña exacta: Chats para
+      // mensajes; Me Gusta con la sub-pestaña correspondiente para el resto.
+      final int tab;
+      final int subindice;
+      switch (n.tipo) {
+        case TipoNotificacion.mensaje:
+          tab = 3;
+          subindice = 0;
+        case TipoNotificacion.meGusta:
+          tab = 2;
+          subindice = 0;
+        case TipoNotificacion.visita:
+          tab = 2;
+          subindice = 1;
+        case TipoNotificacion.match:
+          tab = 2;
+          subindice = 3;
+      }
+      Navigator.pop(context);
+      widget.onNavegarA?.call(tab, subindice);
+      return;
+    }
+
+    if (n.tipo == TipoNotificacion.mensaje) {
+      _abrirChat(usuario, esMatch: esMatch, esMeGusta: true);
     } else {
       Navigator.push(
         context,
@@ -258,7 +354,7 @@ class _BandejaNotificacionesPantallaState
           otroUsuarioId: usuario.uuid,
           miId: widget.miId,
           nombreOtro: usuario.nombre,
-          online: usuario.ultimaSincronizacionTimestamp != null,
+          online: ChatRepositorio.estaEnLinea(usuario),
           esMeGusta: esMeGusta ?? false,
           esMatch: esMatch ?? false,
         ),

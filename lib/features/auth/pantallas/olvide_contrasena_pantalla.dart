@@ -86,7 +86,6 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
                 ),
                 child: Form(
                   key: _formKey,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [

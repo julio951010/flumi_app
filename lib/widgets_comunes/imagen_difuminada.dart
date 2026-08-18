@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'foto_desde_red.dart';
 import 'foto_perfil.dart';
 
 class ImagenDifuminada extends StatefulWidget {
@@ -32,7 +33,9 @@ class _ImagenDifuminadaState extends State<ImagenDifuminada> {
 
   Future<void> _procesar() async {
     try {
-      final bytes = await bytesDeArchivo(widget.ruta);
+      final bytes = widget.ruta.startsWith('http')
+          ? await bytesDeRed(widget.ruta)
+          : await bytesDeArchivo(widget.ruta);
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       final original = frame.image;

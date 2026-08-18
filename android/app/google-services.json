@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "629098605972",
+    "project_id": "flumi-app",
+    "storage_bucket": "flumi-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:629098605972:android:dd0299a8338607552df381",
+        "android_client_info": {
+          "package_name": "com.jchd.flumi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAOvhLaqVctrE5gUGhz4kYE8rmrPVEa5oY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

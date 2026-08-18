@@ -160,6 +160,26 @@ create table if not exists public.blocks (
 );
 
 -- ------------------------------------------------------------
+-- RECHAZOS (Nope): cada fila es un Nope. Varias filas por par = conteo
+-- acumulado (3 Nopes al mismo perfil = exclusión definitiva). El RPC
+-- perfiles_cercanos excluye solo los Nopes recientes (< 3 días) o con
+-- 3+ filas; los demás quedan disponibles para reciclar en el feed.
+-- ------------------------------------------------------------
+create table if not exists public.rechazos (
+  id           uuid primary key default uuid_generate_v4(),
+  usuario_id   uuid not null references public.profiles(id) on delete cascade,
+  rechazado_id uuid not null references public.profiles(id) on delete cascade,
+  "timestamp"  timestamptz default now()
+);
+
+-- Hasta vX cada par solo podía tener un Nope; era incompatible con el
+-- conteo de Nopes por perfil que exige el reciclaje.
+alter table public.rechazos drop constraint if exists par_rechazo_unico;
+
+create index if not exists rechazos_usuario_idx on public.rechazos (usuario_id);
+create index if not exists rechazos_par_idx on public.rechazos (usuario_id, rechazado_id);
+
+-- ------------------------------------------------------------
 -- SUSCRIPCIONES (planes Gratis / Plus / Premium)
 -- ------------------------------------------------------------
 create table if not exists public.suscripciones (
@@ -208,6 +228,11 @@ create table if not exists public.historial_likes (
   "timestamp"       timestamptz default now()
 );
 
+-- Fase 6: leído de conversaciones like-only (premium, sin match todavía).
+-- Espejo de matches.leido_hasta para que el badge de no leídos funcione
+-- también cuando no existe fila en matches.
+alter table public.historial_likes add column if not exists leido_hasta timestamptz;
+
 create index if not exists historial_likes_usuario_idx   on public.historial_likes (usuario_id);
 create index if not exists historial_likes_likeado_idx   on public.historial_likes (usuario_likeado_id);
 
@@ -221,8 +246,9 @@ alter table public.reports         enable row level security;
 alter table public.blocks          enable row level security;
 alter table public.suscripciones   enable row level security;
 alter table public.usos_diarios    enable row level security;
-alter table public.visitas         enable row level security;
+alter table public.visitas          enable row level security;
 alter table public.historial_likes enable row level security;
+alter table public.rechazos        enable row level security;
 
 -- PROFILES
 drop policy if exists "perfiles_visibles_para_autenticados" on public.profiles;
@@ -251,11 +277,33 @@ create policy "usuario_envia_mensajes_como_si_mismo"
   on public.messages for insert
   with check (auth.uid() = emisor_id);
 
+-- Editar mensaje: solo el emisor puede modificar su propio mensaje. Sin esta
+-- política el upsert del App falla por RLS y el texto editado nunca sube.
+drop policy if exists "usuario_edita_mensajes_como_si_mismo" on public.messages;
+create policy "usuario_edita_mensajes_como_si_mismo"
+  on public.messages for update
+  using (auth.uid() = emisor_id);
+
+-- Borrar mensajes: cualquiera de los dos participantes puede borrar mensajes
+-- de la conversacion (equivale a "eliminar mensaje" del App, que borra el
+-- mensaje tambien en el servidor para que no reaparezca al sincronizar).
+drop policy if exists "participantes_borran_mensajes" on public.messages;
+create policy "participantes_borran_mensajes"
+  on public.messages for delete
+  using (auth.uid() = emisor_id or auth.uid() = receptor_id);
+
 -- MATCHES
 drop policy if exists "matches_visibles_solo_para_participantes" on public.matches;
 create policy "matches_visibles_solo_para_participantes"
   on public.matches for select
   using (auth.uid() = usuario_a_id or auth.uid() = usuario_b_id);
+
+-- Fase 4: los participantes actualizan su leido_hasta (estado "leído").
+drop policy if exists "participantes_actualizan_su_leido_hasta" on public.matches;
+create policy "participantes_actualizan_su_leido_hasta"
+  on public.matches for update
+  using (auth.uid() = usuario_a_id or auth.uid() = usuario_b_id)
+  with check (auth.uid() = usuario_a_id or auth.uid() = usuario_b_id);
 
 -- REPORTS
 drop policy if exists "usuario_crea_reportes_como_si_mismo" on public.reports;
@@ -302,6 +350,71 @@ create policy "usuario_gestiona_sus_likes"
   using (auth.uid() = usuario_id)
   with check (auth.uid() = usuario_id);
 
+-- Fase 5: el likeado ve quién le dio like (necesario para "Le gustas",
+-- el badge y que Realtime le entregue el evento bajo RLS).
+drop policy if exists "usuario_ve_likes_recibidos" on public.historial_likes;
+create policy "usuario_ve_likes_recibidos"
+  on public.historial_likes for select
+  using (auth.uid() = usuario_likeado_id);
+
+-- RECHAZOS
+drop policy if exists "usuario_gestiona_sus_rechazos" on public.rechazos;
+create policy "usuario_gestiona_sus_rechazos"
+  on public.rechazos for all
+  using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
+
+-- CONVERSACIONES BORRADAS
+-- Marcador "borre la conversacion solo para mi" (estilo WhatsApp). Cuando
+-- los DOS participantes la marcan, el trigger borra fisicamente los mensajes
+-- del par en el servidor: no queda basura ocupando espacio para siempre.
+create table if not exists public.conversaciones_borradas (
+  usuario_id      uuid not null references public.profiles(id) on delete cascade,
+  otro_usuario_id uuid not null references public.profiles(id) on delete cascade,
+  borrado_en      timestamptz default now(),
+  primary key (usuario_id, otro_usuario_id)
+);
+
+create index if not exists conversaciones_borradas_otro_idx
+  on public.conversaciones_borradas (otro_usuario_id);
+
+alter table public.conversaciones_borradas enable row level security;
+
+drop policy if exists "usuario_gestiona_sus_conversaciones_borradas" on public.conversaciones_borradas;
+create policy "usuario_gestiona_sus_conversaciones_borradas"
+  on public.conversaciones_borradas for all
+  using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
+
+-- Limpieza automatica: al marcar B su borrado, si A tambien la marco, borra
+-- los mensajes del par. El match y los likes se conservan (si uno escribe de
+-- nuevo la conversacion renace normal). Los marcadores se conservan para que
+-- una reinstalacion siga ocultando la conversacion; cada usuario elimina el
+-- suyo al volver a escribir (lo hace el App).
+create or replace function public.limpiar_conversacion_borrada_por_ambos()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if exists (
+    select 1 from public.conversaciones_borradas cb
+    where cb.usuario_id = new.otro_usuario_id
+      and cb.otro_usuario_id = new.usuario_id
+  ) then
+    delete from public.messages
+    where (emisor_id = new.usuario_id and receptor_id = new.otro_usuario_id)
+       or (emisor_id = new.otro_usuario_id and receptor_id = new.usuario_id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists conversaciones_borradas_limpieza on public.conversaciones_borradas;
+create trigger conversaciones_borradas_limpieza
+  after insert on public.conversaciones_borradas
+  for each row execute function public.limpiar_conversacion_borrada_por_ambos();
+
 -- ============================================================
 -- TRIGGER: crear perfil automáticamente al registrarse
 -- ============================================================
@@ -329,6 +442,195 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ============================================================
+-- TRIGGER: crear match automáticamente con like recíproco
+-- ============================================================
+create or replace function public.try_crear_match()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  a uuid := least(new.usuario_id, new.usuario_likeado_id);
+  b uuid := greatest(new.usuario_id, new.usuario_likeado_id);
+begin
+  if exists (
+    select 1 from public.historial_likes
+    where usuario_id = new.usuario_likeado_id
+      and usuario_likeado_id = new.usuario_id
+  ) then
+    insert into public.matches (usuario_a_id, usuario_b_id)
+    values (a, b)
+    on conflict (usuario_a_id, usuario_b_id) do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists historial_likes_try_match on public.historial_likes;
+create trigger historial_likes_try_match
+  after insert on public.historial_likes
+  for each row execute function public.try_crear_match();
+
+-- ============================================================
+-- FASE 3: RPC registrar_me_gusta (valida límite + like + match)
+-- Retorna {match, likeado, limite}. El límite diario vive en
+-- usos_diarios (server), no en el reloj del teléfono.
+-- ============================================================
+create or replace function public.registrar_me_gusta(perfil_id uuid, es_super boolean default false)
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  plane text := 'gratis';
+  limite int := 0;
+  usado int := 0;
+  hay_match boolean := false;
+begin
+  if yo is null or perfil_id is null or perfil_id = yo then
+    return jsonb_build_object('match', false, 'likeado', false, 'limite', false, 'error', 'destino_invalido');
+  end if;
+
+  select coalesce(plan, 'gratis') into plane
+    from public.suscripciones
+   where usuario_id = yo;
+
+  -- Límites por plan (espejo de LimitesPlan en la app):
+  -- gratis: 15 me gustas/día, 0 superlikes; plus: -1 y 10; premium: -1 y -1.
+  if plane = 'plus' then
+    limite := case when es_super then 10 else -1 end;
+  elsif plane = 'premium' then
+    limite := -1;
+  else
+    limite := case when es_super then 0 else 15 end;
+  end if;
+
+  if es_super then
+    select coalesce(superlikes_usados, 0) into usado
+      from public.usos_diarios
+     where usuario_id = yo and fecha = current_date;
+  else
+    select coalesce(me_gustas_usados, 0) into usado
+      from public.usos_diarios
+     where usuario_id = yo and fecha = current_date;
+  end if;
+
+  if limite >= 0 and usado >= limite then
+    return jsonb_build_object('match', false, 'likeado', false, 'limite', true);
+  end if;
+
+  if es_super then
+    insert into public.usos_diarios (usuario_id, fecha, superlikes_usados)
+    values (yo, current_date, 1)
+    on conflict (usuario_id, fecha) do update
+      set superlikes_usados = public.usos_diarios.superlikes_usados + 1;
+  else
+    insert into public.usos_diarios (usuario_id, fecha, me_gustas_usados)
+    values (yo, current_date, 1)
+    on conflict (usuario_id, fecha) do update
+      set me_gustas_usados = public.usos_diarios.me_gustas_usados + 1;
+  end if;
+
+  -- Like (sin duplicar el par); el trigger crea el match si es recíproco.
+  insert into public.historial_likes (usuario_id, usuario_likeado_id)
+  select yo, perfil_id
+  where not exists (
+    select 1 from public.historial_likes
+    where usuario_id = yo and usuario_likeado_id = perfil_id
+  );
+
+  select exists (
+    select 1 from public.matches m
+    where (m.usuario_a_id = yo and m.usuario_b_id = perfil_id)
+       or (m.usuario_a_id = perfil_id and m.usuario_b_id = yo)
+  ) into hay_match;
+
+  return jsonb_build_object('match', hay_match, 'likeado', true, 'limite', false);
+end;
+$$;
+
+revoke all on function public.registrar_me_gusta(uuid, boolean) from public;
+grant execute on function public.registrar_me_gusta(uuid, boolean) to authenticated;
+
+-- ============================================================
+-- FASE 3: RPC registrar_visita (sin límite)
+-- ============================================================
+create or replace function public.registrar_visita(perfil_id uuid)
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+begin
+  if yo is null or perfil_id is null or perfil_id = yo then
+    return jsonb_build_object('error', 'destino_invalido');
+  end if;
+
+  insert into public.visitas (visitante_id, visitado_id)
+  values (yo, perfil_id);
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function public.registrar_visita(uuid) from public;
+grant execute on function public.registrar_visita(uuid) to authenticated;
+
+-- ============================================================
+-- FASE 6: RPC registrar_deshacer (cupo de Deshacer en el servidor)
+-- Retorna {ok, limite}. gratis: 1/día; plus/premium: -1 (ilimitado).
+-- Si el cupo está agotado NO borra el rechazo.
+-- ============================================================
+create or replace function public.registrar_deshacer(perfil_id uuid)
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  plane text := 'gratis';
+  cupo int := 1;
+  reg public.usos_diarios%rowtype;
+begin
+  if yo is null or perfil_id is null or perfil_id = yo then
+    return jsonb_build_object('ok', false, 'limite', false, 'error', 'destino_invalido');
+  end if;
+
+  select coalesce(plan, 'gratis') into plane
+    from public.suscripciones
+   where usuario_id = yo;
+
+  if plane in ('plus', 'premium') then
+    cupo := -1;
+  end if;
+
+  if cupo >= 0 then
+    insert into public.usos_diarios (usuario_id, fecha, deshacer_usados)
+    values (yo, current_date, 1)
+    on conflict (usuario_id, fecha) do update
+      set deshacer_usados = public.usos_diarios.deshacer_usados + 1
+    returning * into reg;
+
+    if reg.deshacer_usados > cupo then
+      update public.usos_diarios
+         set deshacer_usados = deshacer_usados - 1
+       where usuario_id = yo and fecha = reg.fecha;
+      return jsonb_build_object('ok', false, 'limite', true);
+    end if;
+  end if;
+
+  delete from public.rechazos where usuario_id = yo and rechazado_id = perfil_id;
+
+  return jsonb_build_object('ok', true, 'limite', false);
+end;
+$$;
+
+revoke all on function public.registrar_deshacer(uuid) from public;
+grant execute on function public.registrar_deshacer(uuid) to authenticated;
+
+-- ============================================================
 -- FUNCIÓN: verificar si un email ya está registrado
 -- ============================================================
 create or replace function public.email_existe(email_ingresado text)
@@ -345,26 +647,426 @@ end;
 $$;
 
 -- ============================================================
--- FUNCIÓN: perfiles cercanos (feed de descubrimiento)
+-- FUNCIÓN: normalizar género (para el feed y criterios base)
+-- ============================================================
+create or replace function public.normalizar_genero(valor text)
+returns text
+language sql
+immutable
+as $$
+  select translate(lower(replace(replace(coalesce(valor, ''), ' ', ''), '_', '')), 'áéíóúüñ', 'aeiouun');
+$$;
+
+-- ============================================================
+-- FUNCIÓN: ¿el género [genero] cumple la opción seleccionada?
+-- ============================================================
+create or replace function public.cumple_genero(opcion text, genero text)
+returns boolean
+language sql
+immutable
+as $$
+  select case
+    when normalizar_genero(opcion) in ('hombres', 'hombre')
+      then normalizar_genero(genero) in ('hombre', 'hombretrans')
+    when normalizar_genero(opcion) in ('mujeres', 'mujer')
+      then normalizar_genero(genero) in ('mujer', 'mujertrans')
+    when normalizar_genero(opcion) in ('nobinarias', 'nobinario')
+      then normalizar_genero(genero) in ('nobinario', 'generofluido')
+    else normalizar_genero(genero) = normalizar_genero(opcion)
+  end;
+$$;
+
+-- ============================================================
+-- FUNCIÓN: perfiles cercanos (feed de descubrimiento, online-first)
+-- Aplica en el servidor: distancia, criterios base del perfil propio
+-- (busca_genero + preferencia_edad), filtros del usuario, y exclusiones
+-- (uno mismo, bloqueos, rechazados con 3+ Nopes, y ya gustados).
+-- Los rechazados sin 3 Nopes llegan al cliente, que decide reciclarlos
+-- (sin espera si no quedan nuevos, o tras la edad mínima si aún hay).
+-- `filtros` (jsonb): ampliar(bool), orden('distancia'|'score'),
+--   generos(text[]), edad_min(int), edad_max(int),
+--   en_linea(bool), verificado(bool), ciudad(text).
 -- ============================================================
 create or replace function public.perfiles_cercanos(
-  lat double precision,
-  lon double precision,
-  radio_metros int default 20000
+  lat double precision default 0,
+  lon double precision default 0,
+  radio_metros int default 20000,
+  filtros jsonb default '{}'::jsonb,
+  desde int default 0,
+  cuantos int default 10
 )
 returns setof public.profiles
-language sql
+language plpgsql
 stable
+security definer set search_path = public
 as $$
-  select *
-  from public.profiles
-  where ubicacion is not null
-    and ST_DWithin(
-      ubicacion,
-      ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography,
-      radio_metros
-    )
-    and id <> auth.uid()
-    and id not in (select bloqueado_id from public.blocks where bloqueador_id = auth.uid())
-    and id not in (select bloqueador_id from public.blocks where bloqueado_id = auth.uid());
+declare
+  yo uuid := auth.uid();
+  busca text := 'otro';
+  p_min int := 18;
+  p_max int := 99;
+  gen_extra text[];
+  e_min int := 18;
+  e_max int := 99;
+  en_linea boolean := false;
+  verificado boolean := false;
+  ciudad text := '';
+  ampliar boolean := false;
+  orden text := 'distancia';
+  clausulas text := '';
+  ordenar text := '';
+begin
+  if yo is null then
+    return;
+  end if;
+
+  select coalesce(busca_genero, 'otro'),
+         coalesce(preferencia_edad_min, 18),
+         coalesce(preferencia_edad_max, 99)
+    into busca, p_min, p_max
+    from public.profiles
+   where id = yo;
+
+  gen_extra := (select array_agg(e)
+                  from jsonb_array_elements_text(filtros -> 'generos') as e);
+  e_min := coalesce((filtros ->> 'edad_min')::int, 18);
+  e_max := coalesce((filtros ->> 'edad_max')::int, 99);
+  en_linea := coalesce((filtros ->> 'en_linea')::boolean, false);
+  verificado := coalesce((filtros ->> 'verificado')::boolean, false);
+  ciudad := coalesce(filtros ->> 'ciudad', '');
+  ampliar := coalesce((filtros ->> 'ampliar')::boolean, false);
+  orden := coalesce(filtros ->> 'orden', 'distancia');
+
+  if radio_metros >= 0 then
+    clausulas := clausulas || format(
+      'and ST_DWithin(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4) ');
+  end if;
+
+  if not ampliar and coalesce(busca, '') not in ('', 'todos', 'ambos', 'prefiero_no_decirlo', 'otro') then
+    clausulas := clausulas ||
+      'and exists (select 1 from unnest(string_to_array($5, '','')) as opciones(opcion) where public.cumple_genero(opciones.opcion, p.genero)) ';
+  end if;
+
+  if not ampliar and gen_extra is not null and cardinality(gen_extra) > 0 then
+    clausulas := clausulas ||
+      'and exists (select 1 from unnest($6::text[]) as opciones(opcion) where public.cumple_genero(opciones.opcion, p.genero)) ';
+  end if;
+
+  if not ampliar then
+    clausulas := clausulas ||
+      format('and p.edad between greatest($7, %s) and least($8, %s) ', p_min, p_max);
+  end if;
+
+  if not ampliar and en_linea then
+    clausulas := clausulas ||
+      'and p.ocultar_en_linea = false and p.ultima_conexion > now() - interval ''5 minutes'' ';
+  end if;
+
+  if not ampliar and verificado then
+    clausulas := clausulas || 'and p.verificado_status = true ';
+  end if;
+
+  if not ampliar and ciudad <> '' then
+    clausulas := clausulas ||
+      'and lower(p.ciudad) like ''%'' || lower($9) || ''%'' ';
+  end if;
+
+  if orden = 'score' then
+    ordenar := 'order by p.score_popularidad desc, p.id asc';
+  else
+    ordenar := 'order by ST_Distance(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography) asc, p.id asc';
+  end if;
+
+  return query execute format(
+    'select p.* from public.profiles p
+     where p.ubicacion is not null
+       and p.id <> $1
+       %s
+       and not exists (select 1 from public.blocks b
+                       where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
+                          or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
+       and not exists (
+             select 1 from public.rechazos r
+             where r.usuario_id = $1 and r.rechazado_id = p.id
+             group by r.rechazado_id
+             having count(*) >= 3
+           )
+       and not exists (select 1 from public.historial_likes h
+                       where h.usuario_id = $1 and h.usuario_likeado_id = p.id)
+     %s
+     limit $10 offset $11',
+    clausulas, ordenar)
+    using yo, lat, lon, radio_metros, busca, gen_extra, e_min, e_max, ciudad, cuantos, desde;
+end;
 $$;
+
+-- ============================================================
+-- REALTIME: tablas publicadas para actualizaciones en vivo
+-- ============================================================
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'profiles'
+  ) then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'historial_likes'
+  ) then
+    alter publication supabase_realtime add table public.historial_likes;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'visitas'
+  ) then
+    alter publication supabase_realtime add table public.visitas;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'matches'
+  ) then
+    alter publication supabase_realtime add table public.matches;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+end $$;
+
+-- ============================================================
+-- PUSH MÓVIL: tokens FCM + envío a la Edge Function
+-- ============================================================
+-- Tokens de dispositivo por usuario: los registra la app (FCM) al iniciar
+-- sesión y los borra al cerrarla.
+create table if not exists public.device_tokens (
+  id uuid primary key default uuid_generate_v4(),
+  usuario_id uuid not null references public.profiles(id) on delete cascade,
+  token text not null unique,
+  plataforma text not null default 'android',
+  creado_en timestamptz not null default now(),
+  actualizado_en timestamptz not null default now()
+);
+
+alter table public.device_tokens enable row level security;
+
+drop policy if exists "usuario_gestiona_sus_tokens" on public.device_tokens;
+create policy "usuario_gestiona_sus_tokens"
+  on public.device_tokens for all
+  using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
+
+-- El cliente registra su token FCM (upsert por token).
+create or replace function public.registrar_device_token(p_token text, p_plataforma text default 'android')
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'No autenticado';
+  end if;
+  insert into public.device_tokens (usuario_id, token, plataforma)
+  values (auth.uid(), p_token, p_plataforma)
+  on conflict (token) do update
+  set usuario_id = excluded.usuario_id,
+      plataforma = excluded.plataforma,
+      actualizado_en = now();
+end;
+$$;
+
+-- Al cerrar sesión el cliente elimina su token.
+create or replace function public.eliminar_device_token(p_token text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  delete from public.device_tokens
+  where token = p_token and usuario_id = auth.uid();
+end;
+$$;
+
+-- Configuración del envío: URL de la Edge Function y secreto compartido.
+-- Rellenar tras desplegar la función (ver supabase/functions/enviar-push).
+create table if not exists public.app_config (
+  clave text primary key,
+  valor text not null
+);
+
+alter table public.app_config enable row level security;
+drop policy if exists "app_config_solo_service" on public.app_config;
+create policy "app_config_solo_service"
+  on public.app_config for select
+  using (auth.role() = 'service_role');
+
+insert into public.app_config (clave, valor)
+values
+  ('push_url', 'REEMPLAZA_CON_URL_DE_LA_EDGE_FUNCTION'),
+  ('push_secret', 'REEMPLAZA_CON_SECRETO_ALEATORIO')
+on conflict (clave) do nothing;
+
+-- Envía un push sin bloquear la transacción que lo dispara.
+create or replace function public.enviar_push_pg(
+  p_usuario_id uuid,
+  p_titulo text,
+  p_cuerpo text
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_url text;
+  v_secret text;
+  v_body jsonb;
+  v_headers jsonb;
+begin
+  select valor into v_url from public.app_config where clave = 'push_url';
+  if v_url is null or v_url like 'REEMPLAZA_%' or p_usuario_id is null then
+    return;
+  end if;
+  select valor into v_secret from public.app_config where clave = 'push_secret';
+  v_headers := jsonb_build_object(
+    'content-type', 'application/json',
+    'x-flumi-secret', coalesce(v_secret, '')
+  );
+  v_body := jsonb_build_object(
+    'usuario_id', p_usuario_id,
+    'titulo', p_titulo,
+    'cuerpo', p_cuerpo
+  );
+  begin
+    if to_regnamespace('net') is not null then
+      perform net.http_post(v_url, v_headers, v_body);
+    elsif to_regnamespace('supabase_functions') is not null then
+      perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
+    end if;
+  exception when others then
+    -- Un fallo de push nunca debe romper el insert original.
+    null;
+  end;
+end;
+$$;
+
+-- Trigger: avisar al destinatario de un mensaje nuevo.
+create or replace function public.notificar_push_mensaje()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_nombre text;
+begin
+  if new.emisor_id = new.receptor_id then
+    return new;
+  end if;
+  select nombre into v_nombre from public.profiles where id = new.emisor_id;
+  perform public.enviar_push_pg(
+    new.receptor_id,
+    'Nuevo mensaje de ' || coalesce(v_nombre, 'Alguien'),
+    left(coalesce(new.contenido, ''), 100)
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists notificar_push_mensaje_trg on public.messages;
+create trigger notificar_push_mensaje_trg
+  after insert on public.messages
+  for each row execute function public.notificar_push_mensaje();
+
+-- Trigger: avisar al likeado de un Me Gusta nuevo.
+create or replace function public.notificar_push_like()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_nombre text;
+begin
+  select nombre into v_nombre from public.profiles where id = new.usuario_id;
+  perform public.enviar_push_pg(
+    new.usuario_likeado_id,
+    'Flumi',
+    coalesce(v_nombre, 'Alguien') || ' te dio Me Gusta'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists notificar_push_like_trg on public.historial_likes;
+create trigger notificar_push_like_trg
+  after insert on public.historial_likes
+  for each row execute function public.notificar_push_like();
+
+-- Trigger: avisar al visitado de una visita nueva.
+create or replace function public.notificar_push_visita()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_nombre text;
+begin
+  select nombre into v_nombre from public.profiles where id = new.visitante_id;
+  perform public.enviar_push_pg(
+    new.visitado_id,
+    'Flumi',
+    coalesce(v_nombre, 'Alguien') || ' visitó tu perfil'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists notificar_push_visita_trg on public.visitas;
+create trigger notificar_push_visita_trg
+  after insert on public.visitas
+  for each row execute function public.notificar_push_visita();
+
+-- Trigger: avisar a ambos usuarios de un match nuevo.
+create or replace function public.notificar_push_match()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_nombre text;
+begin
+  select nombre into v_nombre from public.profiles where id = new.usuario_a_id;
+  perform public.enviar_push_pg(
+    new.usuario_b_id,
+    'Flumi',
+    coalesce(v_nombre, 'Alguien') || ' hizo match contigo'
+  );
+  select nombre into v_nombre from public.profiles where id = new.usuario_b_id;
+  perform public.enviar_push_pg(
+    new.usuario_a_id,
+    'Flumi',
+    coalesce(v_nombre, 'Alguien') || ' hizo match contigo'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists notificar_push_match_trg on public.matches;
+create trigger notificar_push_match_trg
+  after insert on public.matches
+  for each row execute function public.notificar_push_match();

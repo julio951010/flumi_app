@@ -11,3 +11,4 @@ const String tablaMessages = 'messages';
 const String tablaMatches = 'matches';
 const String tablaReports = 'reports';
 const String tablaBlocks = 'blocks';
+const String tablaConversacionesBorradas = 'conversaciones_borradas';

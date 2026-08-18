@@ -199,7 +199,6 @@ class _ActualizarEmailPantallaState extends State<ActualizarEmailPantalla> {
             const SizedBox(height: 20),
             Form(
               key: _formKey,
-              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(
                 children: [
                   _campo(
@@ -370,7 +369,6 @@ class _CambiarContrasenaPantallaState extends State<CambiarContrasenaPantalla> {
             const SizedBox(height: 20),
             Form(
               key: _formKey,
-              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(
                 children: [
                   _campo(

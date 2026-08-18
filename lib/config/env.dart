@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 bool get kUsarServidorLocal => false;
-bool get kUsarModoMock => false;
 bool get kEsPremium => false;
 
 String get kServidorLocalUrl {

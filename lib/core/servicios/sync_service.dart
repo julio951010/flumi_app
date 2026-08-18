@@ -1,11 +1,13 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
+import '../constantes/constantes.dart';
 import '../base_datos_local/database.dart';
-import '../base_datos_local/tables.dart';
+import '../utilidades/perfil_mapeo.dart';
 import 'connectivity_service.dart';
+import 'estado_servidor_servicio.dart';
 
 class SyncService {
   SyncService(this._db);
@@ -14,10 +16,13 @@ class SyncService {
 
   bool _sincronizando = false;
 
-  String? get _token => null;
+  /// Tolerancia de reloj entre dispositivos para el corte de mensajes de una
+  /// conversación borrada: un mensaje del otro usuario podría llevar un
+  /// timestamp unos segundos detrás del momento en que yo borré. Se resta
+  /// este margen al corte para no ocultar nunca mensajes nuevos por skew.
+  static const _toleranciaBorrado = Duration(minutes: 1);
 
   Future<void> sincronizarTodo({String? userId, bool alIniciarSesion = false}) async {
-    if (kUsarModoMock) return;
     if (_sincronizando) return;
 
     _sincronizando = true;
@@ -34,20 +39,23 @@ class SyncService {
         sincronizarBloqueosPendientes(),
         sincronizarVisitas(userId),
         sincronizarHistorialLikes(userId),
+        sincronizarRechazos(userId),
+        sincronizarConversacionesBorradas(userId),
+        _sincronizarFeedCercanoDesdePerfilPropio(),
       ]);
     } catch (e) {
       // Un fallo de red no debe bloquear el resto de la app.
       print('[sync] Error en sincronizarTodo: $e');
+      EstadoServidorServicio.instancia.marcarFallo(e);
     } finally {
       _sincronizando = false;
     }
   }
 
-  /// Sincroniza únicamente el perfil propio de inmediato.
+  /// Sincroniza Ãºnicamente el perfil propio de inmediato.
   /// Se usa tras editar el perfil o cambiar ajustes de privacidad,
-  /// para no depender únicamente de los disparadores de conectividad/auth.
+  /// para no depender Ãºnicamente de los disparadores de conectividad/auth.
   Future<void> sincronizarPerfil({String? userId}) async {
-    if (kUsarModoMock) return;
     try {
       await _sincronizarPerfilPropio(userId);
     } catch (_) {}
@@ -56,9 +64,8 @@ class SyncService {
   /// Garantiza que exista un perfil propio local: lo descarga de Supabase
   /// o lo crea a partir del usuario autenticado. Devuelve true si existe.
   /// `userId` debe venir del evento de auth (nunca de auth.currentUser justo
-  /// tras iniciar sesión: puede apuntar todavía al usuario anterior).
+  /// tras iniciar sesiÃ³n: puede apuntar todavÃ­a al usuario anterior).
   Future<bool> asegurarPerfilPropio([String? userId]) async {
-    if (kUsarModoMock) return false;
     try {
       await _sincronizarPerfilPropio(userId);
     } catch (_) {}
@@ -68,7 +75,7 @@ class SyncService {
         null;
   }
 
-  /// True mientras un sincronizado completo está en curso (evita tormentas
+  /// True mientras un sincronizado completo estÃ¡ en curso (evita tormentas
   /// de refrescos cuando muchas pantallas piden datos a la vez).
   bool get estaSincronizando => _sincronizando;
 
@@ -76,15 +83,14 @@ class SyncService {
   String? get userIdActual => _obtenerUserId();
 
   /// Refresca (o crea) en la BD local el perfil remoto de un usuario.
-  /// Devuelve true si el servidor tenía datos y se guardaron.
+  /// Devuelve true si el servidor tenÃ­a datos y se guardaron.
   Future<bool> refrescarPerfilRemoto(String uuid) async {
-    if (kUsarModoMock) return false;
     if (!ConnectivityService.instancia.hayConexion) return false;
     try {
       final remoto = await _fetchPerfil(uuid);
       if (remoto == null) return false;
       // Si este perfil es el propio y tiene cambios locales sin subir, la
-      // descarga remota podría revertirlos con datos viejos: el local manda.
+      // descarga remota podrÃ­a revertirlos con datos viejos: el local manda.
       final conPendientes = await (_db.select(_db.usuarios)
             ..where((u) =>
                 u.uuid.equals(uuid) &
@@ -93,7 +99,8 @@ class SyncService {
           .getSingleOrNull();
       if (conPendientes != null) return false;
       await _db.into(_db.usuarios).insertOnConflictUpdate(
-            _mapearPerfilRemoto(remoto, uuid == userIdActual).copyWith(
+            PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: uuid == userIdActual)
+                .copyWith(
               pendienteDeSincronizar: const Value(false),
             ),
           );
@@ -107,9 +114,9 @@ class SyncService {
   // Perfil propio
   // ------------------------------------------------------------
   // alIniciarSesion: en el login siempre intentamos cargar el perfil desde
-  // Supabase (fuente de verdad) y solo nos quedamos con la caché local si el
+  // Supabase (fuente de verdad) y solo nos quedamos con la cachÃ© local si el
   // servidor no devuelve datos. Nunca sobrescribimos datos locales buenos con
-  // un perfil vacío.
+  // un perfil vacÃ­o.
   Future<void> _sincronizarPerfilPropio([String? userId, bool alIniciarSesion = false]) async {
     final id = userId ?? _obtenerUserId();
     if (id == null) return;
@@ -127,7 +134,7 @@ class SyncService {
           ..where((u) => u.esPerfilPropio.equals(true)))
         .getSingleOrNull();
 
-    // Subir primero los cambios pendientes para dejar el servidor al día.
+    // Subir primero los cambios pendientes para dejar el servidor al dÃ­a.
     if (local != null) {
       final pendientes = await (_db.select(_db.usuarios)
             ..where((u) =>
@@ -144,16 +151,16 @@ class SyncService {
         ultimaSincronizacionTimestamp: Value(DateTime.now()),
       ));
     } catch (e) {
-      // La subida falló (RLS, CHECK, tipos de columna, red...). No borramos
-      // la marca pendiente para reintentar más tarde, pero lo registramos
-      // para poder diagnosticar por qué el perfil no llega a Supabase.
+      // La subida fallÃ³ (RLS, CHECK, tipos de columna, red...). No borramos
+      // la marca pendiente para reintentar mÃ¡s tarde, pero lo registramos
+      // para poder diagnosticar por quÃ© el perfil no llega a Supabase.
       print('[sync] Error al subir el perfil propio: $e');
     }
       }
     }
 
     // En el login cargamos desde Supabase; si hay perfil remoto lo usamos,
-    // si no (sin red / sin perfil en servidor) conservamos la caché local.
+    // si no (sin red / sin perfil en servidor) conservamos la cachÃ© local.
     if (alIniciarSesion) {
       Map<String, dynamic>? remoto;
       try {
@@ -164,20 +171,20 @@ class SyncService {
         remoto = null;
       }
       if (remoto != null) {
-        // Si la caché local tiene cambios pendientes que aún no se subieron
-        // (p. ej. fotos recién editadas/eliminadas), NO la sobreescribimos
-        // con el remoto: el servidor podría traer datos viejos y revertiría
-        // el cambio del usuario. El upload ya se intentó arriba; si falló,
-        // la marca pendiente se conserva y el cambio se reintentará.
+        // Si la cachÃ© local tiene cambios pendientes que aÃºn no se subieron
+        // (p. ej. fotos reciÃ©n editadas/eliminadas), NO la sobreescribimos
+        // con el remoto: el servidor podrÃ­a traer datos viejos y revertirÃ­a
+        // el cambio del usuario. El upload ya se intentÃ³ arriba; si fallÃ³,
+        // la marca pendiente se conserva y el cambio se reintentarÃ¡.
         if (local != null && local.pendienteDeSincronizar) {
           return;
         }
         // Re-chequeo justo antes de sobrescribir: la descarga remota pudo
         // haber arrancado ANTES de que el usuario guardara un cambio, y al
-        // terminar (red lenta) traería datos viejos que revertirían la edición
-        // local recién escrita. Si en este instante hay pendientes, el cambio
-        // local manda y se preserva (el upload fire-and-forget de la edición
-        // ya está subiéndolo).
+        // terminar (red lenta) traerÃ­a datos viejos que revertirÃ­an la ediciÃ³n
+        // local reciÃ©n escrita. Si en este instante hay pendientes, el cambio
+        // local manda y se preserva (el upload fire-and-forget de la ediciÃ³n
+        // ya estÃ¡ subiÃ©ndolo).
         final reciente = await (_db.select(_db.usuarios)
               ..where((u) =>
                   u.esPerfilPropio.equals(true) &
@@ -186,16 +193,16 @@ class SyncService {
         if (reciente != null) {
           return;
         }
-        // Si ya tenemos caché local, NO la sobreescribimos con un perfil
-        // vacío del servidor (p. ej. porque la subida falló silenciosamente).
+        // Si ya tenemos cachÃ© local, NO la sobreescribimos con un perfil
+        // vacÃ­o del servidor (p. ej. porque la subida fallÃ³ silenciosamente).
         // Usamos el servidor solo cuando este trae datos; si no, conservamos
-        // la caché local para no perder la información del usuario.
+        // la cachÃ© local para no perder la informaciÃ³n del usuario.
         if (local != null && !_remotoTieneDatos(remoto)) {
           return;
         }
         try {
           await _db.into(_db.usuarios).insertOnConflictUpdate(
-                _mapearPerfilRemoto(remoto, true).copyWith(
+                PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true).copyWith(
                   pendienteDeSincronizar: const Value(false),
                 ),
               );
@@ -207,7 +214,7 @@ class SyncService {
       final respaldo = _perfilDesdeAuth(id);
       try {
         await _db.into(_db.usuarios).insertOnConflictUpdate(
-              _mapearPerfilRemoto(respaldo, true).copyWith(
+              PerfilMapeo.perfilRemotoACompanion(respaldo, esPropio: true).copyWith(
                 pendienteDeSincronizar: const Value(true),
               ),
             );
@@ -228,7 +235,7 @@ class SyncService {
       }
       remoto ??= _perfilDesdeAuth(id);
       await _db.into(_db.usuarios).insertOnConflictUpdate(
-            _mapearPerfilRemoto(remoto, true).copyWith(
+            PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true).copyWith(
               pendienteDeSincronizar: const Value(true),
             ),
           );
@@ -238,8 +245,23 @@ class SyncService {
   // ------------------------------------------------------------
   // Mensajes
   // ------------------------------------------------------------
-  /// Sube de inmediato los mensajes pendientes (write-through tras enviar).
+  /// Sube de inmediato los mensajes pendientes (write-through tras enviar) y
+  /// descarga del servidor el historial completo (los mensajes que el
+  /// Realtime pudo perder mientras estuvo caído/cerrado).
   Future<void> sincronizarMensajesPendientes() async {
+    if (_sincronizandoMensajes) return;
+    _sincronizandoMensajes = true;
+    try {
+      await _subirMensajesPendientes();
+      await _descargarMensajesRemotos();
+    } finally {
+      _sincronizandoMensajes = false;
+    }
+  }
+
+  bool _sincronizandoMensajes = false;
+
+  Future<void> _subirMensajesPendientes() async {
     final pendientes = await (_db.select(_db.mensajes)
           ..where((m) => m.pendienteDeSincronizar.equals(true))
           ..orderBy([(m) => OrderingTerm.asc(m.timestamp)]))
@@ -254,7 +276,8 @@ class SyncService {
           pendienteDeSincronizar: Value(false),
           estadoEnvio: Value('enviado'),
         ));
-      } catch (_) {
+        EstadoServidorServicio.instancia.marcarExito();
+      } catch (e) {
         final intentos = mensaje.intentosDeSincronizacion + 1;
         await (_db.update(_db.mensajes)
               ..where((m) => m.uuid.equals(mensaje.uuid)))
@@ -262,10 +285,113 @@ class SyncService {
           intentosDeSincronizacion: Value(intentos),
           estadoEnvio: Value(intentos >= 5 ? 'fallido' : mensaje.estadoEnvio),
         ));
+        if (ConnectivityService.instancia.hayConexion) {
+          EstadoServidorServicio.instancia.marcarFallo(e);
+        }
       }
     }
   }
 
+  /// Descarga del servidor el historial completo de mensajes (fuente de
+  /// verdad). Si el Realtime perdió eventos (suscripción caída, app cerrada,
+  /// gap al recrear los streams...), aquí se recuperan. Los mensajes locales
+  /// que aún no se han subido no se sobrescriben (gana el local pendiente).
+  Future<void> _descargarMensajesRemotos() async {
+    if (kUsarServidorLocal) return;
+    final userId = _obtenerUserId();
+    if (userId == null) return;
+    try {
+      final remoto = await sb.Supabase.instance.client
+          .from('messages')
+          .select()
+          .or('emisor_id.eq.$userId,receptor_id.eq.$userId');
+      final filas =
+          (remoto as List).map((f) => f as Map<String, dynamic>).toList();
+      final pendientesLocales = (await (_db.select(_db.mensajes)
+            ..where((m) => m.pendienteDeSincronizar.equals(true)))
+          .get())
+          .map((m) => m.uuid)
+          .toSet();
+
+      final companiones = <MensajesCompanion>[];
+      // Cortes de borrado: el historial anterior al borrado de una
+      // conversación no se vuelve a descargar del servidor, aunque la
+      // conversación esté reactivada (solo renace con los mensajes nuevos).
+      final borradas = await _db.select(_db.conversacionesEliminadas).get();
+      final cortes = {
+        for (final b in borradas) b.otroUsuarioId: b.eliminadoEn
+      };
+      for (final f in filas) {
+        final id = f['id'] as String?;
+        if (id == null || pendientesLocales.contains(id)) continue;
+        final emisor = f['emisor_id'] as String? ?? '';
+        final timestamp =
+            PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now();
+        final otroId = emisor == userId
+            ? (f['receptor_id'] as String? ?? '')
+            : emisor;
+        final corte = cortes[otroId];
+        // Estricto sin tolerancia: el historial anterior al borrado nunca se
+        // vuelve a descargar. La tolerancia de reloj solo se aplica al
+        // mostrarlo (un mensaje nuevo con skew no se oculta de la vista).
+        if (corte != null && !timestamp.isAfter(corte)) {
+          continue;
+        }
+        companiones.add(MensajesCompanion.insert(
+          uuid: id,
+          emisorId: emisor,
+          receptorId: f['receptor_id'] as String? ?? '',
+          contenido: f['contenido'] as String? ?? '',
+          timestamp: timestamp,
+          pendienteDeSincronizar: const Value(false),
+          estadoEnvio: Value(emisor == userId ? 'enviado' : 'entregado'),
+        ));
+      }
+      if (companiones.isNotEmpty) {
+        await _db.batch(
+            (batch) => batch.insertAllOnConflictUpdate(_db.mensajes, companiones));
+        // Los mensajes que llegaron por sync (no por Realtime) también
+        // reactivan la conversación si el usuario la había borrado: si hay
+        // un mensaje más nuevo que el borrado, se quita el tombstone.
+        await _limpiarTombstonesObsoletos();
+      }
+      // Purga física del historial anterior a los cortes de borrado (filas
+      // que quedaron de builds anteriores o reinsertadas por Realtime antes
+      // del corte): sin ella, al reactivar la conversación reaparecerían los
+      // mensajes que el usuario borró. Se excluyen los pendientes (aún no
+      // subidos) y se aplica la tolerancia de reloj.
+      for (final entry in cortes.entries) {
+        await (_db.delete(_db.mensajes)
+              ..where((m) =>
+                  (((m.emisorId.equals(userId) &
+                              m.receptorId.equals(entry.key)) |
+                          (m.emisorId.equals(entry.key) &
+                              m.receptorId.equals(userId))) &
+                      m.timestamp.isBiggerThanValue(entry.value
+                          .subtract(_toleranciaBorrado))
+                          .not()) &
+                      m.pendienteDeSincronizar.equals(false)))
+              .go();
+      }
+      final idsRemotos = filas.map((f) => f['id'] as String).toSet();
+      final locales = await (_db.select(_db.mensajes)
+            ..where((m) => m.pendienteDeSincronizar.equals(false) &
+                (m.emisorId.equals(userId) | m.receptorId.equals(userId))))
+          .get();
+      final aBorrar = locales
+          .where((m) => !idsRemotos.contains(m.uuid))
+          .map((m) => m.uuid)
+          .toList();
+      if (aBorrar.isNotEmpty) {
+        await (_db.delete(_db.mensajes)
+              ..where((m) => m.uuid.isIn(aBorrar)))
+            .go();
+      }
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // Matches
   // ------------------------------------------------------------
   // Matches
   // ------------------------------------------------------------
@@ -281,6 +407,51 @@ class SyncService {
               ..where((m) => m.uuid.equals(match.uuid)))
             .write(const MatchesCompanion(pendienteDeSincronizar: Value(false)));
       } catch (_) {}
+    }
+
+    final userIdResuelto = _obtenerUserId();
+    if (userIdResuelto == null || kUsarServidorLocal) return;
+    try {
+      // Descargar los matches del usuario y purgar los huérfanos locales
+      // (p. ej. tras limpiar el remoto con tool/limpiar_remoto.sql).
+      final remoto = await sb.Supabase.instance.client
+          .from('matches')
+          .select()
+          .or('usuario_a_id.eq.$userIdResuelto,usuario_b_id.eq.$userIdResuelto');
+      final filas = (remoto as List).map((fila) {
+        final f = fila as Map<String, dynamic>;
+        return MatchesCompanion.insert(
+          uuid: f['id'] as String,
+          usuarioAId: f['usuario_a_id'] as String,
+          usuarioBId: f['usuario_b_id'] as String,
+          timestampMatch:
+              PerfilMapeo.parsearFecha(f['timestamp_match']) ?? DateTime.now(),
+          ultimoMensajePreview: const Value.absent(),
+          ultimoMensajeTimestamp: const Value.absent(),
+          leidoHasta: const Value.absent(),
+        );
+      }).toList();
+      if (filas.isNotEmpty) {
+        await _db.batch((batch) {
+          batch.insertAllOnConflictUpdate(_db.matches, filas);
+        });
+      }
+      await _purgarMatchesHuerfanos(filas.map((f) => f.uuid.value).toSet());
+    } catch (_) {}
+  }
+
+  /// Borra de la BD local los matches ya sincronizados que el remoto ya no
+  /// tiene (p. ej. tras limpiar con `tool/limpiar_remoto.sql`).
+  Future<void> _purgarMatchesHuerfanos(Set<String> idsRemotos) async {
+    final locales = await (_db.select(_db.matches)
+          ..where((m) => m.pendienteDeSincronizar.equals(false)))
+        .get();
+    final aBorrar = locales
+        .where((m) => !idsRemotos.contains(m.uuid))
+        .map((m) => m.uuid)
+        .toList();
+    if (aBorrar.isNotEmpty) {
+      await (_db.delete(_db.matches)..where((m) => m.uuid.isIn(aBorrar))).go();
     }
   }
 
@@ -354,7 +525,7 @@ class SyncService {
             .upsert(_suscripcionARemoto(local));
       }
 
-      // Descargar la suscripción remota para mantener coherencia local
+      // Descargar la suscripciÃ³n remota para mantener coherencia local
       final remoto = await sb.Supabase.instance.client
           .from('suscripciones')
           .select()
@@ -369,7 +540,7 @@ class SyncService {
   }
 
   // ------------------------------------------------------------
-  // Usos diarios (límites por plan)
+  // Usos diarios (lÃ­mites por plan)
   // ------------------------------------------------------------
   Future<void> sincronizarUsosDiarios([String? userId]) async {
     final userIdResuelto = userId ?? _obtenerUserId();
@@ -400,12 +571,9 @@ class SyncService {
         return;
       }
 
-      if (local != null) {
-        await sb.Supabase.instance.client
-            .from('usos_diarios')
-            .upsert(_usosDiariosARemoto(local));
-      }
-
+      // El servidor es la fuente de verdad del cupo diario (lo valida el RPC
+      // registrar_me_gusta). El contador local es solo un espejo: nunca se
+      // sube (un espejo rancio re-infectaría el remoto tras una limpieza).
       final remoto = await sb.Supabase.instance.client
           .from('usos_diarios')
           .select()
@@ -416,12 +584,26 @@ class SyncService {
         await _db.into(_db.usosDiarios).insertOnConflictUpdate(
               _usosDiariosDesdeRemoto(remoto),
             );
+      } else if (local != null) {
+        // Sin registro remoto hoy (p. ej. tras limpiar el remoto de
+        // pruebas): el espejo local no debe bloquear por usos fantasma.
+        await _db.into(_db.usosDiarios).insertOnConflictUpdate(
+              UsosDiariosCompanion(
+                usuarioId: Value(userIdResuelto),
+                fecha: Value(inicioDia),
+                meGustasUsados: const Value(0),
+                deshacerUsados: const Value(0),
+                superlikesUsados: const Value(0),
+                boostsUsados: const Value(0),
+                vistasCercaUsadas: const Value(0),
+              ),
+            );
       }
     } catch (_) {}
   }
 
   // ------------------------------------------------------------
-  // Visitas (quién visitó a quién)
+  // Visitas (quiÃ©n visitÃ³ a quiÃ©n)
   // ------------------------------------------------------------
   Future<void> sincronizarVisitas([String? userId]) async {
     final userIdResuelto = userId ?? _obtenerUserId();
@@ -457,7 +639,7 @@ class SyncService {
             uuid: f['id'] as String,
             visitanteId: f['visitante_id'] as String,
             visitadoId: f['visitado_id'] as String,
-            timestamp: Value(_parsearFecha(f['timestamp']) ?? DateTime.now()),
+            timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
             pendienteDeSincronizar: const Value(false),
           );
         }).toList();
@@ -469,18 +651,18 @@ class SyncService {
         return;
       }
 
-      // Descargar las visitas recibidas para "quien te vio"
+      // Descargar las visitas recibidas y propias para "quien te vio"
       final remoto = await sb.Supabase.instance.client
           .from('visitas')
           .select()
-          .eq('visitado_id', userIdResuelto);
+          .or('visitante_id.eq.$userIdResuelto,visitado_id.eq.$userIdResuelto');
       final filas = (remoto as List).map((fila) {
         final f = fila as Map<String, dynamic>;
         return VisitasCompanion.insert(
           uuid: f['id'] as String,
           visitanteId: f['visitante_id'] as String,
           visitadoId: f['visitado_id'] as String,
-          timestamp: Value(_parsearFecha(f['timestamp']) ?? DateTime.now()),
+          timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
           pendienteDeSincronizar: const Value(false),
         );
       }).toList();
@@ -489,12 +671,42 @@ class SyncService {
           batch.insertAllOnConflictUpdate(_db.visitas, filas);
         });
       }
-    } catch (_) {}
+      await _purgarVisitasHuerfanas(filas.map((f) => f.uuid.value).toSet());
+      EstadoServidorServicio.instancia.marcarExito();
+    } catch (e) {
+      EstadoServidorServicio.instancia.marcarFallo(e);
+    }
+  }
+
+  /// Borra de la BD local las visitas ya sincronizadas que el remoto ya no
+  /// tiene (p. ej. tras limpiar con `tool/limpiar_remoto.sql`).
+  Future<void> _purgarVisitasHuerfanas(Set<String> idsRemotos) async {
+    final locales = await (_db.select(_db.visitas)
+          ..where((v) => v.pendienteDeSincronizar.equals(false)))
+        .get();
+    final aBorrar = locales
+        .where((v) => !idsRemotos.contains(v.uuid))
+        .map((v) => v.uuid)
+        .toList();
+    if (aBorrar.isNotEmpty) {
+      await (_db.delete(_db.visitas)..where((v) => v.uuid.isIn(aBorrar))).go();
+    }
   }
 
   // ------------------------------------------------------------
   // Historial de likes
   // ------------------------------------------------------------
+
+  /// Fusiona el corte de lectura local con el remoto: `leido_hasta` solo
+  /// avanza (nunca retrocede), así el "leído" nunca se pierde al re-descargar
+  /// filas que el remoto tiene más viejas o vacías (p. ej. la dirección de
+  /// like-only que RLS impide escribir en remoto).
+  static DateTime? leidoHastaMasReciente(DateTime? local, DateTime? remoto) {
+    if (local == null) return remoto;
+    if (remoto == null || local.isAfter(remoto)) return local;
+    return remoto;
+  }
+
   Future<void> sincronizarHistorialLikes([String? userId]) async {
     final userIdResuelto = userId ?? _obtenerUserId();
     if (userIdResuelto == null) return;
@@ -523,14 +735,21 @@ class SyncService {
         );
         if (res.statusCode != 200) return;
         final lista = jsonDecode(res.body) as List;
+        final leidosLocales = {
+          for (final l in await _db.select(_db.historialLikes).get())
+            l.uuid: l.leidoHasta
+        };
         final filas = lista.map((fila) {
           final f = fila as Map<String, dynamic>;
           return HistorialLikesCompanion.insert(
             uuid: f['id'] as String,
             usuarioId: f['usuario_id'] as String,
             usuarioLikeadoId: f['usuario_likeado_id'] as String,
-            timestamp: Value(_parsearFecha(f['timestamp']) ?? DateTime.now()),
+            timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
             pendienteDeSincronizar: const Value(false),
+            leidoHasta: Value(leidoHastaMasReciente(
+                leidosLocales[f['id']],
+                PerfilMapeo.parsearFecha(f['leido_hasta']))),
           );
         }).toList();
         if (filas.isNotEmpty) {
@@ -544,15 +763,23 @@ class SyncService {
       final remoto = await sb.Supabase.instance.client
           .from('historial_likes')
           .select()
-          .eq('usuario_id', userIdResuelto);
+          .or(
+              'usuario_id.eq.$userIdResuelto,usuario_likeado_id.eq.$userIdResuelto');
+      final leidosLocales = {
+        for (final l in await _db.select(_db.historialLikes).get())
+          l.uuid: l.leidoHasta
+      };
       final filas = (remoto as List).map((fila) {
         final f = fila as Map<String, dynamic>;
         return HistorialLikesCompanion.insert(
           uuid: f['id'] as String,
           usuarioId: f['usuario_id'] as String,
           usuarioLikeadoId: f['usuario_likeado_id'] as String,
-          timestamp: Value(_parsearFecha(f['timestamp']) ?? DateTime.now()),
+          timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
           pendienteDeSincronizar: const Value(false),
+          leidoHasta: Value(leidoHastaMasReciente(
+              leidosLocales[f['id']],
+              PerfilMapeo.parsearFecha(f['leido_hasta']))),
         );
       }).toList();
       if (filas.isNotEmpty) {
@@ -560,6 +787,239 @@ class SyncService {
           batch.insertAllOnConflictUpdate(_db.historialLikes, filas);
         });
       }
+      await _purgarLikesHuerfanos(filas.map((f) => f.uuid.value).toSet());
+      EstadoServidorServicio.instancia.marcarExito();
+    } catch (e) {
+      EstadoServidorServicio.instancia.marcarFallo(e);
+    }
+  }
+
+  /// Borra de la BD local los likes ya sincronizados que el remoto ya no
+  /// tiene (p. ej. tras limpiar con `tool/limpiar_remoto.sql`).
+  Future<void> _purgarLikesHuerfanos(Set<String> idsRemotos) async {
+    final locales = await (_db.select(_db.historialLikes)
+          ..where((h) => h.pendienteDeSincronizar.equals(false)))
+        .get();
+    final aBorrar = locales
+        .where((h) => !idsRemotos.contains(h.uuid))
+        .map((h) => h.uuid)
+        .toList();
+    if (aBorrar.isNotEmpty) {
+      await (_db.delete(_db.historialLikes)
+            ..where((h) => h.uuid.isIn(aBorrar)))
+          .go();
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Conversaciones borradas (tombstones remotos)
+  // ------------------------------------------------------------
+  /// Baja del servidor los marcadores de conversaciones borradas SOLO propias
+  /// y recrea los tombstones locales (p. ej. tras reinstalar la app, donde
+  /// la tabla local se perdió pero el servidor aún recuerda el borrado).
+  /// Es aditivo a propósito: la verdad para la UI es el tombstone local.
+  /// Los marcadores obsoletos (la conversación retomó actividad: hay un
+  /// mensaje local más nuevo que el borrado) se ignoran y se limpian.
+  Future<void> sincronizarConversacionesBorradas([String? userId]) async {
+    if (kUsarServidorLocal) return;
+    final userIdResuelto = userId ?? _obtenerUserId();
+    if (userIdResuelto == null) return;
+    try {
+      // Un borrado deja de estar vigente en cuanto la conversación retoma
+      // actividad: si ya existe un mensaje local más nuevo que el borrado,
+      // el tombstone es basura y se elimina (local y remoto). Esto evita
+      // que el siguiente sync vuelva a ocultar la conversación después de
+      // que cualquiera de los dos vuelva a escribir.
+      await _limpiarTombstonesObsoletos();
+
+      final remoto = await sb.Supabase.instance.client
+          .from(tablaConversacionesBorradas)
+          .select()
+          .eq('usuario_id', userIdResuelto);
+      final filas = remoto as List;
+      final companions = <ConversacionesEliminadasCompanion>[];
+      for (final f in filas) {
+        final m = f as Map<String, dynamic>;
+        final otroUsuarioId = m['otro_usuario_id'] as String?;
+        if (otroUsuarioId == null) continue;
+        final borradoEn = PerfilMapeo.parsearFecha(m['borrado_en']);
+        // Marcador viejo de una conversación que ya volvió a tener
+        // actividad: no se vuelve a ocultar aunque el servidor aún lo tenga
+        // (p. ej. porque la eliminación remota del marcador falló o quedó
+        // una carrera con el sync).
+        if (borradoEn != null &&
+            await _conversacionTieneMensajeMasNuevo(
+                otroUsuarioId, borradoEn)) {
+          continue;
+        }
+        companions.add(ConversacionesEliminadasCompanion(
+          otroUsuarioId: Value(otroUsuarioId),
+        ));
+      }
+      if (companions.isNotEmpty) {
+        await _db.batch((batch) {
+          batch.insertAllOnConflictUpdate(
+              _db.conversacionesEliminadas, companions);
+        });
+      }
+      // Re-subir los tombstones locales vigentes (upsert idempotente): cubre
+      // los borrados hechos sin conexión, cuyo marcador no llegó a subirse
+      // en el momento. Si es un INSERT nuevo y el otro también borró, el
+      // trigger del servidor limpia los mensajes del par. Las conversaciones
+      // reactivadas ya no se suben (el marcador se elimina en la reactivación).
+      // La limpieza se repite justo antes de subir: cierra la carrera en la
+      // que una reactivación (realtime o sync concurrente) acaba de marcar el
+      // tombstone y la subida lo resucitaría en el servidor.
+      await _limpiarTombstonesObsoletos();
+      final locales = await _db.select(_db.conversacionesEliminadas).get();
+      final vigentes = locales.where((t) => !t.reactivada).toList();
+      if (vigentes.isNotEmpty) {
+        await sb.Supabase.instance.client
+            .from(tablaConversacionesBorradas)
+            .upsert(vigentes
+                .map((t) => {
+                      'usuario_id': userIdResuelto,
+                      'otro_usuario_id': t.otroUsuarioId,
+                      'borrado_en': t.eliminadoEn.toUtc().toIso8601String(),
+                    })
+                .toList());
+      }
+    } catch (_) {}
+  }
+
+  /// ¿Existe un mensaje local entre yo y [otroUsuarioId] más nuevo que
+  /// [momento]? Si sí, el borrado de esa conversación ya no está vigente.
+  /// Con tolerancia de reloj hacia lo "reciente": un mensaje nuevo cuyo
+  /// timestamp quedó unos segundos detrás del corte por skew entre
+  /// dispositivos sí reactiva la conversación (sesgo: mostrar la
+  /// conversación antes que ocultarla).
+  Future<bool> _conversacionTieneMensajeMasNuevo(
+      String otroUsuarioId, DateTime momento) async {
+    final yo = _obtenerUserId();
+    if (yo == null) return false;
+    final filas = await (_db.select(_db.mensajes)
+          ..where((m) =>
+              ((m.emisorId.equals(yo) &
+                          m.receptorId.equals(otroUsuarioId)) |
+                      (m.emisorId.equals(otroUsuarioId) &
+                          m.receptorId.equals(yo))) &
+                  m.timestamp
+                      .isBiggerThanValue(momento.subtract(_toleranciaBorrado)))
+          ..limit(1))
+        .get();
+    return filas.isNotEmpty;
+  }
+
+  /// Marca como reactivados los tombstones obsoletos (conversación retomada:
+  /// hay un mensaje local más nuevo que el borrado) y borra su marcador remoto
+  /// propio. La fila se conserva como corte: el historial anterior al borrado
+  /// no vuelve a descargarse ni a mostrarse. Tampoco se vuelve a ocultar la
+  /// conversación, y el marcador no puede disparar el trigger de limpieza si
+  /// el otro usuario borra la conversación de nuevo.
+  Future<void> _limpiarTombstonesObsoletos() async {
+    final tombstones = await _db.select(_db.conversacionesEliminadas).get();
+    for (final t in tombstones) {
+      if (t.reactivada) continue;
+      if (!await _conversacionTieneMensajeMasNuevo(
+          t.otroUsuarioId, t.eliminadoEn)) {
+        continue;
+      }
+      await (_db.update(_db.conversacionesEliminadas)
+            ..where((x) => x.otroUsuarioId.equals(t.otroUsuarioId)))
+          .write(const ConversacionesEliminadasCompanion(
+        reactivada: Value(true),
+      ));
+      if (kUsarServidorLocal || !ConnectivityService.instancia.hayConexion) {
+        continue;
+      }
+      final yo = _obtenerUserId();
+      if (yo == null) continue;
+      try {
+        await sb.Supabase.instance.client
+            .from(tablaConversacionesBorradas)
+            .delete()
+            .eq('usuario_id', yo)
+            .eq('otro_usuario_id', t.otroUsuarioId)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Rechazos (Nope)
+  // ------------------------------------------------------------
+  Future<void> sincronizarRechazos([String? userId]) async {
+    final userIdResuelto = userId ?? _obtenerUserId();
+    if (userIdResuelto == null) return;
+
+    try {
+      final pendientes = await (_db.select(_db.rechazos)
+            ..where((r) => r.pendienteDeSincronizar.equals(true)))
+          .get();
+
+      for (final rechazo in pendientes) {
+        try {
+          await _subirRechazo(rechazo);
+          await (_db.update(_db.rechazos)
+                ..where((r) => r.uuid.equals(rechazo.uuid)))
+              .write(const RechazosCompanion(
+                  pendienteDeSincronizar: Value(false)));
+        } catch (_) {}
+      }
+
+      if (kUsarServidorLocal) return;
+
+      final remoto = await sb.Supabase.instance.client
+          .from('rechazos')
+          .select()
+          .eq('usuario_id', userIdResuelto);
+      final filas = (remoto as List).map((fila) {
+        final f = fila as Map<String, dynamic>;
+        return RechazosCompanion.insert(
+          uuid: f['id'] as String,
+          usuarioId: f['usuario_id'] as String,
+          rechazadoId: f['rechazado_id'] as String,
+          timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
+          pendienteDeSincronizar: const Value(false),
+        );
+      }).toList();
+      if (filas.isNotEmpty) {
+        await _db.batch((batch) {
+          batch.insertAllOnConflictUpdate(_db.rechazos, filas);
+        });
+      }
+      await _purgarRechazosHuerfanos(filas.map((f) => f.uuid.value).toSet());
+      EstadoServidorServicio.instancia.marcarExito();
+    } catch (e) {
+      EstadoServidorServicio.instancia.marcarFallo(e);
+    }
+  }
+
+  /// Borra de la BD local los rechazos ya sincronizados que el remoto ya no
+  /// tiene (p. ej. tras limpiar con `tool/limpiar_remoto.sql`).
+  Future<void> _purgarRechazosHuerfanos(Set<String> idsRemotos) async {
+    final locales = await (_db.select(_db.rechazos)
+          ..where((r) => r.pendienteDeSincronizar.equals(false)))
+        .get();
+    final aBorrar = locales
+        .where((r) => !idsRemotos.contains(r.uuid))
+        .map((r) => r.uuid)
+        .toList();
+    if (aBorrar.isNotEmpty) {
+      await (_db.delete(_db.rechazos)..where((r) => r.uuid.isIn(aBorrar))).go();
+    }
+  }
+
+  /// Borra el rechazo remoto (Deshacer). Best-effort: si falla, el siguiente
+  /// sync de rechazos no lo reintenta (el rechazo ya no existe localmente).
+  Future<void> borrarRechazoRemoto(String usuarioId, String rechazadoId) async {
+    if (!ConnectivityService.instancia.hayConexion) return;
+    if (kUsarServidorLocal) return;
+    try {
+      await sb.Supabase.instance.client
+          .from('rechazos')
+          .delete()
+          .match({'usuario_id': usuarioId, 'rechazado_id': rechazadoId});
     } catch (_) {}
   }
 
@@ -571,15 +1031,6 @@ class SyncService {
       return 'local-dev';
     }
     return sb.Supabase.instance.client.auth.currentUser?.id;
-  }
-
-  String _getAuthHeader() {
-    final prefs = _localPrefs();
-    return prefs != null ? 'Bearer $prefs' : '';
-  }
-
-  String? _localPrefs() {
-    return null;
   }
 
   Future<Map<String, dynamic>?> _fetchPerfil(String userId) async {
@@ -601,11 +1052,11 @@ class SyncService {
         .select()
         .eq('id', userId)
         .maybeSingle();
-    return remoto as Map<String, dynamic>?;
+    return remoto;
   }
 
   // Perfil local de respaldo a partir del usuario autenticado, por si la
-  // descarga remota falla o el perfil remoto aún no existe.
+  // descarga remota falla o el perfil remoto aÃºn no existe.
   Map<String, dynamic> _perfilDesdeAuth(String userId) {
     final authUser = sb.Supabase.instance.client.auth.currentUser;
     final nombre = (authUser?.userMetadata?['nombre'] as String?) ??
@@ -617,7 +1068,7 @@ class SyncService {
     };
   }
 
-  // Indica si el perfil remoto trae datos de perfil (no está vacío).
+  // Indica si el perfil remoto trae datos de perfil (no estÃ¡ vacÃ­o).
   bool _remotoTieneDatos(Map<String, dynamic> r) {
     String s(dynamic v) => (v ?? '').toString();
     bool listaLlena(dynamic v) => v is List && v.isNotEmpty;
@@ -629,117 +1080,6 @@ class SyncService {
         listaLlena(r['intereses']) ||
         listaLlena(r['fotos_urls']) ||
         r['perfil_completado'] == true;
-  }
-
-  // Mapea el perfil remoto (Supabase o servidor local) al companion local.
-  UsuariosCompanion _mapearPerfilRemoto(
-    Map<String, dynamic> p,
-    bool esPropio,
-  ) {
-    final fechaNacRaw = p['fecha_nacimiento'] as String?;
-    final fechaNac =
-        fechaNacRaw != null ? _parsearFecha(fechaNacRaw) : null;
-    final edadRemota = p['edad'];
-    final edad = (edadRemota is int && edadRemota > 0)
-        ? edadRemota
-        : (fechaNac != null
-            ? _calcularEdad(fechaNac.toIso8601String())
-            : 18);
-
-    return UsuariosCompanion.insert(
-      uuid: p['id'] as String,
-      nombre: (p['nombre'] as String?) ?? '',
-      edad: edad,
-      genero: (p['genero'] as String?) ?? 'otro',
-      buscaGenero: (p['busca_genero'] as String?) ?? 'otro',
-      biografia: Value((p['biografia'] as String?) ?? ''),
-      queBusca: Value((p['que_busca'] as String?) ?? ''),
-      preferenciaEdadMin: Value(_aInt(p['preferencia_edad_min'], 18)),
-      preferenciaEdadMax: Value(_aInt(p['preferencia_edad_max'], 99)),
-      fechaNacimiento: Value(fechaNac),
-      ciudad: Value((p['ciudad'] as String?) ?? ''),
-      ubicacionLat: Value(_aDouble(p['ubicacion_lat'], 0.0)),
-      ubicacionLon: Value(_aDouble(p['ubicacion_lon'], 0.0)),
-      ultimaConexion: Value(_parsearFecha(p['ultima_conexion'])),
-      ocultarEnLinea: Value(_aBool(p['ocultar_en_linea'], false)),
-      ocultarEdad: Value(_aBool(p['ocultar_edad'], false)),
-      verificadoStatus: Value(_aBool(p['verificado_status'], false)),
-      scorePopularidad: Value(_aInt(p['score_popularidad'], 0)),
-      perfilCompletado: Value(_aBool(p['perfil_completado'], false)),
-      orientacionSexual: Value((p['orientacion_sexual'] as String?) ?? ''),
-      situacionSentimental:
-          Value((p['situacion_sentimental'] as String?) ?? ''),
-      intereses: Value(_aListaString(p['intereses'])),
-      altura: Value((p['altura'] as String?) ?? ''),
-      educacion: Value((p['educacion'] as String?) ?? ''),
-      trabajo: Value((p['trabajo'] as String?) ?? ''),
-      profesion: Value((p['profesion'] as String?) ?? ''),
-      preferenciaRelacion: Value((p['preferencia_relacion'] as String?) ?? ''),
-      bebe: Value((p['bebe'] as String?) ?? ''),
-      fuma: Value((p['fuma'] as String?) ?? ''),
-      hijos: Value((p['hijos'] as String?) ?? ''),
-      personalidad: Value((p['personalidad'] as String?) ?? ''),
-      signoZodiaco: Value((p['signo_zodiaco'] as String?) ?? ''),
-      mascotas: Value((p['mascotas'] as String?) ?? ''),
-      religion: Value((p['religion'] as String?) ?? ''),
-      idiomas: Value((p['idiomas'] as String?) ?? ''),
-      tatuajes: Value((p['tatuajes'] as String?) ?? ''),
-      preguntasPerfil: Value(_aPreguntas(p['preguntas_perfil'])),
-      fotoVerificacion: Value((p['foto_verificacion'] as String?) ?? ''),
-      fotosUrls: Value(_aListaString(p['fotos_urls'])),
-      creadoEn: Value(_parsearFecha(p['creado_en']) ?? DateTime.now()),
-      esPerfilPropio: Value(esPropio),
-      pendienteDeSincronizar: const Value(false),
-    );
-  }
-
-  // Convierte el perfil local en el mapa que se sube al servidor.
-  // 'genero' y 'busca_genero' se normalizan a minúsculas porque la UI los
-  // guarda capitalizados ('Mujer', 'No binario') y el CHECK constraint de
-  // Supabase admite solo ('hombre','mujer','otro','mujer trans',
-  // 'hombre trans','no binario','género fluido').
-  Map<String, dynamic> _perfilARemoto(Usuario perfil) {
-    return {
-      'nombre': perfil.nombre,
-      'biografia': perfil.biografia,
-      'genero': perfil.genero.toLowerCase(),
-      'busca_genero': perfil.buscaGenero.toLowerCase(),
-      'que_busca': perfil.queBusca,
-      'preferencia_edad_min': perfil.preferenciaEdadMin,
-      'preferencia_edad_max': perfil.preferenciaEdadMax,
-      'fecha_nacimiento': perfil.fechaNacimiento != null
-          ? perfil.fechaNacimiento!.toIso8601String().substring(0, 10)
-          : null,
-      'ciudad': perfil.ciudad,
-      'ubicacion_lat': perfil.ubicacionLat,
-      'ubicacion_lon': perfil.ubicacionLon,
-      'ultima_conexion': perfil.ultimaConexion?.toIso8601String(),
-      'ocultar_en_linea': perfil.ocultarEnLinea,
-      'ocultar_edad': perfil.ocultarEdad,
-      'perfil_completado': perfil.perfilCompletado,
-      'orientacion_sexual': perfil.orientacionSexual,
-      'situacion_sentimental': perfil.situacionSentimental,
-      'intereses': perfil.intereses,
-      'altura': perfil.altura,
-      'educacion': perfil.educacion,
-      'trabajo': perfil.trabajo,
-      'profesion': perfil.profesion,
-      'preferencia_relacion': perfil.preferenciaRelacion,
-      'bebe': perfil.bebe,
-      'fuma': perfil.fuma,
-      'hijos': perfil.hijos,
-      'personalidad': perfil.personalidad,
-      'signo_zodiaco': perfil.signoZodiaco,
-      'mascotas': perfil.mascotas,
-      'religion': perfil.religion,
-      'idiomas': perfil.idiomas,
-      'tatuajes': perfil.tatuajes,
-      'preguntas_perfil':
-          perfil.preguntasPerfil.map((e) => e.toJson()).toList(),
-      'foto_verificacion': perfil.fotoVerificacion,
-      'fotos_urls': perfil.fotosUrls,
-      'edad': perfil.edad,
-    };
   }
 
   Map<String, dynamic> _suscripcionARemoto(Suscripcione s) => {
@@ -754,9 +1094,9 @@ class SyncService {
       SuscripcionesCompanion.insert(
         usuarioId: r['usuario_id'] as String,
         plan: Value((r['plan'] as String?) ?? 'gratis'),
-        inicio: Value(_parsearFecha(r['inicio']) ?? DateTime.now()),
-        vence: Value(_parsearFecha(r['vence'])),
-        activa: Value(_aBool(r['activa'], true)),
+        inicio: Value(PerfilMapeo.parsearFecha(r['inicio']) ?? DateTime.now()),
+        vence: Value(PerfilMapeo.parsearFecha(r['vence'])),
+        activa: Value(PerfilMapeo.aBool(r['activa'], true)),
       );
 
   Map<String, dynamic> _usosDiariosARemoto(UsosDiario u) => {
@@ -772,16 +1112,16 @@ class SyncService {
   UsosDiariosCompanion _usosDiariosDesdeRemoto(Map<String, dynamic> r) =>
       UsosDiariosCompanion.insert(
         usuarioId: r['usuario_id'] as String,
-        fecha: _parsearFecha(r['fecha']) ?? DateTime.now(),
-        meGustasUsados: Value(_aInt(r['me_gustas_usados'], 0)),
-        deshacerUsados: Value(_aInt(r['deshacer_usados'], 0)),
-        superlikesUsados: Value(_aInt(r['superlikes_usados'], 0)),
-        boostsUsados: Value(_aInt(r['boosts_usados'], 0)),
-        vistasCercaUsadas: Value(_aInt(r['vistas_cerca_usadas'], 0)),
+        fecha: PerfilMapeo.parsearFecha(r['fecha']) ?? DateTime.now(),
+        meGustasUsados: Value(PerfilMapeo.aInt(r['me_gustas_usados'], 0)),
+        deshacerUsados: Value(PerfilMapeo.aInt(r['deshacer_usados'], 0)),
+        superlikesUsados: Value(PerfilMapeo.aInt(r['superlikes_usados'], 0)),
+        boostsUsados: Value(PerfilMapeo.aInt(r['boosts_usados'], 0)),
+        vistasCercaUsadas: Value(PerfilMapeo.aInt(r['vistas_cerca_usadas'], 0)),
       );
 
   Future<void> _subirPerfil(Usuario perfil) async {
-    final body = _perfilARemoto(perfil);
+    final body = PerfilMapeo.perfilARemoto(perfil);
 
     if (kUsarServidorLocal) {
       final token = await LocalTokenStore.obtenerToken();
@@ -809,7 +1149,10 @@ class SyncService {
       'emisor_id': mensaje.emisorId,
       'receptor_id': mensaje.receptorId,
       'contenido': mensaje.contenido,
-      'timestamp': mensaje.timestamp.toIso8601String(),
+      // UTC explícito: sin él, Postgres interpreta el timestamp con la zona
+      // del servidor y al re-descargar el mensaje se desplaza horas
+      // (desordena la conversación y rompe el cálculo de "visto").
+      'timestamp': mensaje.timestamp.toUtc().toIso8601String(),
       'estado_envio': 'enviado',
     };
 
@@ -835,7 +1178,7 @@ class SyncService {
       'id': match.uuid,
       'usuario_a_id': match.usuarioAId,
       'usuario_b_id': match.usuarioBId,
-      'timestamp_match': match.timestampMatch.toIso8601String(),
+      'timestamp_match': match.timestampMatch.toUtc().toIso8601String(),
     };
 
     if (kUsarServidorLocal) {
@@ -957,13 +1300,45 @@ class SyncService {
     await sb.Supabase.instance.client.from('historial_likes').upsert(body);
   }
 
+  Future<void> _subirRechazo(Rechazo rechazo) async {
+    if (kUsarServidorLocal) return;
+
+    final body = {
+      'id': rechazo.uuid,
+      'usuario_id': rechazo.usuarioId,
+      'rechazado_id': rechazo.rechazadoId,
+      'timestamp': rechazo.timestamp.toIso8601String(),
+    };
+    await sb.Supabase.instance.client.from('rechazos').upsert(body);
+  }
+
   // ------------------------------------------------------------
-  // Feed de cercanía
+  // Feed de cercanÃ­a
   // ------------------------------------------------------------
+  /// Lee la ubicaciÃ³n ya guardada del perfil propio (local) y, si es
+  /// vÃ¡lida, sincroniza el feed de perfiles cercanos con esas coordenadas.
+  /// Si el perfil aÃºn no tiene ubicaciÃ³n (0,0 â€” nunca la estableciÃ³), no
+  /// hace nada: no tiene sentido pedir "cercanos" sin saber dÃ³nde estÃ¡.
+  Future<void> _sincronizarFeedCercanoDesdePerfilPropio() async {
+    final propio = await (_db.select(_db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true)))
+        .getSingleOrNull();
+    if (propio == null) return;
+    if (propio.ubicacionLat == 0 && propio.ubicacionLon == 0) return;
+    await sincronizarFeedCercano(
+      lat: propio.ubicacionLat,
+      lon: propio.ubicacionLon,
+      radioMetros: feedRadioMetrosDefault,
+    );
+  }
+
   Future<void> sincronizarFeedCercano({
     required double lat,
     required double lon,
     int radioMetros = 20000,
+    Map<String, dynamic> filtros = const <String, dynamic>{},
+    int desde = 0,
+    int cuantos = 500,
   }) async {
     if (!ConnectivityService.instancia.hayConexion) return;
 
@@ -979,7 +1354,7 @@ class SyncService {
       if (lista.isEmpty) return;
       final filas = lista.map((fila) {
         final f = fila as Map<String, dynamic>;
-        return _mapearPerfilRemoto(f, false);
+        return PerfilMapeo.perfilRemotoACompanion(f, esPropio: false);
       }).toList();
       await _db.batch((batch) {
         batch.insertAllOnConflictUpdate(_db.usuarios, filas);
@@ -992,9 +1367,15 @@ class SyncService {
           'lat': lat,
           'lon': lon,
           'radio_metros': radioMetros,
+          'filtros': filtros,
+          'desde': desde,
+          'cuantos': cuantos,
         });
     final filas = (resultado as List).map((fila) {
-      return _mapearPerfilRemoto(fila as Map<String, dynamic>, false);
+      return PerfilMapeo.perfilRemotoACompanion(
+        fila as Map<String, dynamic>,
+        esPropio: false,
+      );
     }).toList();
     if (filas.isNotEmpty) {
       await _db.batch((batch) {
@@ -1003,79 +1384,82 @@ class SyncService {
     }
   }
 
-  // ------------------------------------------------------------
-  // Utilidades de parseo
-  // ------------------------------------------------------------
-  DateTime? _parsearFecha(dynamic valor) {
-    if (valor == null) return null;
-    if (valor is DateTime) return valor;
-    if (valor is String) return DateTime.tryParse(valor);
-    return null;
-  }
+  /// Consulta el feed directamente al backend (RPC `perfiles_cercanos` o API
+  /// local) y devuelve los perfiles como filas locales [Usuario], sin
+  /// persistirlos. Fase 2: filtros y paginación en el servidor.
+  Future<List<Usuario>> consultarFeedRemoto({
+    required double lat,
+    required double lon,
+    int radioMetros = feedRadioMetrosDefault,
+    Map<String, dynamic> filtros = const <String, dynamic>{},
+    int desde = 0,
+    int cuantos = 10,
+  }) async {
+    if (!ConnectivityService.instancia.hayConexion) return const [];
 
-  int _aInt(dynamic valor, int defecto) {
-    if (valor is int) return valor;
-    if (valor is num) return valor.toInt();
-    if (valor is String) return int.tryParse(valor) ?? defecto;
-    return defecto;
-  }
-
-  double _aDouble(dynamic valor, double defecto) {
-    if (valor is double) return valor;
-    if (valor is int) return valor.toDouble();
-    if (valor is num) return valor.toDouble();
-    if (valor is String) return double.tryParse(valor) ?? defecto;
-    return defecto;
-  }
-
-  bool _aBool(dynamic valor, bool defecto) {
-    if (valor is bool) return valor;
-    if (valor is String) return valor.toLowerCase() == 'true';
-    return defecto;
-  }
-
-  List<String> _aListaString(dynamic valor) {
-    if (valor == null) return [];
-    if (valor is List) return valor.map((e) => e.toString()).toList();
-    if (valor is String && valor.isNotEmpty) {
-      try {
-        final decodificado = jsonDecode(valor);
-        if (decodificado is List) {
-          return decodificado.map((e) => e.toString()).toList();
-        }
-      } catch (_) {}
-    }
-    return [];
-  }
-
-  List<PreguntaRespuesta> _aPreguntas(dynamic valor) {
-    if (valor == null) return [];
-    dynamic lista = valor;
-    if (valor is String && valor.isNotEmpty) {
-      try {
-        lista = jsonDecode(valor);
-      } catch (_) {
-        return [];
+    try {
+      if (kUsarServidorLocal) {
+        final token = await LocalTokenStore.obtenerToken();
+        if (token == null) return const [];
+        final res = await http.get(
+          Uri.parse('$kServidorLocalUrl/api/profiles'),
+          headers: {'authorization': 'Bearer $token'},
+        );
+        if (res.statusCode != 200) return const [];
+        final lista = jsonDecode(res.body) as List;
+        return lista.map((fila) {
+          final f = fila as Map<String, dynamic>;
+          return PerfilMapeo.perfilRemotoAUsuario(f, esPropio: false);
+        }).toList();
       }
+
+      final resultado = await sb.Supabase.instance.client.rpc(
+          'perfiles_cercanos',
+          params: {
+            'lat': lat,
+            'lon': lon,
+            'radio_metros': radioMetros,
+            'filtros': filtros,
+            'desde': desde,
+            'cuantos': cuantos,
+          });
+      return (resultado as List).map((fila) {
+        return PerfilMapeo.perfilRemotoAUsuario(
+          fila as Map<String, dynamic>,
+          esPropio: false,
+        );
+      }).toList();
+    } catch (e) {
+      EstadoServidorServicio.instancia.marcarFallo(e);
+      return const [];
     }
-    if (lista is! List) return [];
-    return lista.whereType<Map>().map((m) {
-      final mapa = Map<String, dynamic>.from(m);
-      return PreguntaRespuesta(
-        pregunta: (mapa['pregunta'] ?? '').toString(),
-        respuesta: (mapa['respuesta'] ?? '').toString(),
-      );
-    }).toList();
   }
 
-  int _calcularEdad(String fechaNacimientoIso) {
-    final nacimiento = DateTime.parse(fechaNacimientoIso);
-    final hoy = DateTime.now();
-    var edad = hoy.year - nacimiento.year;
-    if (hoy.month < nacimiento.month ||
-        (hoy.month == nacimiento.month && hoy.day < nacimiento.day)) {
-      edad--;
-    }
-    return edad;
+  // ------------------------------------------------------------
+  // Filtros de búsqueda -> JSON del RPC perfiles_cercanos
+  // ------------------------------------------------------------
+  /// Convierte los filtros de la UI (FiltrosEncuentros) en el JSON que espera
+  /// el RPC `perfiles_cercanos`, para que el servidor descarte los perfiles
+  /// que no cumplen antes de sincronizarlos a la BD local.
+  static Map<String, dynamic> filtrosARpcJson({
+    List<String> generos = const [],
+    double edadMin = 18,
+    double edadMax = 99,
+    bool enLineaAhora = false,
+    bool perfilesVerificados = false,
+    String ciudad = '',
+    bool ampliar = false,
+    String orden = 'distancia',
+  }) {
+    return <String, dynamic>{
+      'ampliar': ampliar,
+      'orden': orden,
+      'edad_min': edadMin.round(),
+      'edad_max': edadMax.round(),
+      'en_linea': enLineaAhora,
+      'verificado': perfilesVerificados,
+      if (generos.isNotEmpty) 'generos': generos,
+      if (ciudad.trim().isNotEmpty) 'ciudad': ciudad.trim(),
+    };
   }
 }

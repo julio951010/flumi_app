@@ -1,17 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' hide Column;
 import '../../../core/utilidades/fotos_perfil.dart';
 import 'package:swipe_cards/draggable_card.dart';
 import 'package:swipe_cards/swipe_cards.dart';
-import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
-import '../../../core/estilos/tema.dart';
+import '../../../core/constantes/constantes.dart';
+import '../../../core/servicios/connectivity_service.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
+import '../../../widgets_comunes/estado_vacio_encuentros.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/tarjeta_detalle_usuario.dart';
 import '../../chat/chat_repositorio.dart';
@@ -26,10 +29,12 @@ class EncuentrosPantalla extends StatefulWidget {
   final String miId;
   final FiltrosEncuentros filtros;
   final ValueNotifier<int> undoSignal;
+  final SyncService syncService;
   final SuscripcionServicio suscripcionServicio;
   final VisitasServicio visitasServicio;
   final HistorialLikesServicio historialLikesServicio;
   final VotosServicio votosServicio;
+  final VoidCallback? onAmpliarBusqueda;
 
   const EncuentrosPantalla({
     super.key,
@@ -37,10 +42,12 @@ class EncuentrosPantalla extends StatefulWidget {
     required this.miId,
     required this.filtros,
     required this.undoSignal,
+    required this.syncService,
     required this.suscripcionServicio,
     required this.visitasServicio,
     required this.historialLikesServicio,
     required this.votosServicio,
+    this.onAmpliarBusqueda,
   });
 
   @override
@@ -48,8 +55,12 @@ class EncuentrosPantalla extends StatefulWidget {
 }
 
 class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
+  static const _loteTamanio = 10;
+  static const _umbralCola = 3;
+
   List<Usuario> _usuarios = [];
   List<Usuario> _filtrados = [];
+  Usuario? _propio;
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
   bool _cargando = true;
@@ -57,6 +68,11 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   int _motorBase = 0;
   bool _agotado = false;
   int _motorId = 0;
+  int _consumidasEnMotor = 0;
+  int _offset = 0;
+  bool _hayMasRemoto = true;
+  bool _cargandoMas = false;
+  bool _amplitudAplicada = false;
   MatchEngine? _matchEngine;
   late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
@@ -83,6 +99,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   }
 
   MatchEngine _crearMotor(List<Usuario> lista) {
+    _consumidasEnMotor = 0;
     return MatchEngine(
       swipeItems: [
         for (final u in lista)
@@ -90,11 +107,38 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             content: u,
             likeAction: () => _aplicarMeGusta(u),
             superlikeAction: () => _superlike(u),
-            nopeAction: () => widget.votosServicio.registrarRechazo(u.uuid),
+            nopeAction: () {
+              widget.votosServicio.registrarRechazo(u.uuid);
+              // Nopear a alguien que ya te dio Me Gusta = match perdido.
+              unawaited(_avisarMatchPerdido(u));
+            },
             onSlideUpdate: (region) async => _gestoSeguimiento(region),
           ),
       ],
     )..addListener(_alCambiarCarta);
+}
+
+  /// Si [usuario] ya te dio Me Gusta al momento del Nope, avisa que se
+  /// perdió un match. Rechequea contra la BD local por si el like llegó
+  /// después de cargar el mazo (realtime/sync), que `_idsRecibidos` no
+  /// habría capturado.
+  Future<void> _avisarMatchPerdido(Usuario usuario) async {
+    var leDioLike = _idsRecibidos.contains(usuario.uuid);
+    if (!leDioLike) {
+      try {
+        final recibido = await (widget.db.select(widget.db.historialLikes)
+              ..where((h) =>
+                  h.usuarioLikeadoId.equals(widget.miId) &
+                  h.usuarioId.equals(usuario.uuid)))
+            .get();
+        leDioLike = recibido.isNotEmpty;
+      } catch (_) {
+        leDioLike = false;
+      }
+    }
+    if (leDioLike && mounted) {
+      NotificacionServicio.advertencia(context, 'Te has perdido un match');
+    }
   }
 
   void _alCambiarVotos() {
@@ -106,9 +150,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         ? actual
         : engine?.nextItem?.content as Usuario?;
     setState(() {
-      final sinRechazados = _filtrados
-          .where((u) => !widget.votosServicio.esRechazado(u.uuid))
-          .toList();
+      final sinRechazados = widget.votosServicio.componerDeck(_filtrados);
       if (sinRechazados.isEmpty) {
         _filtrados = sinRechazados;
         _agotado = true;
@@ -168,15 +210,31 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         _progresoFoto = 0;
       });
     }
+    // Fase 2: carga predictiva. Cuando quedan pocas cartas por consumir,
+    // pedimos el siguiente lote en segundo plano para que la cola nunca se
+    // sienta vacía.
+    _consumidasEnMotor++;
+    if (_cargandoMas || !_hayMasRemoto || _cargando) return;
+    final restantes = _filtrados.length - _motorBase - _consumidasEnMotor;
+    if (restantes <= _umbralCola) {
+      unawaited(_cargarMas());
+    }
   }
 
   Future<void> _undo() async {
     final engine = _matchEngine;
     if (engine == null) return;
-    if (_agotado) {
-      if (_filtrados.isEmpty) return;
-      final puede = await _suscripcion.puedeUsarDeshacer();
-      if (!puede && mounted) {
+    final revividoId = _agotado
+        ? (_filtrados.isEmpty ? null : _filtrados[_motorBase].uuid)
+        : (engine.currentItem?.content as Usuario?)?.uuid;
+    if (revividoId == null) return;
+
+    // Fase 6: el cupo de Deshacer lo valida el servidor
+    // (registrar_deshacer); el límite local es solo un espejo.
+    final concedido =
+        await widget.votosServicio.quitarRechazo(revividoId);
+    if (!concedido) {
+      if (mounted) {
         mostrarBloqueoSuscripcion(
           context,
           funcionalidad: 'Deshacer',
@@ -197,9 +255,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             ),
           ),
         );
-        return;
       }
-      await _suscripcion.registrarDeshacer();
+      return;
+    }
+
+    await _suscripcion.registrarDeshacer();
+    if (_agotado) {
       setState(() {
         _agotado = false;
         _motorBase = _filtrados.length - 1;
@@ -207,41 +268,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         _motorId++;
         _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
       });
-      if (_filtrados.isNotEmpty) {
-        widget.votosServicio.quitarRechazo(_filtrados[_motorBase].uuid);
-      }
     } else if (engine.currentItem != null) {
-      final puede = await _suscripcion.puedeUsarDeshacer();
-      if (!puede && mounted) {
-        mostrarBloqueoSuscripcion(
-          context,
-          funcionalidad: 'Deshacer',
-          planMinimo: PlanTipo.plus,
-          descripcion:
-              'Has alcanzado el límite diario de deshacer (${_suscripcion.limites.deshacerPorDia}). Suscríbete a Flumi Plus para deshacer ilimitado.',
-          onSuscribir: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const DetallePlanPantalla(
-                nombre: 'Flumi Plus',
-                periodo: 'mensual',
-                precio: '250 cup',
-                icono: Icons.auto_awesome,
-                detalle: 'Funciones extra',
-                destacado: true,
-              ),
-            ),
-          ),
-        );
-        return;
-      }
-      await _suscripcion.registrarDeshacer();
       engine.rewindMatch();
       setState(() => _progresoFoto = 0);
-      final revivido = engine.currentItem?.content as Usuario?;
-      if (revivido != null) {
-        widget.votosServicio.quitarRechazo(revivido.uuid);
-      }
     }
   }
 
@@ -255,16 +284,51 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
 
   Future<void> _cargar() async {
     try {
-      final todos = await (widget.db.select(widget.db.usuarios)).get();
-      todos.removeWhere((u) => u.uuid == widget.miId || u.esPerfilPropio);
+      _offset = 0;
+      _hayMasRemoto = true;
+      _amplitudAplicada = false;
+      _cargandoMas = false;
+
+      // Fase 5: datos reales de interacción (adiós al mock) para no repetir
+      // perfiles ya votados.
+      final gustados = await widget.historialLikesServicio.obtenerIdsGustados();
+      final recibidos = await widget.historialLikesServicio.obtenerLikesRecibidos();
+      _idsGustados = gustados;
+      _idsRecibidos = recibidos;
+
+      // Criterios base del perfil propio: "interesado en" y "rango de edad".
+      final propio = await (widget.db.select(widget.db.usuarios)
+            ..where((u) => u.esPerfilPropio.equals(true))
+            ..limit(1))
+          .getSingleOrNull();
+      _propio = propio;
+
+      // Fase 1: primer lote del RPC + llenado hasta el tamaño mínimo de
+      // cola para mostrar cartas de inmediato. Fase 2: si el RPC vuelve
+      // vacío con los filtros actuales, se reintenta con ampliación en el
+      // servidor (sin distancia, edad ni filtros del usuario) antes de
+      // rendirse; las exclusiones (rechazos, gustados, bloqueos) se
+      // mantienen en ambos modos.
+      final acumulados = <Usuario>[];
+      while (acumulados.length < _loteTamanio && _hayMasRemoto) {
+        final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
+        if (lote.isEmpty) {
+          if (!_amplitudAplicada) {
+            _amplitudAplicada = true;
+            _offset = 0;
+            continue;
+          }
+          _hayMasRemoto = false;
+          break;
+        }
+        _offset += lote.length;
+        _hayMasRemoto = lote.length == _loteTamanio;
+        acumulados.addAll(_filtrar(lote, conAmpliacion: _amplitudAplicada));
+      }
+
       if (mounted) {
         setState(() {
-          _usuarios = todos;
-          _idsGustados =
-              GeneradorMock.obtenerMisLikes().map((i) => i.usuarioId).toSet();
-          _idsRecibidos = GeneradorMock.obtenerLikesRecibidos()
-              .map((i) => i.usuarioId)
-              .toSet();
+          _usuarios = acumulados;
           _cargando = false;
         });
         _aplicarFiltros();
@@ -274,36 +338,142 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
   }
 
-  void _aplicarFiltros() {
-    final f = widget.filtros;
-    var lista = List<Usuario>.from(_usuarios);
+  double get _miLat => _propio?.ubicacionLat ?? 0;
+  double get _miLon => _propio?.ubicacionLon ?? 0;
 
-    if (f.generos.isNotEmpty) {
+  /// Siguiente lote desde el RPC `perfiles_cercanos` (paginación por offset
+  /// en el servidor). Con `conAmpliacion` el servidor relaja todo menos las
+  /// exclusiones (sin distancia, edad ni filtros del usuario).
+  Future<List<Usuario>> _siguienteLote({bool conAmpliacion = false}) async {
+    final f = widget.filtros;
+    final radioMetros = conAmpliacion
+        ? -1
+        : (f.distanciaKm > 0
+            ? (f.distanciaKm * 1000).round()
+            : feedRadioMetrosDefault);
+    return widget.syncService.consultarFeedRemoto(
+      lat: _miLat,
+      lon: _miLon,
+      radioMetros: radioMetros,
+      filtros: SyncService.filtrosARpcJson(
+        generos: f.generos,
+        edadMin: f.edadRango.start,
+        edadMax: f.edadRango.end,
+        enLineaAhora: f.enLineaAhora,
+        perfilesVerificados: f.perfilesVerificados,
+        ciudad: f.ubicacion,
+        ampliar: conAmpliacion,
+        orden: 'score',
+      ),
+      desde: _offset,
+      cuantos: _loteTamanio,
+    );
+  }
+
+  /// Carga predictiva en segundo plano (Fase 2): trae más perfiles cuando la
+  /// cola se acerca al final y los encola sin interrumpir al usuario.
+  Future<void> _cargarMas() async {
+    if (_cargandoMas || !_hayMasRemoto || _cargando) return;
+    _cargandoMas = true;
+    try {
+      while (_hayMasRemoto) {
+        final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
+        if (lote.isEmpty) {
+          if (!_amplitudAplicada) {
+            _amplitudAplicada = true;
+            _offset = 0;
+            continue;
+          }
+          _hayMasRemoto = false;
+          break;
+        }
+        _offset += lote.length;
+        _hayMasRemoto = lote.length == _loteTamanio;
+        final nuevas = _filtrar(lote, conAmpliacion: _amplitudAplicada);
+        if (nuevas.isEmpty) continue;
+        if (!mounted) return;
+        final existentes = _usuarios.map((u) => u.uuid).toSet();
+        _usuarios.addAll(nuevas.where((u) => !existentes.contains(u.uuid)));
+        break;
+      }
+      // Reconstruye el motor preservando la posición del usuario. Primero
+      // incorporamos el lote nuevo a la lista visible y luego el motor
+      // re-deriva los rechazados y re-encola desde la carta actual.
+      if (mounted && _cargandoMas) {
+        setState(() => _filtrados = List.of(_usuarios));
+        _alCambiarVotos();
+      }
+    } finally {
+      _cargandoMas = false;
+    }
+  }
+
+  /// Aplica los filtros a [entrada]. Con `conAmpliacion` se relaja la
+  /// búsqueda (sin distancia, en línea, rango de edad del filtro, etc.)
+  /// tal y como exige el estado límite de la Fase 3; el género y el rango
+  /// de edad ideal del perfil nunca se relajan.
+  List<Usuario> _filtrar(List<Usuario> entrada, {bool conAmpliacion = false}) {
+    final f = widget.filtros;
+    var lista = List<Usuario>.from(entrada);
+
+    // Criterios base del perfil ("¿A quién quieres conocer?" y rango de edad
+    // ideal): se respetan SIEMPRE, también en la ampliación de la Fase 3.
+    final propio = _propio;
+    if (propio != null) {
+      lista.removeWhere((u) => !cumpleCriteriosPerfil(propio, u));
+    }
+
+    if (!conAmpliacion && f.generos.isNotEmpty) {
       lista.removeWhere((u) => !f.generos
           .any((g) => normalizarGenero(u.genero) == normalizarGenero(g)));
     }
 
-    lista.removeWhere(
-        (u) => u.edad < f.edadRango.start.toInt() || u.edad > f.edadRango.end.toInt());
+    final edadMin = conAmpliacion ? 18 : f.edadRango.start.toInt();
+    final edadMax = conAmpliacion ? 99 : f.edadRango.end.toInt();
+    lista.removeWhere((u) => u.edad < edadMin || u.edad > edadMax);
 
-    if (f.enLineaAhora) {
+    if (!conAmpliacion && f.enLineaAhora) {
       lista.removeWhere((u) => !_estaEnLinea(u));
     }
 
-    if (f.perfilesVerificados) {
+    if (!conAmpliacion && f.perfilesVerificados) {
       lista.removeWhere((u) => !u.verificadoStatus);
     }
 
     final ubicacion = f.ubicacion.trim().toLowerCase();
-    if (ubicacion.isNotEmpty) {
+    if (!conAmpliacion && ubicacion.isNotEmpty) {
       lista.removeWhere((u) => !u.ciudad.toLowerCase().contains(ubicacion));
     }
 
-    lista.removeWhere((u) => !cumpleFiltrosAvanzados(f, u));
+    if (!conAmpliacion) {
+      lista.removeWhere((u) => !cumpleFiltrosAvanzados(f, u));
+    }
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
+    lista.removeWhere((u) => widget.votosServicio.esExcluidoPermanente(u.uuid));
 
-    lista.removeWhere((u) => widget.votosServicio.esRechazado(u.uuid));
+    return lista;
+  }
+
+  void _aplicarFiltros() {
+    var lista = _filtrar(_usuarios, conAmpliacion: _amplitudAplicada);
+
+    // Fase 3: si se agotó la BD con el filtro actual, ampliamos
+    // automáticamente (sin distancia ni rango de edad) antes de rendirnos.
+    if (lista.isEmpty &&
+        _usuarios.isNotEmpty &&
+        !_hayMasRemoto &&
+        !_amplitudAplicada) {
+      final ampliados = _filtrar(_usuarios, conAmpliacion: true);
+      if (ampliados.isNotEmpty) {
+        _amplitudAplicada = true;
+        lista = ampliados;
+      }
+    }
+
+    // Regla de reciclaje de Nopes: nuevos primero; si quedan menos de 5 se
+    // agregan al final los rechazos reciclables (más antiguos primero).
+    lista = widget.votosServicio.componerDeck(lista);
 
     setState(() {
       _filtrados = lista;
@@ -313,6 +483,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       _motorId++;
       _matchEngine = _crearMotor(lista);
     });
+  }
+
+  void _ampliarBusqueda() {
+    widget.onAmpliarBusqueda?.call();
+    setState(() => _cargando = true);
+    _cargar();
   }
 
   @override
@@ -326,32 +502,21 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   Widget _cuerpo() {
     if (_cargando) return _esqueleto();
     if (_filtrados.isEmpty || _agotado) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_search, size: 80, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('No hay m\u00e1s perfiles',
-                style: TextStyle(fontSize: 18, color: Colors.grey[500])),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                setState(() => _cargando = true);
-                _cargar();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: FlumiTema.colorPrimario,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
-                minimumSize: const Size(200, 48),
-              ),
-              child: const Text('Recargar'),
-            ),
-          ],
-        ),
+      if (_hayMasRemoto) {
+        unawaited(_cargarMas());
+      }
+      return EstadoVacioEncuentros(
+        mensaje: _filtrados.isEmpty
+            ? 'No hay perfiles que coincidan con tus filtros'
+            : 'No hay m\u00e1s perfiles por ahora',
+        icono: Icons.person_search,
+        onAmpliarBusqueda: widget.onAmpliarBusqueda != null
+            ? () async => _ampliarBusqueda()
+            : null,
+        onRecargar: () async {
+          setState(() => _cargando = true);
+          await _cargar();
+        },
       );
     }
 
@@ -371,7 +536,15 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
               matchEngine: _matchEngine!,
               itemBuilder: (context, index) =>
                   _tarjeta(_filtrados[_motorBase + index]),
-              onStackFinished: () => setState(() => _agotado = true),
+              onStackFinished: () {
+                // Si aún quedan lotes en la BD, precargamos el siguiente en
+                // vez de mostrar el vacío de inmediato.
+                if (_hayMasRemoto && !_cargandoMas) {
+                  unawaited(_cargarMas());
+                  return;
+                }
+                setState(() => _agotado = true);
+              },
               upSwipeAllowed: _suscripcion.superlikesDisponiblesHoy,
               rightSwipeAllowed: _suscripcion.meGustasDisponiblesHoy,
               fillSpace: true,
@@ -405,13 +578,18 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       onMeGusta: () => _meGusta(usuario),
       mostrarProgreso: false,
       onFotoCambio: (i) => setState(() => _progresoFoto = i),
+      onVerDetalles: () {
+        try {
+          _visitas.registrarVisita(usuario.uuid);
+        } catch (_) {}
+      },
       esMatch: gustado && _idsRecibidos.contains(usuario.uuid),
       esMeGusta: gustado,
     );
   }
 
   Future<void> _meGusta(Usuario usuario) async {
-    final puede = await _suscripcion.puedeUsarMeGusta();
+    final puede = await _suscripcion.puedeUsarMeGusta(revalidar: true);
     if (!puede && mounted) {
       _mostrarBloqueoMeGusta();
       return;
@@ -442,11 +620,32 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     );
   }
 
-  void _aplicarMeGusta(Usuario usuario) {
+  Future<void> _aplicarMeGusta(Usuario usuario) async {
+    // Fase 3: el RPC valida el límite diario y confirma el match.
+    final resultado = await _historialLikes.registrarLike(usuario.uuid);
+    if (resultado?.limite == true) {
+      if (mounted) _mostrarBloqueoMeGusta();
+      return;
+    }
+    if (resultado == null && ConnectivityService.instancia.hayConexion) {
+      // RPC falló teniendo red: el Me Gusta no se guardó ni se encoló.
+      if (mounted) {
+        NotificacionServicio.advertencia(context,
+            'Fallo de conexión: el Me Gusta no se guardó. Inténtalo de nuevo.');
+      }
+      return;
+    }
     _suscripcion.registrarMeGusta();
-    _historialLikes.registrarLike(usuario.uuid);
-    widget.votosServicio.quitarRechazo(usuario.uuid);
-    if (_idsRecibidos.contains(usuario.uuid) && mounted) {
+    widget.votosServicio.quitarRechazo(usuario.uuid, comoDeshacer: false);
+    // El perfil gustado no vuelve a salir en el mazo (ni en el actual si se
+    // recomponen las cartas).
+    setState(() {
+      _idsGustados.add(usuario.uuid);
+      _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+    });
+    final matchSeguro =
+        resultado?.match ?? _idsRecibidos.contains(usuario.uuid);
+    if (matchSeguro && mounted) {
       _abrirMatch(usuario);
     }
   }
@@ -499,14 +698,33 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   }
 
   void _superlike(Usuario usuario) async {
-    final puede = await _suscripcion.puedeUsarSuperlike();
+    final puede = await _suscripcion.puedeUsarSuperlike(revalidar: true);
     if (!puede && mounted) {
       _mostrarBloqueoSuperlike();
       return;
     }
+    // Fase 3: el RPC valida el cupo de superlikes y confirma el match.
+    final resultado =
+        await _historialLikes.registrarLike(usuario.uuid, esSuper: true);
+    if (resultado?.limite == true) {
+      if (mounted) _mostrarBloqueoSuperlike();
+      return;
+    }
+    if (resultado == null && ConnectivityService.instancia.hayConexion) {
+      // RPC falló teniendo red: el Superlike no se guardó ni se encoló.
+      if (mounted) {
+        NotificacionServicio.advertencia(context,
+            'Fallo de conexión: el Superlike no se guardó. Inténtalo de nuevo.');
+      }
+      return;
+    }
     await _suscripcion.registrarSuperlike();
-    await _historialLikes.registrarLike(usuario.uuid);
-    if (_idsRecibidos.contains(usuario.uuid)) {
+    // El perfil superlikeado no vuelve a salir en el mazo.
+    setState(() {
+      _idsGustados.add(usuario.uuid);
+      _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+    });
+    if ((resultado?.match ?? _idsRecibidos.contains(usuario.uuid)) && mounted) {
       _abrirMatch(usuario);
     } else if (mounted) {
       NotificacionServicio.exito(context, 'Superlike enviado a ${usuario.nombre}');

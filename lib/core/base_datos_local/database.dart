@@ -5,12 +5,12 @@ import 'tables.dart';
 
 part 'database.g.dart';
 
-@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes])
+@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes, Rechazos, NotificacionesAbiertas, ConversacionesEliminadas])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -114,6 +114,22 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(usuarios, usuarios.ultimaConexion);
         await m.addColumn(usuarios, usuarios.ocultarEnLinea);
         await m.addColumn(usuarios, usuarios.ocultarEdad);
+      }
+      if (from < 11) {
+        await m.createTable(rechazos);
+      }
+      if (from < 12) {
+        await m.createTable(notificacionesAbiertas);
+      }
+      if (from < 13) {
+        await m.addColumn(historialLikes, historialLikes.leidoHasta);
+      }
+      if (from < 14) {
+        await m.createTable(conversacionesEliminadas);
+      }
+      if (from < 15) {
+        await m.addColumn(
+            conversacionesEliminadas, conversacionesEliminadas.reactivada);
       }
     },
   );

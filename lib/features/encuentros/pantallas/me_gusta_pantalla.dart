@@ -1,5 +1,7 @@
+import 'dart:async';
+
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
-import '../../../core/api/mock_data.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
@@ -13,7 +15,6 @@ import 'match_pantalla.dart';
 import '../../suscripcion/suscripcion_sheet.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
 import '../../perfiles/pantallas/quien_te_vio_pantalla.dart';
-import '../../perfiles/pantallas/historial_likes_pantalla.dart';
 
 class MeGustaPantalla extends StatefulWidget {
   final AppDatabase db;
@@ -22,6 +23,7 @@ class MeGustaPantalla extends StatefulWidget {
   final SuscripcionServicio suscripcionServicio;
   final VisitasServicio visitasServicio;
   final HistorialLikesServicio historialLikesServicio;
+  final int indiceInicial;
 
   const MeGustaPantalla({
     super.key,
@@ -31,6 +33,7 @@ class MeGustaPantalla extends StatefulWidget {
     required this.suscripcionServicio,
     required this.visitasServicio,
     required this.historialLikesServicio,
+    this.indiceInicial = 0,
   });
 
   @override
@@ -55,12 +58,24 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(
+      length: 4,
+      vsync: this,
+      initialIndex: widget.indiceInicial,
+    );
+    // Fase 3: los likes/visitas llegan por Realtime; se refresca la lista
+    // cuando el contador cambia (sin tocar nada).
+    widget.contador.addListener(_alCambiarContador);
     _cargar();
+  }
+
+  void _alCambiarContador() {
+    if (mounted) unawaited(_cargar());
   }
 
   @override
   void dispose() {
+    widget.contador.removeListener(_alCambiarContador);
     _tabCtrl.dispose();
     super.dispose();
   }
@@ -71,33 +86,56 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       final todos = await widget.db.select(widget.db.usuarios).get();
       final mapa = {for (final u in todos) u.uuid: u};
 
-      _likes = GeneradorMock.obtenerLikesRecibidos()
-          .map((i) => _ItemInteraccion(usuario: mapa[i.usuarioId], timestamp: i.timestamp))
-          .where((i) => i.usuario != null)
+      final recibidos =
+          await _historialLikesServicio.obtenerLikesRecibidosDetalle();
+      final gustados = await _historialLikesServicio.obtenerHistorial();
+      final visitas = await _visitasServicio.obtenerVisitas();
+
+      _idsGustados = gustados.map((h) => h.usuarioLikeadoId).toSet();
+      _idsRecibidos = recibidos.map((h) => h.usuarioId).toSet();
+
+      // Los matches viven solo en su pestaña: se quitan de Le gustas,
+      // Visitas y Me gustan para no repetirlos.
+      final idsMatch = _idsGustados.intersection(_idsRecibidos);
+
+      _likes = recibidos
+          .map((h) => _ItemInteraccion(
+              usuario: mapa[h.usuarioId], timestamp: h.timestamp))
+          .where((i) =>
+              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
           .toList();
 
-      _visitas = GeneradorMock.obtenerVisitas()
-          .map((i) => _ItemInteraccion(usuario: mapa[i.usuarioId], timestamp: i.timestamp))
-          .where((i) => i.usuario != null)
+      _visitas = visitas
+          .map((v) => _ItemInteraccion(
+              usuario: mapa[v.visitanteId], timestamp: v.timestamp))
+          .where((i) =>
+              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
           .toList();
 
-      _misLikes = GeneradorMock.obtenerMisLikes()
-          .map((i) => _ItemInteraccion(usuario: mapa[i.usuarioId], timestamp: i.timestamp))
-          .where((i) => i.usuario != null)
+      _misLikes = gustados
+          .map((h) => _ItemInteraccion(
+              usuario: mapa[h.usuarioLikeadoId], timestamp: h.timestamp))
+          .where((i) =>
+              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
           .toList();
 
-      _idsGustados =
-          GeneradorMock.obtenerMisLikes().map((i) => i.usuarioId).toSet();
-      _idsRecibidos = GeneradorMock.obtenerLikesRecibidos()
-          .map((i) => i.usuarioId)
-          .toSet();
-
-      _matches = _idsGustados
-          .intersection(_idsRecibidos)
+      final timestampsRecibidos = {
+        for (final h in recibidos) h.usuarioId: h.timestamp
+      };
+      _matches = idsMatch
           .map((id) => _ItemInteraccion(
-              usuario: mapa[id], timestamp: DateTime.now()))
+              usuario: mapa[id],
+              timestamp: timestampsRecibidos[id] ?? DateTime.now()))
           .where((i) => i.usuario != null)
           .toList();
+      // Chips = tarjetas visibles y no vistas (converge aunque los eventos
+      // de like/match lleguen en cualquier orden).
+      widget.contador.reconciliar(
+        likes: _likes.map((i) => i.usuario!.uuid).toList(),
+        visitas: _visitas.map((i) => i.usuario!.uuid).toList(),
+        misLikes: _misLikes.map((i) => i.usuario!.uuid).toList(),
+        matches: _matches.map((i) => i.usuario!.uuid).toList(),
+      );
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -115,7 +153,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   Widget build(BuildContext context) {
     final puedeVerLikes = _suscripcion.tienePlus;
     final puedeVerVisitas = _suscripcion.tienePlus;
-    final puedeVerMisLikes = _suscripcion.tienePlus;
+    // "Me gustan" siempre muestra las fotos claras (sin requisito de plan).
 
     final hayContenido = _likes.isNotEmpty ||
         _visitas.isNotEmpty ||
@@ -155,7 +193,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                 ),
                 Tab(
                   child: _tabConBadge(
-                    etiqueta: 'Mis Likes',
+                    etiqueta: 'Me gustan',
                     cantidad: widget.contador.misLikesNoLeidos,
                   ),
                 ),
@@ -182,12 +220,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                             suscripcionServicio: _suscripcion,
                           )
                         : _grilla(_visitas, false, CategoriaMeGusta.visitas),
-                    puedeVerMisLikes
-                        ? HistorialLikesPantalla(
-                            historialServicio: _historialLikesServicio,
-                            suscripcionServicio: _suscripcion,
-                          )
-                        : _grilla(_misLikes, false, CategoriaMeGusta.misLikes),
+                    _grilla(_misLikes, true, CategoriaMeGusta.misLikes,
+                        bloquearDetallesSinPlan: true),
                     _grilla(_matches, true, CategoriaMeGusta.matches),
                   ],
                 ),
@@ -276,7 +310,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
     if (_suscripcion.tienePremium) return null;
     if (_suscripcion.tienePlus) {
       return BannerGradiente(
-        titulo: 'Sin l\u00edmites en Visitas y Mis Likes',
+        titulo: 'Sin l\u00edmites en Visitas',
         subtitulo: 'Ilimitado con Flumi Premium',
         etiquetaBoton: 'Mejorar',
         onTapBoton: () => Navigator.push(
@@ -295,7 +329,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       );
     }
     return BannerGradiente(
-      titulo: 'Desbloquea Le gustas, Visitas y tu historial',
+      titulo: 'Desbloquea Le gustas y Visitas',
       subtitulo: 'Requiere Flumi Plus',
       etiquetaBoton: 'Ver planes',
       onTapBoton: () => Navigator.push(
@@ -362,16 +396,22 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   Future<bool> _meGusta(Usuario usuario) async {
-    final puede = await _suscripcion.puedeUsarMeGusta();
+    final puede = await _suscripcion.puedeUsarMeGusta(revalidar: true);
     if (!puede) {
       _mostrarBloqueoMeGusta();
       return false;
     }
+    // Fase 3: el RPC valida el límite diario y confirma el match.
+    final resultado =
+        await _historialLikesServicio.registrarLike(usuario.uuid);
+    if (resultado?.limite == true) {
+      _mostrarBloqueoMeGusta();
+      return false;
+    }
     _suscripcion.registrarMeGusta();
-    _historialLikesServicio.registrarLike(usuario.uuid);
     if (mounted) {
       setState(() => _idsGustados.add(usuario.uuid));
-      if (_idsRecibidos.contains(usuario.uuid)) {
+      if (resultado?.match ?? _idsRecibidos.contains(usuario.uuid)) {
         _abrirMatch(usuario);
       }
     }
@@ -416,7 +456,11 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   Widget _grilla(
-      List<_ItemInteraccion> items, bool puedeVer, CategoriaMeGusta categoria) {
+      List<_ItemInteraccion> items,
+      bool puedeVer,
+      CategoriaMeGusta categoria, {
+      bool bloquearDetallesSinPlan = false,
+    }) {
     if (items.isEmpty) {
       return Center(
         child: Text(
@@ -451,6 +495,17 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
             return TarjetaUsuario(
               usuario: usuario,
               onTap: () {
+                // Me gustan: la foto se ve nítida, pero el detalle del
+                // perfil solo se desbloquea con un plan.
+                if (bloquearDetallesSinPlan && !_suscripcion.tienePlus) {
+                  mostrarBloqueoSuscripcion(
+                    context,
+                    funcionalidad: _tituloCategoria(categoria),
+                    planMinimo: PlanTipo.plus,
+                    descripcion: _textoBloqueo(categoria),
+                  );
+                  return;
+                }
                 widget.contador.marcarVista(categoria, usuario.uuid);
                 Navigator.push(
                   context,
@@ -514,7 +569,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
               usuario: usuario,
               imagenBorrosa: true,
               imagenOverlay: Container(
-                color: Colors.black.withValues(alpha: 0.35),
+                color: Colors.black.withValues(alpha: 0.15),
                 alignment: Alignment.center,
                 child: const Icon(Icons.lock_outline,
                     color: Colors.white, size: 26),
@@ -550,7 +605,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       case CategoriaMeGusta.visitas:
         return 'Ver quién visitó tu perfil';
       case CategoriaMeGusta.misLikes:
-        return 'Ver tu historial de likes';
+        return 'Ver los detalles de los perfiles que te gustan';
       case CategoriaMeGusta.matches:
         return 'Chatear con tus matches';
     }
@@ -563,7 +618,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       case CategoriaMeGusta.visitas:
         return 'Suscríbete a Flumi Plus para ver quién visitó tu perfil (20 visitas/día).';
       case CategoriaMeGusta.misLikes:
-        return 'Suscríbete a Flumi Plus para ver tu historial de likes (últimos 15).';
+        return 'Suscríbete a Flumi Plus para ver los detalles de los perfiles que te gustan.';
       case CategoriaMeGusta.matches:
         return 'Suscríbete a Flumi Plus para chatear con tus matches.';
     }
@@ -579,17 +634,70 @@ class _ItemInteraccion {
 enum CategoriaMeGusta { likes, visitas, misLikes, matches }
 
 class ContadorMeGusta extends ChangeNotifier {
+  static const String _prefijoPersistencia = 'mgvn|';
+
+  final AppDatabase? _db;
   int _likes = 0;
   int _visitas = 0;
   int _misLikes = 0;
   int _matches = 0;
   final Set<String> _vistos = <String>{};
+  List<String> _ultLikes = const [];
+  List<String> _ultVisitas = const [];
+  List<String> _ultMisLikes = const [];
+  List<String> _ultMatches = const [];
+
+  ContadorMeGusta({AppDatabase? db}) : _db = db;
 
   int get likesNoLeidos => _likes;
   int get visitasNoLeidas => _visitas;
   int get misLikesNoLeidos => _misLikes;
   int get matchesNoLeidos => _matches;
   int get total => _likes + _visitas;
+
+  /// Carga del disco las tarjetas ya vistas; al terminar recalcula los
+  /// conteos con las últimas listas reconciliadas para corregir la carrera
+  /// contra la primera carga de la página.
+  Future<void> cargarVistos() async {
+    final db = _db;
+    if (db == null) return;
+    try {
+      final filas = await (db.select(db.notificacionesAbiertas)).get();
+      for (final f in filas) {
+        final clave = f.notificacionId;
+        if (clave.startsWith(_prefijoPersistencia)) {
+          _vistos.add(clave.substring(_prefijoPersistencia.length));
+        }
+      }
+      _recalcularConteos();
+    } catch (_) {}
+  }
+
+  void _persistirVistos(Iterable<String> claves) {
+    final db = _db;
+    final nuevas = claves.toList();
+    if (db == null || nuevas.isEmpty) return;
+    unawaited(() async {
+      await db.batch((b) {
+        for (final c in nuevas) {
+          b.insert(
+            db.notificacionesAbiertas,
+            NotificacionesAbiertasCompanion.insert(
+              notificacionId: '$_prefijoPersistencia$c',
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
+    }());
+  }
+
+  void _marcar(Set<String> claves) {
+    for (final c in claves) {
+      _vistos.add(c);
+    }
+    _persistirVistos(claves);
+  }
 
   void inicializar({
     required int likes,
@@ -604,9 +712,50 @@ class ContadorMeGusta extends ChangeNotifier {
     notifyListeners();
   }
 
+  void incrementarLikes() {
+    _likes++;
+    notifyListeners();
+  }
+
+  void incrementarVisitas() {
+    _visitas++;
+    notifyListeners();
+  }
+
+  void incrementarMisLikes() {
+    _misLikes++;
+    notifyListeners();
+  }
+
+  void incrementarMatches(int cantidad) {
+    _matches += cantidad;
+    notifyListeners();
+  }
+
+  /// Un match nuevo saca a esa persona de Le gustas, Visitas y Me gustan
+  /// (ahí solo se muestran no-matches): su conteo deja de pesar en el chip.
+  void marcarMatch(String otroId) {
+    for (final c in CategoriaMeGusta.values) {
+      if (c == CategoriaMeGusta.matches) continue;
+      if (_vistos.contains('${c.name}|$otroId')) continue;
+      switch (c) {
+        case CategoriaMeGusta.likes:
+          if (_likes > 0) _likes--;
+        case CategoriaMeGusta.visitas:
+          if (_visitas > 0) _visitas--;
+        case CategoriaMeGusta.misLikes:
+          if (_misLikes > 0) _misLikes--;
+        case CategoriaMeGusta.matches:
+          break;
+      }
+    }
+    notifyListeners();
+  }
+
   void marcarVista(CategoriaMeGusta categoria, String usuarioId) {
     final clave = '${categoria.name}|$usuarioId';
-    if (!_vistos.add(clave)) return;
+    if (_vistos.contains(clave)) return;
+    _marcar({clave});
     switch (categoria) {
       case CategoriaMeGusta.likes:
         if (_likes > 0) _likes--;
@@ -622,10 +771,56 @@ class ContadorMeGusta extends ChangeNotifier {
   }
 
   void marcarTodasVistas() {
+    // Marca también como vistos los items visibles de la última carga:
+    // sin esto, la siguiente reconciliación los volvería a contar.
+    final claves = <String>{
+      ..._ultLikes.map((id) => '${CategoriaMeGusta.likes.name}|$id'),
+      ..._ultVisitas.map((id) => '${CategoriaMeGusta.visitas.name}|$id'),
+      ..._ultMisLikes.map((id) => '${CategoriaMeGusta.misLikes.name}|$id'),
+      ..._ultMatches.map((id) => '${CategoriaMeGusta.matches.name}|$id'),
+    };
+    _marcar(claves.where((c) => !_vistos.contains(c)).toSet());
     _likes = 0;
     _visitas = 0;
     _misLikes = 0;
     _matches = 0;
+    notifyListeners();
+  }
+
+  /// Fuente de verdad final: ajusta los chips al número de tarjetas
+  /// VISIBLES y no vistas de cada grilla (las listas ya vienen filtradas
+  /// sin matches). Se llama después de cada carga, así cualquier carrera
+  /// entre eventos (like + match) converge al conteo correcto.
+  void reconciliar({
+    required List<String> likes,
+    required List<String> visitas,
+    required List<String> misLikes,
+    required List<String> matches,
+  }) {
+    _ultLikes = likes;
+    _ultVisitas = visitas;
+    _ultMisLikes = misLikes;
+    _ultMatches = matches;
+    _recalcularConteos();
+  }
+
+  void _recalcularConteos() {
+    int nuevos(List<String> ids, CategoriaMeGusta categoria) =>
+        ids.where((id) => !_vistos.contains('${categoria.name}|$id')).length;
+    final nLikes = nuevos(_ultLikes, CategoriaMeGusta.likes);
+    final nVisitas = nuevos(_ultVisitas, CategoriaMeGusta.visitas);
+    final nMisLikes = nuevos(_ultMisLikes, CategoriaMeGusta.misLikes);
+    final nMatches = nuevos(_ultMatches, CategoriaMeGusta.matches);
+    if (nLikes == _likes &&
+        nVisitas == _visitas &&
+        nMisLikes == _misLikes &&
+        nMatches == _matches) {
+      return;
+    }
+    _likes = nLikes;
+    _visitas = nVisitas;
+    _misLikes = nMisLikes;
+    _matches = nMatches;
     notifyListeners();
   }
 }

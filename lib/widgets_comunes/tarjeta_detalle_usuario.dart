@@ -14,6 +14,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   final VoidCallback? onMeGusta;
   final bool mostrarProgreso;
   final ValueChanged<int>? onFotoCambio;
+  final VoidCallback? onVerDetalles;
   final bool gusta;
   final bool esMatch;
   final bool esMeGusta;
@@ -26,6 +27,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
     this.onMeGusta,
     this.mostrarProgreso = true,
     this.onFotoCambio,
+    this.onVerDetalles,
     this.gusta = false,
     this.esMatch = false,
     this.esMeGusta = false,
@@ -78,6 +80,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     if (scrolled != _scrolled) {
       setState(() => _scrolled = scrolled);
       _tamanoCtrl.animateTo(scrolled ? 1 : 0);
+      if (scrolled) widget.onVerDetalles?.call();
     }
   }
 
@@ -86,6 +89,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     super.didUpdateWidget(old);
     if (widget.usuario.uuid != old.usuario.uuid) {
       _fotoActual = 0;
+      _scrolled = false;
       if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
     }
   }
@@ -251,6 +255,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
                       top: 16,
                       right: 16,
                       child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onTap: widget.soloVista ? null : _abrirMenu,
                         child: const Icon(Icons.more_horiz,
                             color: Colors.white, size: 40),
@@ -333,6 +338,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     required VoidCallback? onTap,
   }) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
         width: size,
@@ -417,7 +423,13 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
   Widget _buildTapZones() {
     return Row(
       children: [
-        Expanded(flex: 35, child: GestureDetector(onTap: _fotoAnterior)),
+        Expanded(
+          flex: 35,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _fotoAnterior,
+          ),
+        ),
         Expanded(
           flex: 30,
           child: GestureDetector(
@@ -425,7 +437,13 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
             onTap: _abrirVisor,
           ),
         ),
-        Expanded(flex: 35, child: GestureDetector(onTap: _fotoSiguiente)),
+        Expanded(
+          flex: 35,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _fotoSiguiente,
+          ),
+        ),
       ],
     );
   }
