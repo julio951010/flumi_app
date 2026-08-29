@@ -561,21 +561,13 @@ class _OrientacionSexualPantallaState extends State<OrientacionSexualPantalla> {
                     style: TextStyle(color: Colors.grey[600], fontSize: 14),
                   ),
                   const SizedBox(height: 20),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final anchoTarjeta = (constraints.maxWidth - 10) / 2;
-                      return Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final opcion in _opciones)
-                            SizedBox(
-                              width: anchoTarjeta,
-                              child: _tarjetaOpcion(opcion, primario),
-                            ),
-                        ],
-                      );
-                    },
+                  Column(
+                    children: [
+                      for (final opcion in _opciones) ...[
+                        _tarjetaOpcion(opcion, primario),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 24),
                   TextField(
@@ -1203,40 +1195,10 @@ class _TrabajoPantallaState extends State<TrabajoPantalla> {
                     style: TextStyle(color: Colors.grey[600], fontSize: 14),
                   ),
                   const SizedBox(height: 20),
-                  _tarjetaOpcionLarga(_opciones[1], primario),
-                  const SizedBox(height: 10),
-                  _tarjetaOpcionLarga(_opciones[0], primario),
-                  const SizedBox(height: 10),
-                  _tarjetaOpcionLarga(_opciones[2], primario),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _tarjetaOpcionLarga(_opciones[3], primario),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _tarjetaOpcionLarga(_opciones[4], primario),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _tarjetaOpcionLarga(_opciones[5], primario),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _tarjetaOpcionLarga(_opciones[6], primario),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  _tarjetaOpcionLarga(_opciones[7], primario),
-                  const SizedBox(height: 10),
-                  _tarjetaOpcionLarga(_opciones[8], primario),
-                  const SizedBox(height: 10),
+                  for (final i in [1, 0, 2, 3, 4, 5, 6, 7, 8]) ...[
+                    _tarjetaOpcionLarga(_opciones[i], primario),
+                    const SizedBox(height: 10),
+                  ],
                 ],
               ),
             ),
@@ -2292,33 +2254,10 @@ class _ReligionPantallaState extends State<ReligionPantalla> {
                   const SizedBox(height: 20),
                   Column(
                     children: [
-                      for (final indice in [0, 2, 4, 7])
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 5),
-                                  child: _tarjetaOpcion(
-                                      _opciones[indice], primario),
-                                ),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(left: 5),
-                                  child: _tarjetaOpcion(
-                                      _opciones[indice + 1], primario),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      for (final indice in [6, 9])
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _tarjetaOpcion(_opciones[indice], primario),
-                        ),
+                      for (final i in [0, 1, 2, 3, 4, 5, 7, 8, 6, 9]) ...[
+                        _tarjetaOpcion(_opciones[i], primario),
+                        const SizedBox(height: 10),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 24),
@@ -5720,28 +5659,35 @@ class _PreguntasPantallaState extends State<PreguntasPantalla> {
   }
 
   Widget _tarjetaAnadir(Color primario, int indice) {
-    return InkWell(
-      onTap: _guardando ? null : () => _elegirPregunta(indice),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: InkWell(
+          onTap: _guardando ? null : () => _elegirPregunta(indice),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: primario.withValues(alpha: 0.5)),
-          color: primario.withValues(alpha: 0.05),
-        ),
-        child: Column(
-          children: [
-            Icon(Icons.add_circle_outline, color: primario, size: 28),
-            const SizedBox(height: 6),
-            Text(
-              'A\u00f1adir pregunta',
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: primario),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: primario.withValues(alpha: 0.5)),
+              color: primario.withValues(alpha: 0.05),
             ),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Icon(Icons.add_circle_outline, color: primario, size: 28),
+                const SizedBox(height: 6),
+                Text(
+                  'A\u00f1adir pregunta',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: primario),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

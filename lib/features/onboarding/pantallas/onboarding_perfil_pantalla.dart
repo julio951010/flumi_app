@@ -603,17 +603,20 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       subtitulo: 'Sube al menos una foto (máx. 2). La primera será tu foto de perfil.',
       child: Column(
         children: [
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1,
-            children: List.generate(2, (index) {
-              final tieneFoto = index < _fotos.length;
-              return _celdaFotoOnboarding(index, tieneFoto ? _fotos[index] : null, primario);
-            }),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1,
+              children: List.generate(2, (index) {
+                final tieneFoto = index < _fotos.length;
+                return _celdaFotoOnboarding(index, tieneFoto ? _fotos[index] : null, primario);
+              }),
+            ),
           ),
           const SizedBox(height: 12),
           Text(

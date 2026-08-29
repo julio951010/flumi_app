@@ -52,6 +52,13 @@ class VisitasServicio with ChangeNotifier {
     final visitanteId = await _obtenerUsuarioPropioId(_db);
     if (visitanteId == null || visitanteId == visitadoId) return;
 
+    // Modo invisible: no se registra la visita (ni local ni remota), así
+    // nadie puede ver que visité su perfil.
+    final perfil = await (_db.select(_db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true)))
+        .getSingleOrNull();
+    if (perfil?.ocultarVisitas ?? false) return;
+
     // Fase 3: online-first contra el RPC; sin conexión se queda local
     // pendiente para el siguiente sync.
     if (ConnectivityService.instancia.hayConexion && !kUsarServidorLocal) {
@@ -236,5 +243,18 @@ class HistorialLikesServicio with ChangeNotifier {
           ..where((h) => h.usuarioLikeadoId.equals(usuarioId)))
         .get();
     return filas.map((h) => h.usuarioId).toSet();
+  }
+
+  /// Ids de perfiles que ME dieron un Superlike (recibidos).
+  Future<Set<String>> obtenerIdsSuperRecibidos() async {
+    final usuarioId = await _obtenerUsuarioPropioId(_db);
+    if (usuarioId == null) return {};
+    if (ConnectivityService.instancia.hayConexion) {
+      await _sync.sincronizarHistorialLikes();
+    }
+    final filas = await (_db.select(_db.historialLikes)
+          ..where((h) => h.usuarioLikeadoId.equals(usuarioId)))
+        .get();
+    return filas.where((h) => h.esSuper).map((h) => h.usuarioId).toSet();
   }
 }

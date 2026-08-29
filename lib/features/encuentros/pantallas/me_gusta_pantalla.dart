@@ -53,6 +53,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   List<_ItemInteraccion> _matches = [];
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
+  Set<String> _idsSuperRecibidos = {};
   bool _cargando = true;
 
   @override
@@ -93,6 +94,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
 
       _idsGustados = gustados.map((h) => h.usuarioLikeadoId).toSet();
       _idsRecibidos = recibidos.map((h) => h.usuarioId).toSet();
+      _idsSuperRecibidos =
+          recibidos.where((h) => h.esSuper).map((h) => h.usuarioId).toSet();
 
       // Los matches viven solo en su pestaña: se quitan de Le gustas,
       // Visitas y Me gustan para no repetirlos.
@@ -277,31 +280,40 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
           childAspectRatio: 0.72,
         ),
         itemCount: 6,
-        itemBuilder: (_, __) => Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)
-            ],
-          ),
-          child: const Column(
-            children: [
-              Expanded(child: ShimmerCaja(radius: 0)),
-              Padding(
+      itemBuilder: (_, __) => Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+                  child: const ShimmerCaja(radius: 20),
+                ),
+              ),
+              const Padding(
                 padding: EdgeInsets.fromLTRB(10, 8, 10, 10),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     ShimmerCaja(width: 80, height: 14),
-                    SizedBox(height: 4),
-                    ShimmerCaja(width: 60, height: 11),
                   ],
                 ),
               ),
-            ],
-          ),
+          ],
         ),
+      ),
       ),
     );
   }
@@ -491,9 +503,13 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
             final tiempo = _formatoTiempo(item.timestamp);
             final gustado = _idsGustados.contains(usuario.uuid);
             final esMatch = gustado && _idsRecibidos.contains(usuario.uuid);
+            final esNuevo = widget.contador.esNuevo(categoria, usuario.uuid);
+            final esSuperRecibido = _idsSuperRecibidos.contains(usuario.uuid);
 
             return TarjetaUsuario(
               usuario: usuario,
+              nuevo: esNuevo,
+              esSuperRecibido: esSuperRecibido,
               onTap: () {
                 // Me gustan: la foto se ve nítida, pero el detalle del
                 // perfil solo se desbloquea con un plan.
@@ -503,6 +519,19 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                     funcionalidad: _tituloCategoria(categoria),
                     planMinimo: PlanTipo.plus,
                     descripcion: _textoBloqueo(categoria),
+                    onSuscribir: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DetallePlanPantalla(
+                          nombre: 'Flumi Plus',
+                          periodo: 'mensual',
+                          precio: '250 cup',
+                          icono: Icons.auto_awesome,
+                          detalle: 'Funciones extra',
+                          destacado: true,
+                        ),
+                      ),
+                    ),
                   );
                   return;
                 }
@@ -565,8 +594,12 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
           itemBuilder: (context, index) {
             final item = items[index];
             final usuario = item.usuario!;
+            final esNuevo = widget.contador.esNuevo(categoria, usuario.uuid);
+            final esSuperRecibido = _idsSuperRecibidos.contains(usuario.uuid);
             return TarjetaUsuario(
               usuario: usuario,
+              nuevo: esNuevo,
+              esSuperRecibido: esSuperRecibido,
               imagenBorrosa: true,
               imagenOverlay: Container(
                 color: Colors.black.withValues(alpha: 0.15),
@@ -590,6 +623,19 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                 funcionalidad: _tituloCategoria(categoria),
                 planMinimo: PlanTipo.plus,
                 descripcion: _textoBloqueo(categoria),
+                onSuscribir: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const DetallePlanPantalla(
+                      nombre: 'Flumi Plus',
+                      periodo: 'mensual',
+                      precio: '250 cup',
+                      icono: Icons.auto_awesome,
+                      detalle: 'Funciones extra',
+                      destacado: true,
+                    ),
+                  ),
+                ),
               ),
             );
           },
@@ -791,6 +837,11 @@ class ContadorMeGusta extends ChangeNotifier {
   /// VISIBLES y no vistas de cada grilla (las listas ya vienen filtradas
   /// sin matches). Se llama después de cada carga, así cualquier carrera
   /// entre eventos (like + match) converge al conteo correcto.
+  /// True si la tarjeta de [categoria]/[usuarioId] todavía no se ha visto
+  /// (es decir, es un registro "nuevo"). Se usa para la etiqueta "Nuevo".
+  bool esNuevo(CategoriaMeGusta categoria, String usuarioId) =>
+      !_vistos.contains('${categoria.name}|$usuarioId');
+
   void reconciliar({
     required List<String> likes,
     required List<String> visitas,

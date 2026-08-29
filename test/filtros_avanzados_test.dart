@@ -47,6 +47,8 @@ void main() {
       ultimaConexion: null,
       ocultarEnLinea: false,
       ocultarEdad: false,
+      ocultarPerfil: false,
+      ocultarVisitas: false,
       creadoEn: DateTime(2025),
     );
   }

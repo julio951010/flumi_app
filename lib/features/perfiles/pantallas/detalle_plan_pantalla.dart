@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 
-class DetallePlanPantalla extends StatelessWidget {
+class DetallePlanPantalla extends StatefulWidget {
   final String nombre;
   final String periodo;
   final String precio;
@@ -23,7 +22,22 @@ class DetallePlanPantalla extends StatelessWidget {
     this.esGratis = false,
   });
 
-  List<String> get _beneficios => switch (nombre) {
+  @override
+  State<DetallePlanPantalla> createState() => _DetallePlanPantallaState();
+}
+
+class _DetallePlanPantallaState extends State<DetallePlanPantalla> {
+  static const _periodos = [7, 30, 90];
+
+  List<int> get _precios => switch (widget.nombre) {
+        'Flumi Premium' => const [200, 500, 1300],
+        'Flumi Plus' => const [100, 250, 650],
+        _ => const [0, 0, 0],
+      };
+
+  int _seleccionado = 1;
+
+  List<String> get _beneficios => switch (widget.nombre) {
         'Flumi Gratis' => const [
             '15 Me Gustas al d\u00eda',
             '10 perfiles en Cerca de ti',
@@ -63,15 +77,15 @@ class DetallePlanPantalla extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
-    final colorBase = esGratis
+    final colorBase = widget.esGratis
         ? Colors.grey[700]!
-        : destacado
+        : widget.destacado
             ? const Color(0xFF6C63FF)
             : const Color(0xFFC9A227);
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(nombre,
+        title: Text(widget.nombre,
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.white,
@@ -87,9 +101,9 @@ class DetallePlanPantalla extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: esGratis
+                colors: widget.esGratis
                     ? [Colors.grey[700]!, Colors.grey[500]!]
-                    : destacado
+                    : widget.destacado
                         ? [const Color(0xFF6C63FF), const Color(0xFF8E7BFF)]
                         : [const Color(0xFFC9A227), const Color(0xFFE6C35C)],
               ),
@@ -97,30 +111,14 @@ class DetallePlanPantalla extends StatelessWidget {
             ),
             child: Column(
               children: [
-                Icon(icono, size: 44, color: Colors.white),
+                Icon(widget.icono, size: 44, color: Colors.white),
                 const SizedBox(height: 10),
                 Text(
-                  nombre,
+                  widget.nombre,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  precio,
-                  style: const TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                Text(
-                  periodo,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.white.withValues(alpha: 0.85),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -132,7 +130,7 @@ class DetallePlanPantalla extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    detalle,
+                    widget.detalle,
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -143,6 +141,83 @@ class DetallePlanPantalla extends StatelessWidget {
               ],
             ),
           ),
+          if (!widget.esGratis) ...[
+            const SizedBox(height: 24),
+            const Text(
+              'Seleccione un plan',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (var i = 0; i < _periodos.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => setState(() => _seleccionado = i),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _seleccionado == i
+                              ? colorBase.withValues(alpha: 0.08)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _seleccionado == i
+                                ? colorBase
+                                : Colors.grey[300]!,
+                            width: _seleccionado == i ? 2 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.end,
+                              children: [
+                                Icon(
+                                  _seleccionado == i
+                                      ? Icons.check_circle
+                                      : Icons.circle_outlined,
+                                  size: 16,
+                                  color: _seleccionado == i
+                                      ? colorBase
+                                      : Colors.grey[400],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${_periodos[i]} d\u00edas',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: _seleccionado == i
+                                    ? colorBase
+                                    : Colors.black87,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_precios[i]} cup',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: _seleccionado == i
+                                    ? colorBase
+                                    : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
           const Text(
             'Lo que incluye',
@@ -165,28 +240,31 @@ class DetallePlanPantalla extends StatelessWidget {
                 ],
               ),
             ),
-          const SizedBox(height: 24),
-          SizedBox(
-            height: 52,
-            child: FilledButton(
-              onPressed: () {
-                NotificacionServicio.exito(
-                    context, 'Suscripci\u00f3n pr\u00f3ximamente');
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: primario,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+          if (!widget.esGratis) ...[
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 52,
+              child: FilledButton(
+                onPressed: () {
+                  NotificacionServicio.exito(
+                      context, 'Suscripci\u00f3n pr\u00f3ximamente');
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: primario,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
                 ),
-                elevation: 0,
-              ),
-              child: Text(
-                'Suscribirse por $precio',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                child: Text(
+                  'Suscribirse por ${_precios[_seleccionado]} cup',
+                  style:
+                      const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

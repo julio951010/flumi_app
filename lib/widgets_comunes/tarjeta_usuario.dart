@@ -12,6 +12,8 @@ class TarjetaUsuario extends StatelessWidget {
   final VoidCallback? onTap;
   final bool imagenBorrosa;
   final String? nombreMostrado;
+  final bool nuevo;
+  final bool esSuperRecibido;
 
   const TarjetaUsuario({
     super.key,
@@ -22,6 +24,8 @@ class TarjetaUsuario extends StatelessWidget {
     this.onTap,
     this.imagenBorrosa = false,
     this.nombreMostrado,
+    this.nuevo = false,
+    this.esSuperRecibido = false,
   });
 
   @override
@@ -32,7 +36,6 @@ class TarjetaUsuario extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        clipBehavior: Clip.hardEdge,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -43,42 +46,86 @@ class TarjetaUsuario extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF6C63FF), Color(0xFFFF6584)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      border: esSuperRecibido
+                          ? Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 3,
+                            )
+                          : null,
+                      boxShadow: [
+                        BoxShadow(
+                          color: esSuperRecibido
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withValues(alpha: 0.55)
+                              : Colors.black.withValues(alpha: 0.12),
+                          blurRadius: esSuperRecibido ? 16 : 14,
+                          offset: const Offset(0, 6),
                         ),
-                      ),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Center(
-                            child: Text(inicial,
-                                style: const TextStyle(
-                                    fontSize: 48,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Color(0xFF6C63FF), Color(0xFFFF6584)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                          if (fotosParaMostrar(usuario).isNotEmpty)
-                            imagenBorrosa
-                                ? ImagenDifuminada(
-                                    ruta: fotosParaMostrar(usuario).first,
-                                    sigma: 12,
-                                    fit: BoxFit.cover,
-                                  )
-                                : imagenFoto(fotosParaMostrar(usuario).first,
-                                    fit: BoxFit.cover),
-                          if (imagenOverlay != null) imagenOverlay!,
-                        ],
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Center(
+                              child: Text(inicial,
+                                  style: const TextStyle(
+                                      fontSize: 48,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                            if (fotosParaMostrar(usuario).isNotEmpty)
+                              imagenBorrosa
+                                  ? ImagenDifuminada(
+                                      ruta: fotosParaMostrar(usuario).first,
+                                      sigma: 12,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : imagenFoto(fotosParaMostrar(usuario).first,
+                                      fit: BoxFit.cover),
+                            if (imagenOverlay != null) imagenOverlay!,
+                          ],
+                        ),
                       ),
                     ),
                   ),
                   if (badge != null)
                     Positioned(top: 6, right: 6, child: badge!),
+                  if (nuevo)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'Nuevo',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -90,57 +137,42 @@ class TarjetaUsuario extends StatelessWidget {
                   Padding(
                     padding:
                         EdgeInsets.only(right: esquinaDerecha != null ? 26 : 0),
-                    child: Row(
-                      children: [
-                        if (usuario.verificadoStatus)
-                          const Padding(
-                            padding: EdgeInsets.only(right: 4),
-                            child: Icon(Icons.verified,
-                                color: Colors.blueAccent, size: 16),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (usuario.verificadoStatus)
+                            const Padding(
+                              padding: EdgeInsets.only(right: 4),
+                              child: Icon(Icons.verified,
+                                  color: Colors.blueAccent, size: 16),
+                            ),
+                          Flexible(
+                            child: Text(
+                              nombreMostrado ??
+                                  (usuario.ocultarEdad
+                                      ? usuario.nombre
+                                      : '${usuario.nombre}, ${usuario.edad}'),
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87),
+                            ),
                           ),
-                        Expanded(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  nombreMostrado ??
-                                      (usuario.ocultarEdad
-                                          ? '${usuario.nombre}'
-                                          : '${usuario.nombre}, ${usuario.edad}'),
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87),
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: enLinea
-                                      ? const Color(0xFF4CD964)
-                                      : Colors.grey[400],
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              if (enLinea) ...[
-                                const SizedBox(width: 4),
-                                const Text(
-                                  'En línea',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF4CD964),
-                                  ),
-                                ),
-                              ],
-                            ],
+                          const SizedBox(width: 5),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: enLinea
+                                  ? const Color(0xFF4CD964)
+                                  : Colors.grey[400],
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   if (esquinaDerecha != null)

@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
+import '../../../core/servicios/preferencias_notificaciones_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
@@ -180,6 +181,8 @@ class _BandejaNotificacionesPantallaState
           .get()
           .then((fs) => fs.map((f) => f.notificacionId).toSet());
 
+      await PreferenciasNotificacionesServicio.instancia.asegurarCargada();
+
       if (mounted) {
         setState(() {
           _idsGustados
@@ -190,6 +193,10 @@ class _BandejaNotificacionesPantallaState
             ..addAll(recibidos.map((h) => h.usuarioId));
           items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
           items.removeWhere((n) => abiertas.contains(n.id));
+          // Preferencias de notificaciones: se descartan las categorías
+          // que el usuario desactivó en Configuración → Notificaciones.
+          final prefs = PreferenciasNotificacionesServicio.instancia;
+          items.removeWhere((n) => !_categoriaPermitida(prefs, n.tipo));
           _items = items;
           if (!_marcadoVisto) {
             _marcadoVisto = true;
@@ -204,6 +211,20 @@ class _BandejaNotificacionesPantallaState
       }
     } finally {
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  bool _categoriaPermitida(
+      PreferenciasNotificacionesServicio prefs, TipoNotificacion tipo) {
+    switch (tipo) {
+      case TipoNotificacion.mensaje:
+        return prefs.mensajes;
+      case TipoNotificacion.meGusta:
+        return prefs.lesGusto;
+      case TipoNotificacion.visita:
+        return prefs.visitas;
+      case TipoNotificacion.match:
+        return prefs.matches;
     }
   }
 

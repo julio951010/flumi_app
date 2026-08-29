@@ -750,6 +750,7 @@ class SyncService {
             leidoHasta: Value(leidoHastaMasReciente(
                 leidosLocales[f['id']],
                 PerfilMapeo.parsearFecha(f['leido_hasta']))),
+            esSuper: Value((f['es_super'] as bool?) ?? false),
           );
         }).toList();
         if (filas.isNotEmpty) {
@@ -780,6 +781,7 @@ class SyncService {
           leidoHasta: Value(leidoHastaMasReciente(
               leidosLocales[f['id']],
               PerfilMapeo.parsearFecha(f['leido_hasta']))),
+          esSuper: Value((f['es_super'] as bool?) ?? false),
         );
       }).toList();
       if (filas.isNotEmpty) {

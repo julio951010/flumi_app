@@ -78,6 +78,8 @@ class Usuarios extends Table {
   DateTimeColumn get ultimaConexion => dateTime().nullable()();
   BoolColumn get ocultarEnLinea => boolean().withDefault(const Constant(false))();
   BoolColumn get ocultarEdad => boolean().withDefault(const Constant(false))();
+  BoolColumn get ocultarPerfil => boolean().withDefault(const Constant(false))();
+  BoolColumn get ocultarVisitas => boolean().withDefault(const Constant(false))();
 
   BoolColumn get verificadoStatus => boolean().withDefault(const Constant(false))();
   IntColumn get scorePopularidad => integer().withDefault(const Constant(0))();
@@ -223,6 +225,9 @@ class HistorialLikes extends Table {
   /// (like-only). Espejo de matches.leido_hasta para que el badge de no
   /// leídos funcione también sin match.
   DateTimeColumn get leidoHasta => dateTime().nullable()();
+
+  /// true si este like fue un Superlike (emitido o recibido).
+  BoolColumn get esSuper => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {uuid};

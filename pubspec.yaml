@@ -49,6 +49,12 @@ dependencies:
   # --- Cámara / galería ---
   image_picker: ^1.1.2
 
+  # --- Verificación de perfil (reconocimiento facial on-device, FaceNet) ---
+  face_verification: ^0.3.8
+
+  # --- Reconocimiento de gesto (prueba de vida on-device, MediaPipe/LiteRT) ---
+  hand_detection: ^4.1.0
+
   # --- Procesado de imágenes (recorte, formato, compresión) ---
   image: ^4.8.0
   crop_your_image:

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -15,6 +15,7 @@ import 'core/estilos/tema.dart';
 import 'core/servicios/connectivity_service.dart';
 import 'core/servicios/estado_servidor_servicio.dart';
 import 'core/servicios/notificacion_servicio.dart';
+import 'core/servicios/preferencias_notificaciones_servicio.dart';
 import 'core/servicios/sync_service.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
@@ -654,6 +655,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   int _indiceMeGusta = 0;
   FiltrosEncuentros _filtros = FiltrosEncuentros();
   final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
+  final GlobalKey _undoBotonKey = GlobalKey();
+  bool _mostrandoAvisoMatch = false;
+  Timer? _timerAvisoMatch;
   final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
   /// Pendientes REALES (mensajes + sociales): alimenta el chip de la campana
   /// dentro de la página de Chats, que nunca se apaga al entrar.
@@ -763,6 +767,16 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
       'visita' => '$nombre visit\u00f3 tu perfil',
       _ => '\u00a1Hiciste match con $nombre!',
     };
+    // Preferencias de notificaciones: si la categoría está desactivada no se
+    // muestra el aviso en vivo (los contadores internos se mantienen).
+    final prefs = PreferenciasNotificacionesServicio.instancia;
+    await prefs.asegurarCargada();
+    final permitido = switch (tipo) {
+      'like' => prefs.lesGusto,
+      'visita' => prefs.visitas,
+      _ => prefs.matches,
+    };
+    if (!permitido) return;
     await notificarNavegador('Flumi', texto);
   }
 
@@ -867,6 +881,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                   usuarioLikeadoId: miId,
                   timestamp: Value(DateTime.parse(fila['timestamp'] as String)),
                   pendienteDeSincronizar: const Value(false),
+                  esSuper: Value((fila['es_super'] as bool?) ?? false),
                 ),
               );
         } catch (_) {}
@@ -997,6 +1012,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     _visitasWatchSub = null;
     _matchesSub?.cancel();
     _matchesSub = null;
+    _timerAvisoMatch?.cancel();
+    _timerAvisoMatch = null;
     _undoSignal.dispose();
     _contadorMeGusta.dispose();
     _meGustaNoLeidas.dispose();
@@ -1062,7 +1079,25 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     }
   }
 
-  Future<void> _abrirFiltros() async {
+  /// Aviso de "match perdido": se dispara cuando un Nope destruye un match
+  /// potencial con alguien que te dio Me Gusta. Muestra un tooltip simple
+  /// bajo el botón Deshacer (header) y se oculta solo a los 4 s.
+  void _avisarMatchPerdidoEnDeshacer() {
+    debugPrint('[MatchPerdido] disparando aviso');
+    setState(() => _mostrandoAvisoMatch = true);
+    _timerAvisoMatch?.cancel();
+    _timerAvisoMatch = Timer(const Duration(seconds: 4), () {
+      if (mounted) _ocultarAvisoMatch();
+    });
+  }
+
+  void _ocultarAvisoMatch() {
+    if (mounted) setState(() => _mostrandoAvisoMatch = false);
+    _timerAvisoMatch?.cancel();
+    _timerAvisoMatch = null;
+  }
+
+  void _abrirFiltros() async {
     final resultado = await mostrarFiltrosEncuentros(
       context,
       actuales: _filtros,
@@ -1073,6 +1108,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
       setState(() => _filtros = resultado);
     }
   }
+
 
   Future<void> _editarPerfil() async {
     final perfil = await perfilRepositorio.obtenerPerfilPropio();
@@ -1151,6 +1187,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         historialLikesServicio: historialLikesServicio,
         votosServicio: votosServicio,
         onAmpliarBusqueda: _ampliarBusqueda,
+        onMatchPerdido: _avisarMatchPerdidoEnDeshacer,
       ),
       MeGustaPantalla(
         db: database,
@@ -1183,20 +1220,49 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
               EncabezadoPagina(
                 titulo: nombre,
                 accion: _indice <= 1
-                    ? Row(
+                    ? Column(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          if (_indice == 1)
-                            IconButton(
-                              icon: Icon(Icons.undo, color: primario, size: 24),
-                              onPressed: () => _undoSignal.value++,
-                              tooltip: 'Deshacer',
-                            ),
-                          IconButton(
-                            icon: Icon(Icons.tune, color: primario, size: 24),
-                            onPressed: _abrirFiltros,
-                            tooltip: 'Filtros',
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_indice == 1)
+                                IconButton(
+                                  key: _undoBotonKey,
+                                  icon: Icon(Icons.undo,
+                                      color: primario, size: 24),
+                                  onPressed: () => _undoSignal.value++,
+                                  tooltip: 'Deshacer',
+                                ),
+                              IconButton(
+                                icon: Icon(Icons.tune,
+                                    color: primario, size: 24),
+                                onPressed: _abrirFiltros,
+                                tooltip: 'Filtros',
+                              ),
+                            ],
                           ),
+                          // Tooltip simple de "match perdido" bajo el botón
+                          // Deshacer. Se renderiza en el header (siempre visible).
+                          if (_mostrandoAvisoMatch)
+                            Container(
+                              margin: const EdgeInsets.only(top: 4, right: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFB8C00),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Te has perdido un match',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
                         ],
                       )
                     : _indice == 2

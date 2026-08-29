@@ -356,7 +356,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
                   SelectorOpciones(
                     valorActual: _orientacion,
                     opciones: opcionesOrientacionSexual,
-                    dobleColumna: true,
+                    dobleColumna: false,
                     onSeleccion: (v) => setState(() {
                       _orientacion = v;
                       _orientacionPropiaCtrl.clear();
@@ -395,14 +395,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
                 children: [
                   SelectorOpcionesLayout(
                     valorActual: _religion,
-                    filas: [
-                      [opcionesReligion[0], opcionesReligion[1]],
-                      [opcionesReligion[2], opcionesReligion[3]],
-                      [opcionesReligion[4], opcionesReligion[5]],
-                      [opcionesReligion[7], opcionesReligion[8]],
-                      [opcionesReligion[6]],
-                      [opcionesReligion[9]],
-                    ],
+                    filas: opcionesReligion.map((o) => [o]).toList(),
                     onSeleccion: (v) => setState(() {
                       _religion = v;
                       _religionPropiaCtrl.clear();
@@ -439,15 +432,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
               'Ayuda a conocer un poco más sobre tu día a día.',
               SelectorOpcionesLayout(
                 valorActual: _trabajo,
-                filas: [
-                  [opcionesTrabajo[1]],
-                  [opcionesTrabajo[0]],
-                  [opcionesTrabajo[2]],
-                  [opcionesTrabajo[3], opcionesTrabajo[4]],
-                  [opcionesTrabajo[5], opcionesTrabajo[6]],
-                  [opcionesTrabajo[7]],
-                  [opcionesTrabajo[8]],
-                ],
+                filas: opcionesTrabajo.map((o) => [o]).toList(),
                 onSeleccion: (v) => setState(() => _trabajo = v),
               )),
           _pagina('¿Fumas?',
@@ -672,47 +657,47 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   Widget _pasoIntro(Color primario) {
     return Center(
       child: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              height: 90, width: 90,
-              decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: Icon(Icons.assignment, size: 50, color: primario),
-            ),
-            const SizedBox(height: 28),
-            const Text('Completa tu perfil',
-                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87)),
-            const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              Container(
+                height: 90, width: 90,
+                decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
+                child: Icon(Icons.assignment, size: 50, color: primario),
+              ),
+              const SizedBox(height: 28),
+              const Text('Completa tu perfil',
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87)),
+              const SizedBox(height: 14),
+              Text(
                 'Realiza este cuestionario para completar tu perfil\ny ayuda a otros a conocerte mejor.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.5),
               ),
-            ),
-            const SizedBox(height: 40),
-            SizedBox(
-              width: double.infinity, height: 52,
-              child: ElevatedButton(
-                onPressed: _siguiente,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primario, foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
+              const SizedBox(height: 40),
+              SizedBox(
+                width: double.infinity, height: 52,
+                child: ElevatedButton(
+                  onPressed: _siguiente,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primario, foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0,
+                  ),
+                  child: const Text('Ir al cuestionario', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                 ),
-                child: const Text('Ir al cuestionario', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity, height: 48,
-              child: TextButton(
-                onPressed: _omitirAhora,
-                child: Text('Quizá más tarde', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity, height: 48,
+                child: TextButton(
+                  onPressed: _omitirAhora,
+                  child: Text('Quizá más tarde', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-          ],
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
@@ -721,9 +706,11 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   Widget _pasoBienvenida(Color primario) {
     return Center(
       child: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
             Container(
               height: 100, width: 100,
               decoration: BoxDecoration(color: primario.withValues(alpha: 0.1), shape: BoxShape.circle),
@@ -733,15 +720,12 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
             const Text('¡Todo listo!',
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
             const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                _omitido
-                    ? 'Puedes completar tu perfil más tarde desde la sección de perfil.'
-                    : 'Tu perfil está completo. Ahora puedes empezar a conocer personas.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.4),
-              ),
+            Text(
+              _omitido
+                  ? 'Puedes completar tu perfil más tarde desde la sección de perfil.'
+                  : 'Tu perfil está completo. Ahora puedes empezar a conocer personas.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey[600], height: 1.4),
             ),
             const SizedBox(height: 40),
             SizedBox(
@@ -764,6 +748,7 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
             ),
             const SizedBox(height: 16),
           ],
+          ),
         ),
       ),
     );

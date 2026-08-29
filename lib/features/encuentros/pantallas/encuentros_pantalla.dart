@@ -6,6 +6,7 @@ import '../../../core/utilidades/fotos_perfil.dart';
 import 'package:swipe_cards/draggable_card.dart';
 import 'package:swipe_cards/swipe_cards.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../config/env.dart';
 import '../../../core/constantes/constantes.dart';
 import '../../../core/servicios/connectivity_service.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
@@ -35,6 +36,7 @@ class EncuentrosPantalla extends StatefulWidget {
   final HistorialLikesServicio historialLikesServicio;
   final VotosServicio votosServicio;
   final VoidCallback? onAmpliarBusqueda;
+  final VoidCallback? onMatchPerdido;
 
   const EncuentrosPantalla({
     super.key,
@@ -48,6 +50,7 @@ class EncuentrosPantalla extends StatefulWidget {
     required this.historialLikesServicio,
     required this.votosServicio,
     this.onAmpliarBusqueda,
+    this.onMatchPerdido,
   });
 
   @override
@@ -63,6 +66,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   Usuario? _propio;
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
+  Set<String> _idsSuperRecibidos = {};
   bool _cargando = true;
   int _progresoFoto = 0;
   int _motorBase = 0;
@@ -118,26 +122,45 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     )..addListener(_alCambiarCarta);
 }
 
-  /// Si [usuario] ya te dio Me Gusta al momento del Nope, avisa que se
+/// Si [usuario] ya te dio Me Gusta al momento del Nope, avisa que se
   /// perdió un match. Rechequea contra la BD local por si el like llegó
-  /// después de cargar el mazo (realtime/sync), que `_idsRecibidos` no
-  /// habría capturado.
+  /// después de cargar el mazo (realtime), que `_idsRecibidos` no habría
+  /// capturado; si la BD aún no lo tiene y hay red, refresca el historial
+  /// desde el servidor antes de decidir.
   Future<void> _avisarMatchPerdido(Usuario usuario) async {
     var leDioLike = _idsRecibidos.contains(usuario.uuid);
+    debugPrint('[MatchPerdido] ${usuario.nombre}: enIdsRecibidos=$leDioLike');
     if (!leDioLike) {
       try {
-        final recibido = await (widget.db.select(widget.db.historialLikes)
-              ..where((h) =>
-                  h.usuarioLikeadoId.equals(widget.miId) &
-                  h.usuarioId.equals(usuario.uuid)))
-            .get();
-        leDioLike = recibido.isNotEmpty;
-      } catch (_) {
+        final miId = widget.miId;
+        var filas =
+            await (widget.db.select(widget.db.historialLikes)
+                  ..where((h) =>
+                      h.usuarioLikeadoId.equals(miId) &
+                      h.usuarioId.equals(usuario.uuid)))
+                .get();
+        if (filas.isEmpty &&
+            (ConnectivityService.instancia.hayConexion || kUsarServidorLocal)) {
+          await widget.syncService.sincronizarHistorialLikes();
+          filas =
+              await (widget.db.select(widget.db.historialLikes)
+                    ..where((h) =>
+                        h.usuarioLikeadoId.equals(miId) &
+                        h.usuarioId.equals(usuario.uuid)))
+                  .get();
+        }
+        leDioLike = filas.isNotEmpty;
+        debugPrint(
+            '[MatchPerdido] rechequeo BD -> $leDioLike (${filas.length} filas)');
+      } catch (e) {
+        debugPrint('[MatchPerdido] error al rechequear: $e');
         leDioLike = false;
       }
     }
-    if (leDioLike && mounted) {
-      NotificacionServicio.advertencia(context, 'Te has perdido un match');
+    if (leDioLike) {
+      _idsRecibidos.add(usuario.uuid);
+      // El aviso se muestra como tooltip sobre el botón Deshacer (header).
+      widget.onMatchPerdido?.call();
     }
   }
 
@@ -293,8 +316,11 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       // perfiles ya votados.
       final gustados = await widget.historialLikesServicio.obtenerIdsGustados();
       final recibidos = await widget.historialLikesServicio.obtenerLikesRecibidos();
+      final superRecibidos =
+          await widget.historialLikesServicio.obtenerIdsSuperRecibidos();
       _idsGustados = gustados;
       _idsRecibidos = recibidos;
+      _idsSuperRecibidos = superRecibidos;
 
       // Criterios base del perfil propio: "interesado en" y "rango de edad".
       final propio = await (widget.db.select(widget.db.usuarios)
@@ -534,8 +560,6 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             child: SwipeCards(
               key: ValueKey(_motorId),
               matchEngine: _matchEngine!,
-              itemBuilder: (context, index) =>
-                  _tarjeta(_filtrados[_motorBase + index]),
               onStackFinished: () {
                 // Si aún quedan lotes en la BD, precargamos el siguiente en
                 // vez de mostrar el vacío de inmediato.
@@ -544,6 +568,15 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
                   return;
                 }
                 setState(() => _agotado = true);
+              },
+              itemBuilder: (context, index) {
+                // El índice interno del engine (_currentItemIndex) puede quedar
+                // desfasado al recomponer el mazo (Nope, votos, más lotes): nunca
+                // indexamos fuera del rango real de _filtrados.
+                if (_filtrados.isEmpty) return const SizedBox.shrink();
+                final maxIndex = _filtrados.length - 1 - _motorBase;
+                final seguro = index.clamp(0, maxIndex < 0 ? 0 : maxIndex);
+                return _tarjeta(_filtrados[_motorBase + seguro]);
               },
               upSwipeAllowed: _suscripcion.superlikesDisponiblesHoy,
               rightSwipeAllowed: _suscripcion.meGustasDisponiblesHoy,
@@ -585,6 +618,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       },
       esMatch: gustado && _idsRecibidos.contains(usuario.uuid),
       esMeGusta: gustado,
+      esSuperRecibido: _idsSuperRecibidos.contains(usuario.uuid),
     );
   }
 
@@ -788,51 +822,106 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
 
   Widget _esqueleto() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        clipBehavior: Clip.hardEdge,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4))
-          ],
-        ),
-        child: const Column(
-          children: [
-            Expanded(
-              flex: 7,
-              child: ShimmerCaja(radius: 0),
-            ),
-            Expanded(
-              flex: 3,
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ShimmerCaja(width: 200, height: 22),
-                      SizedBox(height: 12),
-                      ShimmerCaja(width: 100, height: 16),
-                      SizedBox(height: 12),
-                      ShimmerCaja(width: 200, height: 14),
-                      SizedBox(height: 6),
-                      ShimmerCaja(width: 160, height: 14),
-                    ],
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 28),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              clipBehavior: Clip.hardEdge,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 24,
+                    offset: Offset(0, 8),
                   ),
-                ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  const Positioned.fill(child: ShimmerCaja(radius: 0)),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 140,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.6),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Positioned(
+                    top: 20,
+                    left: 16,
+                    right: 16,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ShimmerCaja(width: 180, height: 22, radius: 6),
+                        SizedBox(height: 8),
+                        ShimmerCaja(width: 120, height: 18, radius: 9),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 110,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.65),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 16,
+                    left: 0,
+                    right: 0,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _fabEsqueleto(),
+                        const SizedBox(width: 28),
+                        _fabEsqueleto(),
+                        const SizedBox(width: 28),
+                        _fabEsqueleto(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  Widget _fabEsqueleto() => Container(
+        width: 52,
+        height: 52,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white,
+        ),
+        child: const ShimmerCaja(radius: 26),
+      );
 }

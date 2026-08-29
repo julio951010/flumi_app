@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
@@ -86,6 +89,7 @@ class ConfiguracionPantalla extends StatelessWidget {
                           db: db,
                           suscripcionServicio: suscripcionServicio,
                           syncService: syncService,
+                          repositorio: repositorio,
                         ),
                       ),
                     )),
@@ -96,6 +100,7 @@ class ConfiguracionPantalla extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (_) => ModoInvisiblePantalla(
                           suscripcionServicio: suscripcionServicio,
+                          repositorio: repositorio,
                         ),
                       ),
                     )),
@@ -221,7 +226,57 @@ class ConfiguracionPantalla extends StatelessWidget {
       ),
     );
     if (confirmado != true || !context.mounted) return;
-    NotificacionServicio.exito(context, 'Caché borrada correctamente.');
+    // Capturamos el Navigator antes del await: mientras limpiamos el caché la
+    // ruta sigue montada y su Navigator permanece vivo.
+    final nav = Navigator.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      ),
+    );
+
+    var liberados = 0;
+    try {
+      if (!kIsWeb) {
+        final dir = await getTemporaryDirectory();
+        if (await dir.exists()) {
+          await for (final entidad
+              in dir.list(recursive: true, followLinks: false)) {
+            try {
+              if (entidad is File) {
+                final tamano = await entidad.length();
+                await entidad.delete();
+                liberados += tamano;
+              }
+            } catch (_) {}
+          }
+        }
+      }
+      // Caché de imágenes en memoria de Flutter.
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {}
+
+    if (context.mounted) nav.pop();
+    if (!context.mounted) return;
+
+    final texto = liberados > 0
+        ? 'Caché borrada (${_formatoBytes(liberados)} liberados).'
+        : 'Caché borrada correctamente.';
+    NotificacionServicio.exito(context, texto);
+  }
+
+  String _formatoBytes(int bytes) {
+    if (bytes >= 1048576) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
+    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '$bytes B';
   }
 
   Future<void> _limpiarInteracciones(BuildContext context) async {

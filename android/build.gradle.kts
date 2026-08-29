@@ -15,6 +15,45 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+// Alinea el JVM target de Java con el de Kotlin en cada módulo de biblioteca
+// para evitar "Inconsistent JVM Target Compatibility". Cada plugin fija sus
+// propios targets (tflite_flutter: Java 11/Kotlin 21; image_picker: Java 21/
+// Kotlin 17; etc.). Se registra ANTES de evaluationDependsOn(":app") para que
+// este afterEvaluate corra tras la evaluación de cada plugin.
+//
+// No se fuerza un valor fijo: se LEER el jvmTarget de Kotlin (por reflexión,
+// porque el tipo Kotlin no está en el classpath raíz con AGP newDsl) y se
+// iguala el Java a ese valor. Así cada módulo queda coherente sin pelear con
+// la configuración del plugin.
+subprojects {
+    afterEvaluate {
+        val androidExt = extensions.findByName("android")
+            as? com.android.build.gradle.LibraryExtension ?: return@afterEvaluate
+
+        val javaVersion = try {
+            val kotlinExt = extensions.findByName("kotlin")
+            if (kotlinExt != null) {
+                val compilerOptions =
+                    kotlinExt.javaClass.getMethod("getCompilerOptions").invoke(kotlinExt)
+                val jvmTargetProp =
+                    compilerOptions.javaClass.getMethod("getJvmTarget").invoke(compilerOptions)
+                val jvmTargetEnum = jvmTargetProp.javaClass.getMethod("get").invoke(jvmTargetProp)
+                val name = (jvmTargetEnum as? Enum<*>)?.name ?: "JVM_21"
+                JavaVersion.valueOf(name.replace("JVM_", "VERSION_"))
+            } else {
+                JavaVersion.VERSION_21
+            }
+        } catch (_: Exception) {
+            JavaVersion.VERSION_21
+        }
+
+        androidExt.compileOptions {
+            sourceCompatibility = javaVersion
+            targetCompatibility = javaVersion
+        }
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:drift/drift.dart' hide Column;
@@ -8,6 +9,9 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../core/servicios/perfil_foto_servicio.dart';
+import '../../../core/servicios/reconocimiento_gesto_servicio.dart';
+import '../../../core/servicios/verificacion_servicio.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
 import '../perfil_repositorio.dart';
 
@@ -42,12 +46,14 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
   String? _rutaFoto;
   bool _enviando = false;
   late bool _pendiente;
+  late bool _verificado;
   int _intentos = 0;
 
   @override
   void initState() {
     super.initState();
     _gestoRuta = _gestos[_random.nextInt(_gestos.length)];
+    _verificado = widget.perfil.verificadoStatus;
     _pendiente = widget.perfil.fotoVerificacion.isNotEmpty &&
         !widget.perfil.verificadoStatus;
   }
@@ -75,17 +81,82 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     if (ruta == null || ruta.isEmpty) return;
     if (_intentos >= _maxIntentos) return;
     setState(() => _enviando = true);
+    String? urlSubida;
     try {
+      // 1) Prueba de vida: el gesto de la selfie debe coincidir con el de la
+      //    imagen mostrada.
+      if (!kIsWeb) {
+        final gesto = await ReconocimientoGestoServicio.verificarGesto(
+          selfie: File(ruta),
+          referenciaRuta: _gestoRuta,
+        );
+        if (!mounted) return;
+        if (!gesto.exito) {
+          NotificacionServicio.alerta(context, gesto.mensaje);
+          return;
+        }
+      }
+
+      // En web la selfie se sube (el rostro se compara en el servidor) y se
+      // borra del Storage al terminar. En móvil no se sube: todo es local.
+      if (kIsWeb) {
+        urlSubida = await PerfilFotoServicio.subirFotoPerfil(
+          usuarioId: widget.perfil.uuid,
+          archivo: XFile(ruta),
+        );
+        if (urlSubida == null) {
+          NotificacionServicio.alerta(
+            context,
+            'No se pudo subir la foto. Intenta de nuevo.',
+          );
+          return;
+        }
+      }
+      final resultado = kIsWeb
+          ? await VerificacionServicio.verificarPerfilWeb(
+              perfil: widget.perfil,
+              selfieUrl: urlSubida!,
+            )
+          : await VerificacionServicio.verificarPerfil(
+              perfil: widget.perfil,
+              rutaSelfie: ruta,
+            );
+      if (!mounted) return;
+      if (resultado == VerificarResultado.sinFotos) {
+        NotificacionServicio.alerta(
+          context,
+          'Necesitas fotos en tu perfil para verificarte.',
+        );
+        return;
+      }
+      if (resultado == VerificarResultado.error) {
+        NotificacionServicio.alerta(
+          context,
+          'No se pudo verificar la foto. Intenta de nuevo.',
+        );
+        return;
+      }
+      final coincide = resultado == VerificarResultado.coincide;
       await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
         uuid: Value(widget.perfil.uuid),
-        fotoVerificacion: Value(ruta),
-        // Se conserva verificadoStatus sin cambios: la cuenta queda en
-        // estado "pendiente" hasta que Flumi la revise.
+        // No se persiste la selfie: se borra de todos lados al final.
+        fotoVerificacion: const Value(''),
+        verificadoStatus: Value(coincide),
       ));
       if (!mounted) return;
       _intentos++;
-      setState(() => _pendiente = true);
-      NotificacionServicio.exito(context, 'Foto enviada. En revisión.');
+      setState(() {
+        _verificado = coincide;
+        _pendiente = false;
+      });
+      if (coincide) {
+        NotificacionServicio.exito(context, '¡Perfil verificado!');
+      } else {
+        NotificacionServicio.alerta(
+          context,
+          'La selfie no coincide con tus fotos. Inténtalo de nuevo.',
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -93,7 +164,32 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         'No se pudo enviar la verificación. Intenta de nuevo.',
       );
     } finally {
-      if (mounted) setState(() => _enviando = false);
+      // Borra la selfie de todos lados: del servidor (web) y del dispositivo.
+      if (kIsWeb && urlSubida != null) {
+        await PerfilFotoServicio.eliminarFotoPerfil(
+          usuarioId: widget.perfil.uuid,
+          urlOFoto: urlSubida,
+        );
+      }
+      await _borrarFotoLocal(ruta);
+      if (mounted) {
+        setState(() {
+          _enviando = false;
+          _rutaFoto = null;
+        });
+      }
+    }
+  }
+
+  /// Elimina el archivo local de la selfie. En web no aplica (el picker entrega
+  /// un blob efímero), por lo que se omite.
+  Future<void> _borrarFotoLocal(String ruta) async {
+    if (kIsWeb) return;
+    try {
+      final archivo = File(ruta);
+      if (await archivo.exists()) await archivo.delete();
+    } catch (_) {
+      // Si no se puede borrar (p. ej. ya removido), se ignora.
     }
   }
 
@@ -112,9 +208,11 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-        children: _pendiente
-            ? _seccionPendiente(primario)
-            : _seccionCaptura(primario),
+        children: _verificado
+            ? _seccionVerificado(primario)
+            : _pendiente
+                ? _seccionPendiente(primario)
+                : _seccionCaptura(primario),
       ),
     );
   }
@@ -338,6 +436,54 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
           ),
         ),
       if (_intentos < _maxIntentos) const SizedBox(height: 12),
+      SizedBox(
+        height: 52,
+        child: FilledButton.icon(
+          onPressed: () => Navigator.pop(context),
+          style: FilledButton.styleFrom(
+            backgroundColor: primario,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            elevation: 0,
+          ),
+          icon: const Icon(Icons.check, size: 20),
+          label: const Text('Entendido',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _seccionVerificado(Color primario) {
+    return [
+      Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Column(
+          children: [
+            Icon(Icons.verified_user, size: 48, color: Colors.green),
+            SizedBox(height: 12),
+            Text(
+              'Perfil verificado',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Hemos comprobado que eres tú. Tu badge de verificado '
+              'ya es visible para los demás.',
+              style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 24),
       SizedBox(
         height: 52,
         child: FilledButton.icon(

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/servicios/preferencias_notificaciones_servicio.dart';
+
 class NotificacionesPantalla extends StatefulWidget {
   const NotificacionesPantalla({super.key});
 
@@ -8,14 +10,50 @@ class NotificacionesPantalla extends StatefulWidget {
 }
 
 class _NotificacionesPantallaState extends State<NotificacionesPantalla> {
-  bool _mensajes = true;
-  bool _matches = true;
-  bool _lesGusto = true;
-  bool _visitas = true;
-  bool _cercaDeTi = true;
-  bool _regalos = true;
-  bool _consejos = true;
-  bool _sondeos = true;
+  bool _cargando = true;
+  late final PreferenciasNotificacionesServicio _prefs =
+      PreferenciasNotificacionesServicio.instancia;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefs.addListener(_alCambiarPrefs);
+    _prefs.asegurarCargada().then((_) {
+      if (mounted) setState(() => _cargando = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _prefs.removeListener(_alCambiarPrefs);
+    super.dispose();
+  }
+
+  void _alCambiarPrefs() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _cambiar({
+    bool? mensajes,
+    bool? matches,
+    bool? lesGusto,
+    bool? visitas,
+    bool? cercaDeTi,
+    bool? regalos,
+    bool? consejos,
+    bool? sondeos,
+  }) {
+    return _prefs.establecer(
+      mensajes: mensajes,
+      matches: matches,
+      lesGusto: lesGusto,
+      visitas: visitas,
+      cercaDeTi: cercaDeTi,
+      regalos: regalos,
+      consejos: consejos,
+      sondeos: sondeos,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,82 +73,84 @@ class _NotificacionesPantallaState extends State<NotificacionesPantalla> {
       ),
       body: SafeArea(
         top: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            _fila(
-              primario,
-              Icons.chat_bubble_outline,
-              'Mensajes',
-              'Recibe notificaciones sobre mensajes nuevos',
-              _mensajes,
-              (v) => setState(() => _mensajes = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.favorite_outline,
-              'Matches',
-              'Recibe notificaciones sobre nuevos matches',
-              _matches,
-              (v) => setState(() => _matches = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.thumb_up_outlined,
-              'Les gusto',
-              'Recibe notificaciones cuando le gustes a alguien',
-              _lesGusto,
-              (v) => setState(() => _lesGusto = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.remove_red_eye_outlined,
-              'Visitas',
-              'Recibe notificaciones sobre quién visita tu perfil',
-              _visitas,
-              (v) => setState(() => _visitas = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.location_on_outlined,
-              'Cerca de ti',
-              'Recibe notificaciones cuando alguien que coincide con tu perfil está cerca de ti',
-              _cercaDeTi,
-              (v) => setState(() => _cercaDeTi = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.card_giftcard,
-              'Regalos',
-              'Recibe notificaciones cuando te envíen regalos',
-              _regalos,
-              (v) => setState(() => _regalos = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.campaign_outlined,
-              'Consejos, ofertas, promociones',
-              'Recibe consejos para mejorar tu perfil e información sobre ofertas y promociones',
-              _consejos,
-              (v) => setState(() => _consejos = v),
-            ),
-            const Divider(height: 1),
-            _fila(
-              primario,
-              Icons.poll_outlined,
-              'Sondeos y encuestas',
-              'Recibe información sobre programas de investigación remunerados y no remunerados y comparte tu opinión sobre cómo mejorar nuestros servicios',
-              _sondeos,
-              (v) => setState(() => _sondeos = v),
-            ),
-          ],
-        ),
+        child: _cargando
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  _fila(
+                    primario,
+                    Icons.chat_bubble_outline,
+                    'Mensajes',
+                    'Recibe notificaciones sobre mensajes nuevos',
+                    _prefs.mensajes,
+                    (v) => _cambiar(mensajes: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.favorite_outline,
+                    'Matches',
+                    'Recibe notificaciones sobre nuevos matches',
+                    _prefs.matches,
+                    (v) => _cambiar(matches: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.thumb_up_outlined,
+                    'Les gusto',
+                    'Recibe notificaciones cuando le gustes a alguien',
+                    _prefs.lesGusto,
+                    (v) => _cambiar(lesGusto: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.remove_red_eye_outlined,
+                    'Visitas',
+                    'Recibe notificaciones sobre quién visita tu perfil',
+                    _prefs.visitas,
+                    (v) => _cambiar(visitas: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.location_on_outlined,
+                    'Cerca de ti',
+                    'Recibe notificaciones cuando alguien que coincide con tu perfil está cerca de ti',
+                    _prefs.cercaDeTi,
+                    (v) => _cambiar(cercaDeTi: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.card_giftcard,
+                    'Regalos',
+                    'Recibe notificaciones cuando te envíen regalos',
+                    _prefs.regalos,
+                    (v) => _cambiar(regalos: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.campaign_outlined,
+                    'Consejos, ofertas, promociones',
+                    'Recibe consejos para mejorar tu perfil e información sobre ofertas y promociones',
+                    _prefs.consejos,
+                    (v) => _cambiar(consejos: v),
+                  ),
+                  const Divider(height: 1),
+                  _fila(
+                    primario,
+                    Icons.poll_outlined,
+                    'Sondeos y encuestas',
+                    'Recibe información sobre programas de investigación remunerados y no remunerados y comparte tu opinión sobre cómo mejorar nuestros servicios',
+                    _prefs.sondeos,
+                    (v) => _cambiar(sondeos: v),
+                  ),
+                ],
+              ),
       ),
     );
   }

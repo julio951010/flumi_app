@@ -19,6 +19,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   final bool esMatch;
   final bool esMeGusta;
   final bool soloVista;
+  final bool esSuperRecibido;
   const TarjetaDetalleUsuario({
     super.key,
     required this.usuario,
@@ -32,6 +33,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
     this.esMatch = false,
     this.esMeGusta = false,
     this.soloVista = false,
+    this.esSuperRecibido = false,
   });
 
   @override
@@ -185,11 +187,23 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
+                  border: widget.esSuperRecibido
+                      ? Border.all(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 3,
+                        )
+                      : null,
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.12),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8))
+                      color: widget.esSuperRecibido
+                          ? Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.55)
+                          : Colors.black.withValues(alpha: 0.12),
+                      blurRadius: widget.esSuperRecibido ? 26 : 24,
+                      offset: const Offset(0, 8),
+                    ),
                   ],
                 ),
                 child: Stack(

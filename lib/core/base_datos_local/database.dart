@@ -10,7 +10,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -130,6 +130,13 @@ class AppDatabase extends _$AppDatabase {
       if (from < 15) {
         await m.addColumn(
             conversacionesEliminadas, conversacionesEliminadas.reactivada);
+      }
+      if (from < 16) {
+        await m.addColumn(usuarios, usuarios.ocultarPerfil);
+        await m.addColumn(usuarios, usuarios.ocultarVisitas);
+      }
+      if (from < 17) {
+        await m.addColumn(historialLikes, historialLikes.esSuper);
       }
     },
   );

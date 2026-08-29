@@ -130,7 +130,7 @@ class _PreguntasPerfilOpcionState extends State<PreguntasPerfilOpcion> {
     final item = _preguntas[indice];
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
@@ -170,13 +170,19 @@ class _PreguntasPerfilOpcionState extends State<PreguntasPerfilOpcion> {
   }
 
   Widget _tarjetaAnadir(Color primario, int indice) {
-    return InkWell(
-      onTap: () => _elegirPregunta(indice),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: primario.withValues(alpha: 0.5)), color: primario.withValues(alpha: 0.05)),
-        child: Column(children: [Icon(Icons.add_circle_outline, color: primario, size: 28), const SizedBox(height: 6), Text('Añadir pregunta', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: primario))]),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: InkWell(
+          onTap: () => _elegirPregunta(indice),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: primario.withValues(alpha: 0.5)), color: primario.withValues(alpha: 0.05)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [Icon(Icons.add_circle_outline, color: primario, size: 28), const SizedBox(height: 6), Text('Añadir pregunta', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: primario))]),
+          ),
+        ),
       ),
     );
   }

@@ -58,6 +58,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   Usuario? _propio;
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
+  Set<String> _idsSuperRecibidos = {};
   double _miLat = 0;
   double _miLon = 0;
   bool _cargando = true;
@@ -112,8 +113,11 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       // Fase 5: datos reales de interacción (adiós al mock).
       final gustados = await widget.historialLikesServicio.obtenerIdsGustados();
       final recibidos = await widget.historialLikesServicio.obtenerLikesRecibidos();
+      final superRecibidos =
+          await widget.historialLikesServicio.obtenerIdsSuperRecibidos();
       _idsGustados = gustados;
       _idsRecibidos = recibidos;
+      _idsSuperRecibidos = superRecibidos;
 
       // Fase 1: primer lote del RPC + llenado mínimo para mostrar la grilla
       // pronto. Fase 2: si el RPC vuelve vacío con los filtros actuales, se
@@ -345,8 +349,11 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
                   final gustado = _idsGustados.contains(_filtrados[i].uuid);
                   final esMatch =
                       gustado && _idsRecibidos.contains(_filtrados[i].uuid);
+                  final esSuperRecibido =
+                      _idsSuperRecibidos.contains(_filtrados[i].uuid);
                   return TarjetaUsuario(
                     usuario: _filtrados[i],
+                    esSuperRecibido: esSuperRecibido,
                     onTap: () {
                       _abrirPerfil(_filtrados[i], gustado, esMatch);
                     },
@@ -579,20 +586,31 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
         itemBuilder: (_, __) => Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
+            borderRadius: BorderRadius.circular(20),
           ),
-          child: const Column(
+          child: Column(
             children: [
-              Expanded(child: ShimmerCaja(radius: 0)),
-              Padding(
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                  ),
+                  child: const ShimmerCaja(radius: 20),
+                ),
+              ),
+              const Padding(
                 padding: EdgeInsets.fromLTRB(10, 8, 10, 10),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     ShimmerCaja(width: 80, height: 14),
-                    SizedBox(height: 4),
-                    ShimmerCaja(width: 60, height: 11),
                   ],
                 ),
               ),

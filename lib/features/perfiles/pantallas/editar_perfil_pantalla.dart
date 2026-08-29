@@ -644,19 +644,22 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Widget _grillaFotos(Color primario) {
     final fotos = _fotosGrilla;
     const total = 4;
-    return GridView.count(
-      crossAxisCount: 4,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      children: List.generate(total, (index) {
-        final tieneFoto = index < fotos.length;
-        if (tieneFoto) {
-          return _celdaFoto(index, fotos[index], primario);
-        }
-        return _celdaAgregar(primario);
-      }),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: GridView.count(
+        crossAxisCount: 4,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        children: List.generate(total, (index) {
+          final tieneFoto = index < fotos.length;
+          if (tieneFoto) {
+            return _celdaFoto(index, fotos[index], primario);
+          }
+          return _celdaAgregar(primario);
+        }),
+      ),
     );
   }
 

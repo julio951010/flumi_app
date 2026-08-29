@@ -4,6 +4,7 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
 import '../../../features/perfiles/pantallas/detalle_plan_pantalla.dart';
+import '../../../features/perfiles/perfil_repositorio.dart';
 import '../../../widgets_comunes/bloqueo_suscripcion_sheet.dart';
 import '../../../widgets_comunes/flumi_loader.dart';
 import 'personas_bloqueadas_pantalla.dart';
@@ -12,12 +13,14 @@ class PrivacidadPantalla extends StatefulWidget {
   final AppDatabase db;
   final SuscripcionServicio suscripcionServicio;
   final SyncService syncService;
+  final PerfilRepositorio repositorio;
 
   const PrivacidadPantalla({
     super.key,
     required this.db,
     required this.suscripcionServicio,
     required this.syncService,
+    required this.repositorio,
   });
 
   @override
@@ -243,7 +246,10 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => const PersonasBloqueadasPantalla(),
+                  builder: (_) => PersonasBloqueadasPantalla(
+                    db: widget.db,
+                    repositorio: widget.repositorio,
+                  ),
                 ),
               ),
             ),

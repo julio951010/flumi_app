@@ -55,6 +55,8 @@ alter table public.profiles add column if not exists preguntas_perfil      jsonb
 alter table public.profiles add column if not exists foto_verificacion     text default '';
 alter table public.profiles add column if not exists ultima_conexion       timestamptz default now();
 alter table public.profiles add column if not exists creado_en             timestamptz default now();
+alter table public.profiles add column if not exists ocultar_perfil        boolean default false;
+alter table public.profiles add column if not exists ocultar_visitas       boolean default false;
 
 -- Restricción de edad mínima (solo se añade si no existe)
 do $$
@@ -221,17 +223,19 @@ create index if not exists visitas_visitante_idx  on public.visitas (visitante_i
 -- ------------------------------------------------------------
 -- HISTORIAL LIKES
 -- ------------------------------------------------------------
-create table if not exists public.historial_likes (
-  id                uuid primary key default uuid_generate_v4(),
-  usuario_id        uuid not null references public.profiles(id) on delete cascade,
-  usuario_likeado_id uuid not null references public.profiles(id) on delete cascade,
-  "timestamp"       timestamptz default now()
-);
+ create table if not exists public.historial_likes (
+   id                uuid primary key default uuid_generate_v4(),
+   usuario_id        uuid not null references public.profiles(id) on delete cascade,
+   usuario_likeado_id uuid not null references public.profiles(id) on delete cascade,
+   "timestamp"       timestamptz default now(),
+   es_super          boolean default false
+ );
 
 -- Fase 6: leído de conversaciones like-only (premium, sin match todavía).
 -- Espejo de matches.leido_hasta para que el badge de no leídos funcione
 -- también cuando no existe fila en matches.
 alter table public.historial_likes add column if not exists leido_hasta timestamptz;
+alter table public.historial_likes add column if not exists es_super boolean default false;
 
 create index if not exists historial_likes_usuario_idx   on public.historial_likes (usuario_id);
 create index if not exists historial_likes_likeado_idx   on public.historial_likes (usuario_likeado_id);
@@ -533,8 +537,8 @@ begin
   end if;
 
   -- Like (sin duplicar el par); el trigger crea el match si es recíproco.
-  insert into public.historial_likes (usuario_id, usuario_likeado_id)
-  select yo, perfil_id
+  insert into public.historial_likes (usuario_id, usuario_likeado_id, es_super)
+  select yo, perfil_id, es_super
   where not exists (
     select 1 from public.historial_likes
     where usuario_id = yo and usuario_likeado_id = perfil_id
@@ -566,6 +570,15 @@ declare
 begin
   if yo is null or perfil_id is null or perfil_id = yo then
     return jsonb_build_object('error', 'destino_invalido');
+  end if;
+
+  -- Modo invisible: si el visitante tiene activado "ocultar visitas",
+  -- la visita no se registra y nadie puede verla.
+  if exists (
+    select 1 from public.profiles
+    where id = yo and ocultar_visitas = true
+  ) then
+    return jsonb_build_object('ok', true, 'ocultada', true);
   end if;
 
   insert into public.visitas (visitante_id, visitado_id)
@@ -781,6 +794,7 @@ begin
     'select p.* from public.profiles p
      where p.ubicacion is not null
        and p.id <> $1
+       and p.ocultar_perfil = false
        %s
        and not exists (select 1 from public.blocks b
                        where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
