@@ -88,14 +88,18 @@ class _RestablecerContrasenaPantallaState
                     children: [
                       SizedBox(
                         width: double.infinity,
-                        child: Text(
-                          'Restablecer Contraseña',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: primario,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Restablecer Contraseña',
+                            maxLines: 1,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: primario,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1,
+                            ),
                           ),
                         ),
                       ),

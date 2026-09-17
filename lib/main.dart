@@ -19,6 +19,7 @@ import 'core/servicios/preferencias_notificaciones_servicio.dart';
 import 'core/servicios/sync_service.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
+import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
 import 'features/auth/pantallas/login_pantalla.dart';
 import 'features/auth/pantallas/olvide_contrasena_pantalla.dart';
 import 'features/auth/pantallas/registro_pantalla.dart';
@@ -40,6 +41,7 @@ import 'features/notificaciones/pantallas/bandeja_notificaciones_pantalla.dart';
 import 'features/configuracion/pantallas/configuracion_pantalla.dart';
 import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
+import 'core/servicios/config_remota_servicio.dart';
 import 'core/servicios/suscripcion_servicio.dart';
 import 'core/servicios/visitas_historial_servicio.dart';
 import 'core/servicios/votos_servicio.dart';
@@ -52,6 +54,7 @@ late final AppDatabase database;
 late final SyncService syncService;
 late final AuthService authService;
 late final SuscripcionServicio suscripcionServicio;
+late final ConfigRemotaServicio configRemota;
 late final VisitasServicio visitasServicio;
 late final HistorialLikesServicio historialLikesServicio;
 late final VotosServicio votosServicio;
@@ -90,7 +93,13 @@ void main() async {
 
   perfilRepositorio = PerfilRepositorio(database, syncService);
   chatRepositorio = ChatRepositorio(database, syncService);
-  suscripcionServicio = SuscripcionServicio(database, syncService);
+  if (!kUsarServidorLocal) {
+    configRemota = ConfigRemotaServicio(Supabase.instance.client);
+    await configRemota.inicializar();
+  } else {
+    configRemota = ConfigRemotaServicio(null);
+  }
+  suscripcionServicio = SuscripcionServicio(database, syncService, configRemota: configRemota);
   visitasServicio = VisitasServicio(database, syncService);
   historialLikesServicio = HistorialLikesServicio(database, syncService);
   votosServicio = VotosServicio(database, syncService);
@@ -546,7 +555,14 @@ bool _esperandoSincronizacion = false;
   }
 }
 
-enum _AuthPage { login, registro, olvideContrasena }
+enum _AuthPage {
+  login,
+  registro,
+  olvideContrasena,
+  verificacion,
+  verificacionRecovery,
+  restablecer,
+}
 
 class _AuthWrapper extends StatefulWidget {
   final VoidCallback? onLoginExitoso;
@@ -561,6 +577,7 @@ class _AuthWrapperState extends State<_AuthWrapper>
     with SingleTickerProviderStateMixin {
   _AuthPage _paginaActual = _AuthPage.login;
   _AuthPage _paginaAnterior = _AuthPage.login;
+  String _emailPendiente = '';
   late final AnimationController _ctrl;
 
   @override
@@ -592,12 +609,45 @@ class _AuthWrapperState extends State<_AuthWrapper>
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
           onExito: () => _alternar(_AuthPage.login),
+          onCodigoEnviado: (email) {
+            _emailPendiente = email;
+            _alternar(_AuthPage.verificacion);
+          },
+        );
+      case _AuthPage.verificacion:
+        return CodigoVerificacionPantalla(
+          authService: authService,
+          email: _emailPendiente,
+          tipoOtp: OtpType.signup,
+          // Al verificar, Supabase abre sesión y el listener de auth
+          // (SIGNED_IN) sincroniza y muestra la app: no hay que navegar.
+          onExito: () {},
+          onLogin: () => _alternar(_AuthPage.login),
         );
       case _AuthPage.olvideContrasena:
         return OlvideContrasenaPantalla(
           authService: authService,
           onLogin: () => _alternar(_AuthPage.login),
           onExito: () => _alternar(_AuthPage.login),
+          onCodigoEnviado: (email) {
+            _emailPendiente = email;
+            _alternar(_AuthPage.verificacionRecovery);
+          },
+        );
+      case _AuthPage.verificacionRecovery:
+        return CodigoVerificacionPantalla(
+          authService: authService,
+          email: _emailPendiente,
+          tipoOtp: OtpType.recovery,
+          // Al verificar recovery se abre sesión de recuperación:
+          // pasar a definir la nueva contraseña.
+          onExito: () => _alternar(_AuthPage.restablecer),
+          onLogin: () => _alternar(_AuthPage.login),
+        );
+      case _AuthPage.restablecer:
+        return RestablecerContrasenaPantalla(
+          authService: authService,
+          onCompletado: () => _alternar(_AuthPage.login),
         );
     }
   }
@@ -1098,11 +1148,23 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   }
 
   void _abrirFiltros() async {
+    double lat = 0, lon = 0;
+    try {
+      final propio = await (database.select(database.usuarios)
+            ..where((u) => u.esPerfilPropio.equals(true))
+            ..limit(1))
+          .getSingleOrNull();
+      lat = propio?.ubicacionLat ?? 0;
+      lon = propio?.ubicacionLon ?? 0;
+    } catch (_) {}
     final resultado = await mostrarFiltrosEncuentros(
       context,
       actuales: _filtros,
       estaEnCercaDeTi: _indice == 0,
       suscripcionServicio: suscripcionServicio,
+      syncService: syncService,
+      miLat: lat,
+      miLon: lon,
     );
     if (resultado != null) {
       setState(() => _filtros = resultado);
@@ -1228,12 +1290,23 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (_indice == 1)
-                                IconButton(
-                                  key: _undoBotonKey,
-                                  icon: Icon(Icons.undo,
-                                      color: primario, size: 24),
-                                  onPressed: () => _undoSignal.value++,
-                                  tooltip: 'Deshacer',
+                                ListenableBuilder(
+                                  listenable: votosServicio,
+                                  builder: (_, __) {
+                                    final hay = votosServicio.hayParaDeshacer;
+                                    return IconButton(
+                                      key: _undoBotonKey,
+                                      icon: Icon(Icons.undo,
+                                          color: hay
+                                              ? primario
+                                              : Colors.grey[400],
+                                          size: 24),
+                                      onPressed: hay
+                                          ? () => _undoSignal.value++
+                                          : null,
+                                      tooltip: 'Deshacer',
+                                    );
+                                  },
                                 ),
                               IconButton(
                                 icon: Icon(Icons.tune,

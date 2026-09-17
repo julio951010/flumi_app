@@ -45,6 +45,7 @@ class PerfilMapeo {
       verificadoStatus: Value(aBool(p['verificado_status'], false)),
       scorePopularidad: Value(aInt(p['score_popularidad'], 0)),
       perfilCompletado: Value(aBool(p['perfil_completado'], false)),
+      isAdmin: Value(aBool(p['is_admin'], false)),
       orientacionSexual: Value((p['orientacion_sexual'] as String?) ?? ''),
       situacionSentimental:
           Value((p['situacion_sentimental'] as String?) ?? ''),
@@ -111,6 +112,7 @@ class PerfilMapeo {
       pendienteDeSincronizar: false,
       esPerfilPropio: esPropio,
       perfilCompletado: aBool(p['perfil_completado'], false),
+      isAdmin: aBool(p['is_admin'], false),
       orientacionSexual: (p['orientacion_sexual'] as String?) ?? '',
       situacionSentimental: (p['situacion_sentimental'] as String?) ?? '',
       intereses: aListaString(p['intereses']),
@@ -179,6 +181,9 @@ class PerfilMapeo {
       'foto_verificacion': perfil.fotoVerificacion,
       'fotos_urls': perfil.fotosUrls,
       'edad': perfil.edad,
+      'verificado_status': perfil.verificadoStatus,
+      'score_popularidad': perfil.scorePopularidad,
+      'is_admin': perfil.isAdmin,
     };
   }
 
@@ -241,6 +246,10 @@ class PerfilMapeo {
       'foto_verificacion': o(c.fotoVerificacion, base?.fotoVerificacion ?? ''),
       'fotos_urls': o(c.fotosUrls, base?.fotosUrls ?? const <String>[]),
       'edad': o(c.edad, base?.edad ?? 18),
+      'verificado_status': o(c.verificadoStatus, base?.verificadoStatus ?? false),
+      'score_popularidad':
+          o(c.scorePopularidad, base?.scorePopularidad ?? 0),
+      'is_admin': o(c.isAdmin, base?.isAdmin ?? false),
     };
   }
 

@@ -125,7 +125,12 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       // exclusiones (rechazos, gustados, bloqueos) se mantienen en ambos
       // modos.
       final acumulados = <Usuario>[];
-      while (acumulados.length < _loteTamanio && _hayMasRemoto) {
+      // Tope de intentos: con filtros duros no se pagina sin fin.
+      var intentos = 0;
+      while (acumulados.length < _loteTamanio &&
+          _hayMasRemoto &&
+          intentos < 4) {
+        intentos++;
         final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
         if (lote.isEmpty) {
           if (!_amplitudAplicada) {
@@ -191,7 +196,10 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     if (_cargandoMas || !_hayMasRemoto || _cargando) return;
     _cargandoMas = true;
     try {
-      while (_hayMasRemoto) {
+      // Mismo tope que la carga inicial: no paginar sin fin si todo se filtra.
+      var intentos = 0;
+      while (_hayMasRemoto && intentos < 4) {
+        intentos++;
         final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
         if (lote.isEmpty) {
           if (!_amplitudAplicada) {
@@ -273,7 +281,6 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     }
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
-    lista.removeWhere((u) => widget.votosServicio.esExcluidoPermanente(u.uuid));
 
     return lista;
   }
@@ -351,9 +358,32 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
                       gustado && _idsRecibidos.contains(_filtrados[i].uuid);
                   final esSuperRecibido =
                       _idsSuperRecibidos.contains(_filtrados[i].uuid);
+                  if (_esBorrosa(i)) {
+                    return TarjetaUsuario(
+                      usuario: _filtrados[i],
+                      esSuperRecibido: esSuperRecibido,
+                      badge: _distanciaBadge(_filtrados[i]),
+                      imagenBorrosa: true,
+                      imagenOverlay: Container(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.lock_outline,
+                            color: Colors.white, size: 26),
+                      ),
+                      onTap: _mostrarBloqueoCerca,
+                      esquinaDerecha: esMatch
+                          ? const Icon(Icons.whatshot,
+                              color: Colors.orangeAccent, size: 18)
+                          : gustado
+                              ? const Icon(Icons.favorite,
+                                  color: Colors.redAccent, size: 18)
+                              : null,
+                    );
+                  }
                   return TarjetaUsuario(
                     usuario: _filtrados[i],
                     esSuperRecibido: esSuperRecibido,
+                    badge: _distanciaBadge(_filtrados[i]),
                     onTap: () {
                       _abrirPerfil(_filtrados[i], gustado, esMatch);
                     },
@@ -366,7 +396,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
                             : null,
                   );
                 },
-                childCount: _perfilesVisibles,
+                childCount: _filtrados.length,
               ),
             ),
           ),
@@ -375,10 +405,67 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     );
   }
 
-  int get _perfilesVisibles {
-    final limite = _suscripcion.limites.vistasCercaPorDia;
-    if (limite < 0 || _filtrados.length <= limite) return _filtrados.length;
-    return limite;
+  int get _limiteCerca => _suscripcion.limites.vistasCercaPorDia;
+
+  /// Badge de distancia ("850 m" / "1.2 km"), mismo estilo que el tiempo
+  /// en Le gustas. Null si no hay coordenadas para calcularla.
+  Widget? _distanciaBadge(Usuario u) {
+    if ((_miLat == 0 && _miLon == 0) ||
+        (u.ubicacionLat == 0 && u.ubicacionLon == 0)) {
+      return null;
+    }
+    final km = distanciaKmEntre(_miLat, _miLon, u.ubicacionLat, u.ubicacionLon);
+    final texto =
+        km < 1 ? '~ ${(km * 1000).round()} m' : '~ ${km.toStringAsFixed(1)} km';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.place, color: Colors.white, size: 10),
+          const SizedBox(width: 2),
+          Text(
+            texto,
+            style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// True si el perfil en [indice] está por encima del límite del plan:
+  /// se muestra con blur + candado.
+  bool _esBorrosa(int indice) =>
+      _limiteCerca >= 0 && indice >= _limiteCerca;
+
+  void _mostrarBloqueoCerca() {
+    final esGratis = !_suscripcion.tienePlus;
+    final plan = esGratis ? PlanTipo.plus : PlanTipo.premium;
+    final nombrePlan = esGratis ? 'Flumi Plus' : 'Flumi Premium';
+    mostrarBloqueoSuscripcion(
+      context,
+      funcionalidad: 'Ver perfiles cerca de ti',
+      planMinimo: plan,
+      descripcion:
+          'Tu plan incluye ${_limiteCerca} perfiles cerca de ti al día. Suscríbete a $nombrePlan para verlos todos.',
+      onSuscribir: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DetallePlanPantalla(
+            nombre: nombrePlan,
+            periodo: 'mensual',
+            precio: esGratis ? '250 cup' : '500 cup',
+            icono: esGratis ? Icons.auto_awesome : Icons.workspace_premium,
+            detalle: esGratis ? 'Funciones extra' : 'Acceso total',
+            destacado: esGratis,
+          ),
+        ),
+      ),
+    );
   }
 
   void _abrirPerfil(Usuario usuario, bool gustado, bool esMatch) {
@@ -473,6 +560,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
           usuario: usuario,
           miId: widget.miId,
           chatRepo: _chatRepo,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );
@@ -509,13 +597,14 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ChatPantalla(
-          repositorio: _chatRepo,
-          otroUsuarioId: usuario.uuid,
-          miId: widget.miId,
-          nombreOtro: usuario.nombre,
-          online: _estaEnLinea(usuario),
-        ),
+builder: (_) => ChatPantalla(
+            repositorio: _chatRepo,
+            otroUsuarioId: usuario.uuid,
+            miId: widget.miId,
+            nombreOtro: usuario.nombre,
+            online: _estaEnLinea(usuario),
+            suscripcionServicio: widget.suscripcionServicio,
+          ),
       ),
     );
   }
@@ -552,7 +641,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     return BannerGradiente(
       titulo: 'Impulsa tu perfil',
       subtitulo:
-          'Llega a m\u00e1s personas cerca de ti (10 perfiles con Gratis)',
+          'Llega a m\u00e1s personas cerca de ti (${_suscripcion.limites.vistasCercaPorDia} perfiles con Gratis)',
       etiquetaBoton: 'Ver plan',
       onTapBoton: () => Navigator.push(
         context,
@@ -627,6 +716,9 @@ class PerfilDetallePage extends StatefulWidget {
   final bool esMatch;
   final bool esMeGusta;
   final bool soloVista;
+
+  /// Título opcional en la cabecera (p. ej. 'Vista previa').
+  final String? titulo;
   final VoidCallback? onChat;
   final VoidCallback? onRechazar;
   final Future<bool> Function()? onMeGusta;
@@ -638,6 +730,7 @@ class PerfilDetallePage extends StatefulWidget {
     this.esMatch = false,
     this.esMeGusta = false,
     this.soloVista = false,
+    this.titulo,
     this.onChat,
     this.onRechazar,
     this.onMeGusta,
@@ -690,24 +783,43 @@ class _PerfilDetallePageState extends State<PerfilDetallePage> {
             Positioned(
               top: 8,
               left: 16,
-              child: GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.12),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2)),
-                    ],
+              right: 16,
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2)),
+                        ],
+                      ),
+                      child: const Icon(Icons.arrow_back,
+                          color: Colors.black87, size: 22),
+                    ),
                   ),
-                  child: const Icon(Icons.arrow_back,
-                      color: Colors.black87, size: 22),
-                ),
+                  if (widget.titulo != null) ...[
+                    Expanded(
+                      child: Text(
+                        widget.titulo!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 40),
+                  ],
+                ],
               ),
             ),
           ],

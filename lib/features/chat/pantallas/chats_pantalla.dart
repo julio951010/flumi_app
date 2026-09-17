@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/constantes/constantes.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
@@ -69,7 +70,9 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   }
 
   void _abrirChat(ResumenConversacion conv) {
-    if (!widget.suscripcionServicio.tienePremium && !conv.esMatch) {
+    if (!esCuentaOficial(conv.otroUsuarioId) &&
+        !widget.suscripcionServicio.tienePremium &&
+        !conv.esMatch) {
       _mostrarBloqueoChatSinMatch();
       return;
     }
@@ -84,6 +87,7 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
           online: conv.online,
           esMeGusta: conv.esMeGusta,
           esMatch: conv.esMatch,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );

@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -6,6 +8,7 @@ import '../../config/env.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/constantes/constantes.dart';
 import '../../core/servicios/connectivity_service.dart';
+import '../../core/servicios/notificacion_local_servicio.dart';
 import '../../core/servicios/sync_service.dart';
 import '../../core/utilidades/notificacion_navegador.dart';
 import '../../core/utilidades/perfil_mapeo.dart';
@@ -90,9 +93,11 @@ class ChatRepositorio {
   /// mantiene _NavegacionPrincipalState).
   int _suscripcionesRealtime = 0;
 
-  RealtimeChannel? _canalEscribiendo;
-  StreamController<bool>? _escribiendoCtrl;
-  bool _escribiendoSuscrito = false;
+  // Indicador de escribiendo: un canal broadcast por conversación (clave
+  // "a#b" ordenada). Un único canal global mezclaba salas al abrir varios
+  // chats en la sesión.
+  final Map<String, RealtimeChannel> _canalesEscribiendo = {};
+  final Map<String, StreamController<bool>> _escribiendoCtrls = {};
 
   ChatRepositorio(this._db, [this._sync]);
 
@@ -102,6 +107,7 @@ class ChatRepositorio {
     StreamSubscription? subMatches;
     StreamSubscription? subUsuarios;
     StreamSubscription? subEliminadas;
+    StreamSubscription? subLeidas;
 
     Future<void> recalcular() async {
       if (ctrl.isClosed) return;
@@ -130,6 +136,11 @@ class ChatRepositorio {
             .select(_db.conversacionesEliminadas)
             .watch()
             .listen((_) => recalcular());
+        // Marcar como leída (conversacionesLeidas) también recalcula el badge.
+        subLeidas = _db
+            .select(_db.conversacionesLeidas)
+            .watch()
+            .listen((_) => recalcular());
         recalcular();
       },
       onCancel: () {
@@ -141,6 +152,8 @@ class ChatRepositorio {
         subUsuarios = null;
         subEliminadas?.cancel();
         subEliminadas = null;
+        subLeidas?.cancel();
+        subLeidas = null;
       },
     );
     return ctrl.stream;
@@ -267,6 +280,12 @@ class ChatRepositorio {
       final leido = like.leidoHasta;
       if (leido != null) leidosHasta.putIfAbsent(like.usuarioId, () => leido);
     }
+    // Marcador local de lectura por conversación: tiene prioridad porque es la
+    // fuente de verdad del estado de lectura del usuario en este dispositivo
+    // (e incluye cuentas oficiales sin match ni like).
+    for (final r in await _db.select(_db.conversacionesLeidas).get()) {
+      leidosHasta[r.otroUsuarioId] = r.leidoHasta;
+    }
 
     for (final m in msgs) {
       final otro = m.emisorId == miId ? m.receptorId : m.emisorId;
@@ -289,10 +308,10 @@ class ChatRepositorio {
       final ultimo = conv.last;
       resumenes.add(ResumenConversacion(
         otroUsuarioId: otro,
-        nombre: nombres[otro] ?? 'Usuario',
+        nombre: cuentasOficialesFlumi[otro] ?? nombres[otro] ?? 'Usuario',
         edad: edades[otro],
         verificado: verificados[otro] ?? false,
-        fotoUrl: fotos[otro],
+        fotoUrl: fotosOficialesFlumi[otro] ?? fotos[otro],
         ultimoMensaje: ultimo.contenido,
         ultimoEsMio: ultimo.emisorId == miId,
         timestamp: ultimo.timestamp,
@@ -308,10 +327,10 @@ class ChatRepositorio {
       if (ocultas.contains(match.key)) continue;
       resumenes.add(ResumenConversacion(
         otroUsuarioId: match.key,
-        nombre: nombres[match.key] ?? 'Usuario',
+        nombre: cuentasOficialesFlumi[match.key] ?? nombres[match.key] ?? 'Usuario',
         edad: edades[match.key],
         verificado: verificados[match.key] ?? false,
-        fotoUrl: fotos[match.key],
+        fotoUrl: fotosOficialesFlumi[match.key] ?? fotos[match.key],
         ultimoMensaje: 'Has hecho match. ¡Salúdale!',
         ultimoEsMio: false,
         timestamp: match.value,
@@ -372,6 +391,12 @@ class ChatRepositorio {
           ..where((h) =>
               h.usuarioId.equals(otroUsuarioId) & h.usuarioLikeadoId.equals(miId)))
         .write(HistorialLikesCompanion(leidoHasta: Value(ahora)));
+    // Marcador local de lectura por conversación (fuente de verdad para el
+    // badge de no leídos y el estado "visto"). Cubre también las cuentas
+    // oficiales, que no tienen fila en matches ni historial_likes.
+    await _db.into(_db.conversacionesLeidas).insertOnConflictUpdate(
+        ConversacionesLeidasCompanion(
+            otroUsuarioId: Value(otroUsuarioId), leidoHasta: Value(ahora)));
     if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
       try {
         await Supabase.instance.client
@@ -396,21 +421,34 @@ class ChatRepositorio {
   /// Marca como leídas todas las conversaciones (popup "Marcar todos como
   /// leídos" de la pestaña Chats).
   Future<void> marcarTodasConversacionesLeidas(String miId) async {
+    final socios = <String>{};
+    // Socios desde matches.
     final matches = await (_db.select(_db.matches)
           ..where((m) =>
               m.usuarioAId.equals(miId) | m.usuarioBId.equals(miId)))
         .get();
     for (final m in matches) {
-      final otroId = m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId;
-      await marcarConversacionLeida(otroId, miId);
+      socios.add(m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId);
     }
-    // Like-only: si solo me dieron like (sin match) y hay mensajes, también
-    // se marca leído.
+    // Like-only (solo me dieron like, sin match).
     final likes = await (_db.select(_db.historialLikes)
           ..where((h) => h.usuarioLikeadoId.equals(miId)))
         .get();
     for (final like in likes) {
-      await marcarConversacionLeida(like.usuarioId, miId);
+      socios.add(like.usuarioId);
+    }
+    // Cualquier conversación que exista solo por mensajes (sin match ni like).
+    final mensajes = await (_db.select(_db.mensajes)
+          ..where((m) => m.emisorId.equals(miId) | m.receptorId.equals(miId)))
+        .get();
+    for (final m in mensajes) {
+      final otro = m.emisorId == miId ? m.receptorId : m.emisorId;
+      if (otro.isNotEmpty) socios.add(otro);
+    }
+    // Cuentas oficiales (sin match ni like).
+    socios.addAll(cuentasOficialesFlumi.keys);
+    for (final otroId in socios) {
+      await marcarConversacionLeida(otroId, miId);
     }
   }
 
@@ -493,6 +531,14 @@ class ChatRepositorio {
     // Write-through: intenta subir el mensaje a Supabase de inmediato;
     // si falla queda pendiente para el siguiente sync.
     unawaited(_sync?.sincronizarMensajesPendientes());
+
+    // Notificación inteligente: local si foreground, push si background
+    unawaited(NotificacionLocalServicio.instancia.notificarInteligente(
+      titulo: 'Nuevo mensaje',
+      cuerpo: contenido,
+      usuarioIdDestino: receptorId,
+      categoria: 'mensajes',
+    ));
   }
 
   Future<void> borrarConversacion(String otroUsuarioId, String miId) async {
@@ -616,6 +662,7 @@ class ChatRepositorio {
   }
 
   Future<void> eliminarMensaje({required String uuid}) async {
+    await SyncService.recordarMensajeBorrado(uuid);
     await (_db.delete(_db.mensajes)..where((m) => m.uuid.equals(uuid))).go();
     // Best-effort: si la red está, se borra en el servidor; si no, el purge
     // de sincronizarMensajesPendientes convergerá al faltar en el remoto.
@@ -679,28 +726,29 @@ class ChatRepositorio {
   }
 
   /// El otro usuario está escribiendo (bool). Se emite en vivo mientras la
-  /// pantalla de chat esté abierta.
+  /// pantalla de chat esté abierta. Cada conversación tiene su canal.
   Stream<bool> observarEscribiendo(String otroUsuarioId, String miId) {
     final clave = _claveConversacion(otroUsuarioId, miId);
-    if (_escribiendoCtrl != null && _escribiendoSuscrito) {
-      return _escribiendoCtrl!.stream;
-    }
-    _escribiendoCtrl ??= StreamController<bool>.broadcast();
-    final ctrl = _escribiendoCtrl!;
-    _escribiendoSuscrito = true;
+    final ctrl = _escribiendoCtrls.putIfAbsent(
+      clave,
+      () => StreamController<bool>.broadcast(),
+    );
     if (kUsarServidorLocal || !ConnectivityService.instancia.hayConexion) {
       return ctrl.stream;
     }
-    _canalEscribiendo ??= Supabase.instance.client
-        .channel('tip-$clave')
-        .onBroadcast(event: 'escribiendo', callback: (payload) {
-          final datos = payload['payload'] as Map?;
-          if (datos == null) return;
-          if (datos['usuario'] == miId) return;
-          if (ctrl.isClosed) return;
-          ctrl.add(datos['escribiendo'] == true);
-        })
-        .subscribe();
+    _canalesEscribiendo.putIfAbsent(clave, () {
+      return Supabase.instance.client
+          .channel('tip-$clave')
+          .onBroadcast(event: 'escribiendo', callback: (payload) {
+            final datos = payload['payload'] as Map?;
+            if (datos == null) return;
+            if (datos['usuario'] == miId) return;
+            final c = _escribiendoCtrls[clave];
+            if (c == null || c.isClosed) return;
+            c.add(datos['escribiendo'] == true);
+          })
+          .subscribe();
+    });
     return ctrl.stream;
   }
 
@@ -710,22 +758,28 @@ class ChatRepositorio {
     required bool escribiendo,
   }) {
     if (kUsarServidorLocal) return;
-    final canal = _canalEscribiendo ??= Supabase.instance.client
-        .channel('tip-${_claveConversacion(otroUsuarioId, miId)}')
-        .onBroadcast(event: 'escribiendo', callback: (_) {})
-        .subscribe();
+    final clave = _claveConversacion(otroUsuarioId, miId);
+    final canal = _canalesEscribiendo.putIfAbsent(
+      clave,
+      () => Supabase.instance.client
+          .channel('tip-$clave')
+          .onBroadcast(event: 'escribiendo', callback: (_) {})
+          .subscribe(),
+    );
     canal.sendBroadcastMessage(event: 'escribiendo', payload: {
       'usuario': miId,
       'escribiendo': escribiendo,
     });
   }
 
-  void _cerrarCanalEscribiendo() {
-    final canal = _canalEscribiendo;
-    _canalEscribiendo = null;
-    _escribiendoCtrl?.close();
-    _escribiendoCtrl = null;
-    _escribiendoSuscrito = false;
+  /// Libera el canal de escribiendo de una conversación (al cerrar su chat).
+  void cerrarEscribiendo(String otroUsuarioId, String miId) {
+    final clave = _claveConversacion(otroUsuarioId, miId);
+    final canal = _canalesEscribiendo.remove(clave);
+    final ctrl = _escribiendoCtrls.remove(clave);
+    try {
+      ctrl?.close();
+    } catch (_) {}
     if (canal != null) {
       try {
         Supabase.instance.client.removeChannel(canal);
@@ -908,7 +962,7 @@ class ChatRepositorio {
           ..where((u) => u.uuid.equals(emisorId))
           ..limit(1))
         .getSingleOrNull();
-    final nombre = u?.nombre ?? 'Alguien';
+    final nombre = cuentasOficialesFlumi[emisorId] ?? u?.nombre ?? 'Alguien';
     await notificarNavegador('Flumi', 'Nuevo mensaje de $nombre: $contenido');
   }
 
@@ -1057,6 +1111,17 @@ class ChatRepositorio {
     _connectivitySub = null;
     _presenciaTimer?.cancel();
     _presenciaTimer = null;
-    _cerrarCanalEscribiendo();
+    for (final clave in _canalesEscribiendo.keys.toList()) {
+      try {
+        Supabase.instance.client.removeChannel(_canalesEscribiendo[clave]!);
+      } catch (_) {}
+    }
+    _canalesEscribiendo.clear();
+    for (final ctrl in _escribiendoCtrls.values) {
+      try {
+        ctrl.close();
+      } catch (_) {}
+    }
+    _escribiendoCtrls.clear();
   }
 }

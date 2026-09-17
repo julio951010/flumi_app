@@ -19,19 +19,14 @@ import 'sync_service.dart';
 ///     con [edadMinimaReciclaje] cumplida (los más antiguos primero);
 ///   - no queda ningún perfil nuevo: cualquier Nope vuelve sin esperar,
 ///     reciente o viejo.
-/// * Con [nopesParaExclusionPermanente] Nopes al mismo perfil se excluye
-///   definitivamente, haya o no perfiles nuevos.
+/// * No hay exclusión permanente: todo Nope puede reciclarse con el tiempo.
 ///
 /// Cada Nope inserta una fila en la tabla [Rechazos] (múltiples filas por
 /// par = conteo acumulado), persistida y sincronizada con Supabase.
 class VotosServicio extends ChangeNotifier {
-  /// Veces que hay que hacer Nope al mismo perfil para excluirlo para
-  /// siempre, aunque ya sea reciclable por tiempo.
-  static const int nopesParaExclusionPermanente = 3;
-
-  /// Edad mínima de un Nope para poder reciclarlo. Más reciente = "muy
-  /// reciente", no se recicla. Espejo del RPC `perfiles_cercanos`.
-  static const Duration edadMinimaReciclaje = Duration(days: 3);
+  /// Edad mínima de un Nope para poder reciclarlo. En cero: los Nopes
+  /// se reciclan sin espera (cuando el mazo los necesita).
+  static const Duration edadMinimaReciclaje = Duration.zero;
 
   /// Si quedan menos perfiles nuevos que esto, el mazo recicla los Nopes
   /// más antiguos (que ya cumplen [edadMinimaReciclaje]).
@@ -41,6 +36,21 @@ class VotosServicio extends ChangeNotifier {
   final SyncService _sync;
   final Map<String, ({int conteo, DateTime ultimo})> _rechazos = {};
   bool _inicializado = false;
+
+  /// Historial LIFO de Nopes de la sesión (uuids) para Deshacer.
+  /// Solo se apilan nopes; los likes no (deshacer un like es otra operación).
+  static const int _maxHistorialNope = 20;
+  final List<String> _historialNope = [];
+
+  bool get hayParaDeshacer => _historialNope.isNotEmpty;
+
+  /// Saca y devuelve el último Nope, o null si no hay nada que deshacer.
+  String? tomarUltimoNope() {
+    if (_historialNope.isEmpty) return null;
+    final id = _historialNope.removeLast();
+    notifyListeners();
+    return id;
+  }
 
   VotosServicio(this._db, this._sync);
 
@@ -76,25 +86,19 @@ class VotosServicio extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Excluido AHORA del mazo: excluido definitivamente (3+ Nopes) o Nope
-  /// demasiado reciente (aún no reciclable mientras queden nuevos).
+  /// Excluido AHORA del mazo: Nope demasiado reciente (aún no reciclable
+  /// mientras queden nuevos).
   bool esRechazado(String uuid) {
     final r = _rechazos[uuid];
     if (r == null) return false;
-    if (r.conteo >= nopesParaExclusionPermanente) return true;
     return DateTime.now().difference(r.ultimo) < edadMinimaReciclaje;
   }
 
-  /// Excluido por siempre: acumuló [nopesParaExclusionPermanente] Nopes.
-  /// Este criterio nunca se relaja, haya o no perfiles nuevos.
-  bool esExcluidoPermanente(String uuid) =>
-      (_rechazos[uuid]?.conteo ?? 0) >= nopesParaExclusionPermanente;
-
   /// Candidato a reciclaje por tiempo: ya pasó [edadMinimaReciclaje] desde
-  /// el Nope y aún no acumuló [nopesParaExclusionPermanente].
+  /// el último Nope.
   bool esReciclable(String uuid) {
     final r = _rechazos[uuid];
-    if (r == null || r.conteo >= nopesParaExclusionPermanente) return false;
+    if (r == null) return false;
     return DateTime.now().difference(r.ultimo) >= edadMinimaReciclaje;
   }
 
@@ -106,11 +110,10 @@ class VotosServicio extends ChangeNotifier {
   /// * >= [minimoNuevosParaReciclar] nuevos → solo nuevos.
   /// * 1..[minimoNuevosParaReciclar)-1 nuevos → nuevos + reciclables por
   ///   tiempo ([esReciclable]), más antiguos primero.
-  /// * 0 nuevos → todos los rechazados no permanentes, sin esperar la edad
-  ///   mínima, más antiguos primero.
+  /// * 0 nuevos → todos los rechazados, sin esperar la edad mínima,
+  ///   más antiguos primero.
   List<Usuario> componerDeck(List<Usuario> entrada) {
-    final disponibles =
-        entrada.where((u) => !esExcluidoPermanente(u.uuid)).toList();
+    final disponibles = List.of(entrada);
     final nuevos =
         disponibles.where((u) => !_rechazos.containsKey(u.uuid)).toList();
     if (nuevos.length >= minimoNuevosParaReciclar) return nuevos;
@@ -124,6 +127,10 @@ class VotosServicio extends ChangeNotifier {
   }
 
   Future<void> registrarRechazo(String uuid) async {
+    _historialNope.add(uuid);
+    if (_historialNope.length > _maxHistorialNope) {
+      _historialNope.removeAt(0);
+    }
     final prev = _rechazos[uuid];
     _rechazos[uuid] = (conteo: (prev?.conteo ?? 0) + 1, ultimo: DateTime.now());
     final usuarioId = await _obtenerUsuarioPropioId(_db);
@@ -166,6 +173,9 @@ class VotosServicio extends ChangeNotifier {
       }
     }
     _rechazos.remove(uuid);
+    // Si se deshace por vía administrativa (like tras nope), sale del
+    // historial: ya no hay nada que deshacer para ese perfil.
+    if (!comoDeshacer) _historialNope.remove(uuid);
     if (usuarioId != null) {
       await (_db.delete(_db.rechazos)
             ..where((r) => r.usuarioId.equals(usuarioId) &

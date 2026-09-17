@@ -43,11 +43,15 @@ dependencies:
   # --- UI ---
   cupertino_icons: ^1.0.6
   curved_navigation_bar: ^1.0.6
+  flutter_svg: ^2.0.10
   swipe_cards:
     path: packages/swipe_cards
 
   # --- Cámara / galería ---
   image_picker: ^1.1.2
+  # --- Cámara frontal embebida (verificación en vivo) ---
+  camera: ^0.11.1
+  permission_handler: ^11.4.0
 
   # --- Verificación de perfil (reconocimiento facial on-device, FaceNet) ---
   face_verification: ^0.3.8
@@ -90,6 +94,7 @@ flutter:
     - assets/images/gestos/
     - assets/data/
     - assets/icons/
+    - assets/onboarding/
     - assets/fotos_prueba/Alice/
     - assets/fotos_prueba/Bob/
     - assets/fotos_prueba/Carla/

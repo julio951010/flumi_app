@@ -3,7 +3,8 @@ import '../../../core/utilidades/fotos_perfil.dart';
 
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
-import '../../../widgets_comunes/foto_perfil.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../widgets_comunes/foto_perfil_io.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
 
@@ -11,12 +12,14 @@ class MatchPantalla extends StatefulWidget {
   final Usuario usuario;
   final String miId;
   final ChatRepositorio chatRepo;
+  final SuscripcionServicio suscripcionServicio;
 
   const MatchPantalla({
     super.key,
     required this.usuario,
     required this.miId,
     required this.chatRepo,
+    required this.suscripcionServicio,
   });
 
   @override
@@ -67,6 +70,7 @@ class _MatchPantallaState extends State<MatchPantalla>
           online: ChatRepositorio.estaEnLinea(widget.usuario),
           esMeGusta: true,
           esMatch: true,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );
@@ -186,15 +190,32 @@ class _MatchPantallaState extends State<MatchPantalla>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '¡Es un match con ${widget.usuario.nombre}!',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-              shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
-            ),
-            textAlign: TextAlign.center,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  '¡Es un match con ${widget.usuario.nombre}!',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              if (widget.usuario.verificadoStatus) ...[
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.verified,
+                  color: Colors.white,
+                  size: 26,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 6),
 const Text(

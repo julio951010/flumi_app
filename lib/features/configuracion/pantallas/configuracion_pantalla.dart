@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,6 +6,8 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
+import '../../../core/utilidades/temp_cache_native.dart'
+    if (dart.library.html) '../../../core/utilidades/temp_cache_web.dart';
 import '../../auth/auth_service.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import 'administrar_suscripcion_pantalla.dart';
@@ -104,14 +104,16 @@ class ConfiguracionPantalla extends StatelessWidget {
                         ),
                       ),
                     )),
-            const Divider(height: 1),
-            _item(context, Icons.credit_card_outlined, 'Administrar suscripción',
-                onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AdministrarSuscripcionPantalla(),
-                      ),
-                    )),
+            if (suscripcionServicio.suscripcionesHabilitadas) ...[
+              const Divider(height: 1),
+              _item(context, Icons.credit_card_outlined, 'Administrar suscripción',
+                  onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AdministrarSuscripcionPantalla(),
+                        ),
+                      )),
+            ],
             const Divider(height: 1),
             _item(context, Icons.help_outline, 'Ayuda y soporte'),
             const Divider(height: 1),
@@ -244,21 +246,7 @@ class ConfiguracionPantalla extends StatelessWidget {
 
     var liberados = 0;
     try {
-      if (!kIsWeb) {
-        final dir = await getTemporaryDirectory();
-        if (await dir.exists()) {
-          await for (final entidad
-              in dir.list(recursive: true, followLinks: false)) {
-            try {
-              if (entidad is File) {
-                final tamano = await entidad.length();
-                await entidad.delete();
-                liberados += tamano;
-              }
-            } catch (_) {}
-          }
-        }
-      }
+      liberados = await borrarCacheTemporal();
       // Caché de imágenes en memoria de Flutter.
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();

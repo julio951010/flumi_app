@@ -1,4 +1,88 @@
+import 'dart:async';
 import 'dart:math';
+
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+
+/// Error de GPS con mensaje listo para mostrar al usuario.
+class UbicacionException implements Exception {
+  final String mensaje;
+  const UbicacionException(this.mensaje);
+  @override
+  String toString() => mensaje;
+}
+
+/// Coordenadas obtenidas del GPS del dispositivo.
+class CoordenadasGps {
+  final double lat;
+  final double lon;
+  const CoordenadasGps(this.lat, this.lon);
+}
+
+/// Obtiene la posición GPS: precisión media (15 s) y reintento rápido con
+/// precisión baja (10 s, suficiente a nivel de provincia/ciudad).
+/// Lanza [UbicacionException] con texto mostrable si falla.
+Future<CoordenadasGps> obtenerUbicacionGps() async {
+  if (!await Geolocator.isLocationServiceEnabled()) {
+    throw const UbicacionException(
+        'El GPS está desactivado. Actívalo en los ajustes del dispositivo.');
+  }
+  var permiso = await Geolocator.checkPermission();
+  if (permiso == LocationPermission.denied) {
+    permiso = await Geolocator.requestPermission();
+  }
+  if (permiso == LocationPermission.denied) {
+    throw const UbicacionException(
+        'Permiso de ubicación denegado. Permítelo para usar esta función.');
+  }
+  if (permiso == LocationPermission.deniedForever) {
+    throw const UbicacionException(
+        'El permiso de ubicación está bloqueado. Actívalo manualmente en Ajustes > Permisos.');
+  }
+  Position posicion;
+  try {
+    posicion = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.medium,
+        timeLimit: Duration(seconds: 15),
+      ),
+    );
+  } on TimeoutException {
+    try {
+      posicion = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+    } on TimeoutException {
+      throw const UbicacionException(
+          'Tiempo de espera agotado. Verifica la señal GPS e intenta de nuevo.');
+    }
+  } on PlatformException catch (e) {
+    throw UbicacionException(_mensajeGpsPlataforma(e.code));
+  }
+  if (posicion.latitude == 0 && posicion.longitude == 0) {
+    throw const UbicacionException(
+        'No se pudo obtener una ubicación válida. Verifica la señal GPS e intenta de nuevo.');
+  }
+  return CoordenadasGps(posicion.latitude, posicion.longitude);
+}
+
+String _mensajeGpsPlataforma(String codigo) {
+  switch (codigo) {
+    case 'location_unavailable':
+      return 'Ubicación no disponible. Verifica la señal GPS e intenta de nuevo.';
+    case 'permission_denied':
+      return 'Permiso de ubicación denegado.';
+    case 'timeout':
+      return 'Tiempo de espera agotado para obtener la ubicación. Intenta de nuevo.';
+    case 'service_not_available':
+      return 'Servicio de ubicación no disponible en este dispositivo.';
+    default:
+      return 'Error del GPS. Intenta de nuevo.';
+  }
+}
 
 /// Coordenadas aproximadas de las capitales provinciales de Cuba.
 ///
@@ -63,6 +147,23 @@ Future<String?> resolverNombreUbicacion({
   required Map<String, List<String>> provincias,
 }) async {
   return _provinciaMasCercana(latitud, longitud, provincias);
+}
+
+/// Provincia más cercana usando solo la tabla estática (sin depender del
+/// JSON de municipios). Nunca devuelve null: es el último recurso para que
+/// "Usar mi ubicación" siempre resuelva un nombre aunque falle la otra vía.
+String provinciaMasCercanaDirecta(double latitud, double longitud) {
+  var mejor = coordenadasProvinciasCuba.keys.first;
+  var mejorDistancia = double.infinity;
+  for (final entrada in coordenadasProvinciasCuba.entries) {
+    final d =
+        _distanciaKm(latitud, longitud, entrada.value.$1, entrada.value.$2);
+    if (d < mejorDistancia) {
+      mejorDistancia = d;
+      mejor = entrada.key;
+    }
+  }
+  return mejor;
 }
 
 String? _provinciaMasCercana(

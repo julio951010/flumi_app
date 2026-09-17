@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/constantes/constantes.dart';
 import '../../../core/utilidades/ubicacion_util.dart';
-import 'package:geolocator/geolocator.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
+import '../../../core/servicios/connectivity_service.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../features/perfiles/perfil_etiquetas.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
@@ -47,6 +50,9 @@ Future<FiltrosEncuentros?> mostrarFiltrosEncuentros(
   required FiltrosEncuentros actuales,
   required bool estaEnCercaDeTi,
   SuscripcionServicio? suscripcionServicio,
+  SyncService? syncService,
+  double? miLat,
+  double? miLon,
 }) {
   return Navigator.of(context).push<FiltrosEncuentros>(
     MaterialPageRoute(
@@ -54,6 +60,9 @@ Future<FiltrosEncuentros?> mostrarFiltrosEncuentros(
         actuales: actuales,
         estaEnCercaDeTi: estaEnCercaDeTi,
         suscripcionServicio: suscripcionServicio,
+        syncService: syncService,
+        miLat: miLat,
+        miLon: miLon,
       ),
     ),
   );
@@ -64,10 +73,18 @@ class _FiltrosEncuentrosPantalla extends StatefulWidget {
   final bool estaEnCercaDeTi;
   final SuscripcionServicio? suscripcionServicio;
 
+  /// Si se proveen, se muestra una vista previa de resultados.
+  final SyncService? syncService;
+  final double? miLat;
+  final double? miLon;
+
   const _FiltrosEncuentrosPantalla({
     required this.actuales,
     required this.estaEnCercaDeTi,
     this.suscripcionServicio,
+    this.syncService,
+    this.miLat,
+    this.miLon,
   });
 
   @override
@@ -105,6 +122,9 @@ class _FiltrosEncuentrosPantallaState
   @override
   void initState() {
     super.initState();
+    // Sonda inicial de la vista previa (no depende de otro setState).
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _programarPreview());
     _ubicacionCtrl = TextEditingController(
         text: widget.actuales.ubicacion == 'Sin definir'
             ? ''
@@ -121,9 +141,141 @@ class _FiltrosEncuentrosPantallaState
 
   @override
   void dispose() {
+    _previewTimer?.cancel();
     _ubicacionCtrl.dispose();
     _focusNodeUbicacion.dispose();
     super.dispose();
+  }
+
+  // Vista previa de resultados: sonda al primer lote con debounce.
+  Timer? _previewTimer;
+  bool _actualizandoPreview = false;
+  bool _previewCargando = false;
+  int? _previewConteo;
+  bool _previewMas = false;
+
+  bool get _previewHabilitada =>
+      widget.syncService != null &&
+      widget.miLat != null &&
+      widget.miLon != null;
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    // Cualquier cambio del borrador reprograma la vista previa.
+    if (!_actualizandoPreview) _programarPreview();
+  }
+
+  void _programarPreview() {
+    if (!_previewHabilitada || !mounted) return;
+    if (!ConnectivityService.instancia.hayConexion) return;
+    _previewTimer?.cancel();
+    _previewTimer =
+        Timer(const Duration(milliseconds: 700), _ejecutarPreview);
+  }
+
+  Future<void> _ejecutarPreview() async {
+    if (!mounted || !_previewHabilitada) return;
+    _actualizandoPreview = true;
+    setState(() => _previewCargando = true);
+    _actualizandoPreview = false;
+    try {
+      final radio = _distancia > 0
+          ? (_distancia * 1000).round()
+          : feedRadioMetrosDefault;
+      final lote = await widget.syncService!.consultarFeedRemoto(
+        lat: widget.miLat!,
+        lon: widget.miLon!,
+        radioMetros: radio,
+        filtros: SyncService.filtrosARpcJson(
+          generos: _generos,
+          edadMin: _edad.start,
+          edadMax: _edad.end,
+          enLineaAhora: _enLinea,
+          perfilesVerificados: _perfilesVerificados,
+          ciudad: _ubicacion,
+          ampliar: false,
+          orden: 'distancia',
+        ),
+        desde: 0,
+        cuantos: 10,
+      );
+      final borrador = FiltrosEncuentros(
+        generos: List.of(_generos),
+        edadRango: _edad,
+        distanciaKm: _distancia,
+        enLineaAhora: _enLinea,
+        ubicacion: _ubicacion,
+        perfilesVerificados: _perfilesVerificados,
+        avanzado: Map.of(_avanzado),
+      );
+      final validos =
+          lote.where((u) => cumpleFiltrosAvanzados(borrador, u)).toList();
+      if (!mounted) return;
+      _actualizandoPreview = true;
+      setState(() {
+        _previewCargando = false;
+        _previewConteo = validos.length;
+        _previewMas = lote.length >= 10;
+      });
+      _actualizandoPreview = false;
+    } catch (_) {
+      if (!mounted) return;
+      _actualizandoPreview = true;
+      setState(() {
+        _previewCargando = false;
+        _previewConteo = null;
+      });
+      _actualizandoPreview = false;
+    }
+  }
+
+  Widget _lineaPreview() {
+    if (!_previewHabilitada) return const SizedBox.shrink();
+    // La cabecera siempre visible; el contenido según estado.
+    Widget contenido;
+    if (_previewCargando && _previewConteo == null) {
+      contenido = Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text('Buscando perfiles…',
+              style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+        ],
+      );
+    } else if (_previewConteo != null) {
+      final texto = _previewConteo == 0
+          ? 'Sin resultados con estos filtros'
+          : _previewMas
+              ? '${_previewConteo}+ perfiles con estos filtros'
+              : '${_previewConteo} ${_previewConteo == 1 ? 'perfil' : 'perfiles'} con estos filtros';
+      contenido = Text(
+        texto,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: _previewConteo == 0
+              ? Colors.orange[700]
+              : Colors.grey[600],
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    } else {
+      contenido = Text(
+        'Ajusta los filtros para ver resultados',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Colors.grey[400], fontSize: 13),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Center(child: contenido),
+    );
   }
 
   Future<void> _cargarOpcionesUbicacion() async {
@@ -366,46 +518,17 @@ class _FiltrosEncuentrosPantallaState
   Future<void> _obtenerUbicacionActual() async {
     setState(() => _obteniendoUbicacion = true);
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'El GPS está desactivado. Actívalo en los ajustes del dispositivo.',
-        );
-        return;
+      if (_provincias.isEmpty) {
+        await _cargarOpcionesUbicacion();
       }
-      var permiso = await Geolocator.checkPermission();
-      if (permiso == LocationPermission.denied) {
-        permiso = await Geolocator.requestPermission();
-      }
-      if (permiso == LocationPermission.denied) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'Permiso de ubicación denegado. Permítelo para usar esta función.',
-        );
-        return;
-      }
-      if (permiso == LocationPermission.deniedForever) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'El permiso de ubicación está bloqueado. Actívalo manualmente en Ajustes > Permisos.',
-        );
-        return;
-      }
-      final posicion = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 20),
-        ),
-      );
+      final posicion = await obtenerUbicacionGps();
       final nombre = await resolverNombreUbicacion(
-        latitud: posicion.latitude,
-        longitud: posicion.longitude,
-        provincias: _provincias,
-      );
-      if (nombre == null || nombre.isEmpty) {
+            latitud: posicion.lat,
+            longitud: posicion.lon,
+            provincias: _provincias,
+          ) ??
+          provinciaMasCercanaDirecta(posicion.lat, posicion.lon);
+      if (nombre.isEmpty) {
         if (!mounted) return;
         NotificacionServicio.alerta(
           context,
@@ -419,6 +542,9 @@ class _FiltrosEncuentrosPantallaState
       _ubicacionCtrl.text = textoFinal;
       _ubicacion = textoFinal;
       NotificacionServicio.exito(context, 'Ubicación establecida: $textoFinal');
+    } on UbicacionException catch (e) {
+      if (!mounted) return;
+      NotificacionServicio.alerta(context, e.mensaje);
     } catch (_) {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -973,7 +1099,8 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
         leading: IconButton(
           icon: const Icon(Icons.close),
           color: Colors.black87,
-          onPressed: () => _aplicar(),
+          // La X descarta: solo el botón Aplicar guarda los cambios.
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Filtros',
@@ -1243,11 +1370,15 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-        child: SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: _aplicar,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _lineaPreview(),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _aplicar,
             style: ElevatedButton.styleFrom(
               backgroundColor: primario,
               foregroundColor: Colors.white,
@@ -1257,7 +1388,9 @@ Future<void> _editarParametro(_ParametroFiltro p) async {
             ),
             child: const Text('Aplicar filtros',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1375,7 +1508,7 @@ bool cumpleFiltrosAvanzados(FiltrosEncuentros filtros, Usuario usuario) {
 /// (busca_genero) y "rango de edad" (preferencia_edad_min/max). Se aplican
 /// SIEMPRE, antes de los filtros que el usuario configure en la app.
 bool cumpleCriteriosPerfil(Usuario propio, Usuario candidato) {
-  final busca = (propio.buscaGenero ?? '').trim().toLowerCase();
+  final busca = propio.buscaGenero.trim().toLowerCase();
   final sinRestriccion = busca.isEmpty ||
       busca == 'todos' ||
       busca == 'ambos' ||
@@ -1430,21 +1563,19 @@ class _ParametroFiltro {
 }
 
 // Mock para tests sin base de datos
-enum _PlanTipoMock { gratis, plus, premium }
-
-class _LimitesPlanMock {
-  const _LimitesPlanMock();
-}
-
 class SuscripcionServicioMock with ChangeNotifier implements SuscripcionServicio {
   @override
   PlanTipo get planActual => PlanTipo.premium;
   @override
   LimitesPlan get limites => LimitesPlan.premium();
   @override
+  bool get esAdmin => false;
+  @override
   bool get tienePlus => true;
   @override
   bool get tienePremium => true;
+  @override
+  bool get suscripcionesHabilitadas => true;
   @override
   bool get meGustasDisponiblesHoy => true;
   @override

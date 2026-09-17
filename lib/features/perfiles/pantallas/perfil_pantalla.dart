@@ -108,7 +108,7 @@ class _PerfilPantallaState extends State<PerfilPantalla> {
             .select()
             .eq('id', userId)
             .maybeSingle();
-        if (data != null) remoto = data as Map<String, dynamic>;
+        if (data != null) remoto = data;
       }
 
       if (remoto == null) return;
@@ -349,12 +349,14 @@ class _PerfilFlumi extends StatelessWidget {
             const SizedBox(height: 12),
             _tarjetaVerificacion(context),
           ],
-          const SizedBox(height: 28),
-          const _SeccionTitulo('Planes de suscripción'),
-          const SizedBox(height: 12),
-          _tarjetaPlanActual(context),
-          const SizedBox(height: 12),
-          _planes(),
+          if (suscripcionServicio.suscripcionesHabilitadas) ...[
+            const SizedBox(height: 28),
+            const _SeccionTitulo('Planes de suscripción'),
+            const SizedBox(height: 12),
+            _tarjetaPlanActual(context),
+            const SizedBox(height: 12),
+            _planes(),
+          ],
         ],
       ),
     );

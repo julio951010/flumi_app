@@ -12,11 +12,16 @@ class RegistroPantalla extends StatefulWidget {
   final VoidCallback onLogin;
   final VoidCallback onExito;
 
+  /// Se llama con el email cuando el registro requiere verificar
+  /// el código de 6 dígitos (confirmación por email activada).
+  final ValueChanged<String> onCodigoEnviado;
+
   const RegistroPantalla({
     super.key,
     required this.authService,
     required this.onLogin,
     required this.onExito,
+    required this.onCodigoEnviado,
   });
 
   @override
@@ -43,11 +48,16 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
         nombre: '',
       );
       if (!mounted) return;
+      // Sin confirmación por email Supabase ya abrió sesión: seguir normal.
+      if (widget.authService.estaAutenticado) {
+        widget.onExito();
+        return;
+      }
       NotificacionServicio.exito(
         context,
-        'Revisa tu correo y haz clic en el enlace de confirmación.',
+        'Te enviamos un código a tu correo. Ingrésalo para verificar tu cuenta.',
       );
-      widget.onExito();
+      widget.onCodigoEnviado(_emailCtrl.text.trim());
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());

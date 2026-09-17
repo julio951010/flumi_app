@@ -378,6 +378,7 @@ class _BandejaNotificacionesPantallaState
           online: ChatRepositorio.estaEnLinea(usuario),
           esMeGusta: esMeGusta ?? false,
           esMatch: esMatch ?? false,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );

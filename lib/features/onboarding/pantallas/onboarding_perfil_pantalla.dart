@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/utilidades/ubicacion_util.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/servicios/perfil_foto_servicio.dart';
 import '../../../core/base_datos_local/database.dart';
@@ -36,8 +36,26 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
 
   final _nombreCtrl = TextEditingController();
   final TextEditingController _diaCtrl = TextEditingController();
-  final TextEditingController _mesCtrl = TextEditingController();
   final TextEditingController _anioCtrl = TextEditingController();
+  TextEditingController? _mesAutoCtrl;
+  FocusNode? _mesInnerFocus;
+
+  static const _meses = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  ];
+
+  /// Mes como número 1-12: acepta dígitos ("05") o el nombre ("Mayo").
+  int? _mesNumero() {
+    final texto = (_mesAutoCtrl?.text ?? '').trim();
+    if (texto.isEmpty) return null;
+    final n = int.tryParse(texto);
+    if (n != null && n >= 1 && n <= 12) return n;
+    final idx = _meses.indexWhere(
+        (m) => m.toLowerCase() == texto.toLowerCase());
+    if (idx >= 0) return idx + 1;
+    return null;
+  }
   final _ubicacionCtrl = TextEditingController();
   double? _ubicacionLat;
   double? _ubicacionLon;
@@ -46,6 +64,9 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   String _genero = '';
   String _queBusca = '';
   final List<String> _fotos = [];
+  // Bytes en memoria para previsualizar al instante (en web la ruta
+  // blob no siempre resuelve como asset).
+  final List<Uint8List?> _fotosBytes = [];
   String? _errorFecha;
   Map<String, List<String>> _provincias = const {};
   List<String> _opcionesUbicacion = const [];
@@ -114,7 +135,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     _pageCtrl.dispose();
     _nombreCtrl.dispose();
     _diaCtrl.dispose();
-    _mesCtrl.dispose();
     _anioCtrl.dispose();
     _ubicacionCtrl.dispose();
     _focusUbicacion.dispose();
@@ -147,7 +167,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
 
   bool get _fechaValida {
     final d = int.tryParse(_diaCtrl.text);
-    final m = int.tryParse(_mesCtrl.text);
+    final m = _mesNumero();
     final a = int.tryParse(_anioCtrl.text);
     if (d == null || m == null || a == null) return false;
     if (d < 1 || d > 31 || m < 1 || m > 12 || a < 1900) return false;
@@ -157,7 +177,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
 
   void _validarFecha() {
     final d = int.tryParse(_diaCtrl.text);
-    final m = int.tryParse(_mesCtrl.text);
+    final m = _mesNumero();
     final a = int.tryParse(_anioCtrl.text);
     if (d == null || m == null || a == null) {
       setState(() => _errorFecha = null);
@@ -179,32 +199,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       setState(() => _errorFecha = 'Debes tener al menos 18 años');
     } else {
       setState(() => _errorFecha = null);
-    }
-  }
-
-  String? get _razonInvalida {
-    switch (_paso) {
-      case 1:
-        final nombre = _nombreCtrl.text.trim();
-        if (nombre.isEmpty) return 'Ingresa tu nombre';
-        if (nombre.length < 2) return 'El nombre debe tener al menos 2 caracteres';
-        if (nombre.length > 30) return 'El nombre no puede superar los 30 caracteres';
-        if (!_regexNombre.hasMatch(nombre)) {
-          return 'Solo letras, espacios, guiones y apóstrofes';
-        }
-        return null;
-      case 2:
-        return _errorFecha ?? 'Ingresa una fecha válida';
-      case 3:
-        return 'Selecciona tu género para continuar';
-      case 4:
-        return 'Selecciona qué estás buscando para continuar';
-      case 5:
-        return 'Ingresa tu ubicación para continuar';
-      case 6:
-        return 'Agrega al menos una foto para continuar';
-      default:
-        return null;
     }
   }
 
@@ -252,7 +246,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         );
       case 2:
         final d = int.tryParse(_diaCtrl.text);
-        final m = int.tryParse(_mesCtrl.text);
+        final m = _mesNumero();
         final a = int.tryParse(_anioCtrl.text);
         if (d == null || m == null || a == null) return null;
         final fecha = DateTime(a, m, d);
@@ -347,16 +341,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         );
   }
 
-  Future<void> _tomarFoto() async {
-    final picker = ImagePicker();
-    try {
-      final foto = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024);
-      if (foto != null) {
-        setState(() => _fotos.add(foto.path));
-      }
-    } catch (_) {}
-  }
-
   @override
   Widget build(BuildContext context) {
     final primario = FlumiTema.colorPrimario;
@@ -365,12 +349,13 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       body: SafeArea(
         child: Column(
           children: [
-            if (_paso > 0) _barraProgreso(primario),
+            if (_paso > 0) _barraSuperior(primario),
             Expanded(
               child: PageView(
                 controller: _pageCtrl,
                 onPageChanged: (i) => setState(() => _paso = i),
-                physics: null,
+                // Sin swipe: solo se avanza con el botón (validado y guardado).
+                physics: const NeverScrollableScrollPhysics(),
                 children: [
                   _pasoBienvenida(primario),
                   _pasoNombre(primario),
@@ -389,11 +374,31 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     );
   }
 
-  Widget _barraProgreso(Color primario) {
+  Widget _barraSuperior(Color primario) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      child: BarraProgresoRio(
-        progreso: _paso / (_totalPasos - 1),
+      padding: const EdgeInsets.fromLTRB(12, 8, 24, 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: Material(
+              color: Colors.grey[100],
+              shape: const CircleBorder(),
+              child: IconButton(
+                onPressed: _atras,
+                icon: const Icon(Icons.arrow_back_ios_rounded,
+                    color: Colors.grey, size: 20),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: BarraProgresoRio(
+              progreso: _paso / (_totalPasos - 1),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -480,7 +485,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Expanded(
-                  flex: 11,
+                  flex: 8,
                   child: TextFormField(
                     controller: _diaCtrl,
                     onChanged: (valor) {
@@ -496,24 +501,40 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 11,
-                  child: TextFormField(
-                    controller: _mesCtrl,
-                    focusNode: _mesFocus,
-                    onChanged: (valor) {
-                      if (_mesCtrl.text.length >= 2) _enfocarAnio();
-                      _validarFecha();
+                  flex: 14,
+                  child: Autocomplete<String>(
+                    optionsBuilder: (valor) {
+                      final q = valor.text.trim().toLowerCase();
+                      if (q.isEmpty) return _meses;
+                      return _meses.where(
+                          (m) => m.toLowerCase().contains(q));
                     },
-                    keyboardType: TextInputType.number,
-                    maxLength: 2,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.black87, fontSize: 16),
-                    decoration: _campoFecha('Mes', primario).copyWith(counterText: ''),
+                    displayStringForOption: (o) => o,
+                    fieldViewBuilder: (context, ctrlTexto, focusTexto,
+                        onFieldSubmitted) {
+                      _mesAutoCtrl = ctrlTexto;
+                      _mesInnerFocus = focusTexto;
+                      return TextFormField(
+                        controller: ctrlTexto,
+                        focusNode: focusTexto,
+                        onChanged: (_) => _validarFecha(),
+                        keyboardType: TextInputType.text,
+                        textCapitalization: TextCapitalization.words,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.black87, fontSize: 16),
+                        decoration: _campoFecha('Mes', primario),
+                      );
+                    },
+                    onSelected: (_) {
+                      _validarFecha();
+                      _enfocarAnio();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 11,
+                  flex: 10,
                   child: TextFormField(
                     controller: _anioCtrl,
                     focusNode: _anioFocus,
@@ -564,11 +585,10 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     );
   }
 
-  final _mesFocus = FocusNode();
   final _anioFocus = FocusNode();
 
   void _enfocarMes() {
-    _mesFocus.requestFocus();
+    _mesInnerFocus?.requestFocus();
   }
 
   void _enfocarAnio() {
@@ -600,7 +620,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     return _pasoLayout(
       icono: Icons.add_a_photo_outlined,
       titulo: 'Agrega tus fotos',
-      subtitulo: 'Sube al menos una foto (máx. 2). La primera será tu foto de perfil.',
+      subtitulo: 'Sube al menos una foto (máx. 4). La primera será tu foto de perfil.',
       child: Column(
         children: [
           Padding(
@@ -612,7 +632,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               childAspectRatio: 1,
-              children: List.generate(2, (index) {
+              children: List.generate(4, (index) {
                 final tieneFoto = index < _fotos.length;
                 return _celdaFotoOnboarding(index, tieneFoto ? _fotos[index] : null, primario);
               }),
@@ -631,19 +651,30 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
 
   Widget _celdaFotoOnboarding(int index, String? ruta, Color primario) {
     final tieneFoto = ruta != null;
+    final bytes =
+        index < _fotosBytes.length ? _fotosBytes[index] : null;
     return GestureDetector(
       onTap: () async {
         final picker = ImagePicker();
         try {
           final foto = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024);
           if (foto != null) {
+            Uint8List? datos;
+            try {
+              datos = await foto.readAsBytes();
+            } catch (_) {}
+            if (!mounted) return;
             setState(() {
-              if (tieneFoto) {
+              if (index < _fotos.length) {
                 _fotos[index] = foto.path;
-              } else if (_fotos.length <= index) {
-                _fotos.add(foto.path);
+                if (index < _fotosBytes.length) {
+                  _fotosBytes[index] = datos;
+                } else {
+                  _fotosBytes.add(datos);
+                }
               } else {
-                _fotos[index] = foto.path;
+                _fotos.add(foto.path);
+                _fotosBytes.add(datos);
               }
             });
           }
@@ -663,8 +694,10 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (tieneFoto)
-                imagenOrigen(ruta!, fit: BoxFit.cover)
+              if (bytes != null)
+                Image.memory(bytes, fit: BoxFit.cover)
+              else if (tieneFoto)
+                imagenOrigen(ruta, fit: BoxFit.cover)
               else
                 Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -682,7 +715,12 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
                   top: 4,
                   right: 4,
                   child: GestureDetector(
-                    onTap: () => setState(() => _fotos.removeAt(index)),
+                    onTap: () => setState(() {
+                      _fotos.removeAt(index);
+                      if (index < _fotosBytes.length) {
+                        _fotosBytes.removeAt(index);
+                      }
+                    }),
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: const BoxDecoration(
@@ -862,46 +900,19 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   Future<void> _establecerUbicacion() async {
     setState(() => _obteniendoUbicacion = true);
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'El GPS está desactivado. Actívalo en los ajustes del dispositivo.',
-        );
-        return;
+      // El nombre se resuelve contra las opciones: asegura que estén cargadas.
+      if (_provincias.isEmpty) {
+        await _cargarOpcionesUbicacion();
       }
-      var permiso = await Geolocator.checkPermission();
-      if (permiso == LocationPermission.denied) {
-        permiso = await Geolocator.requestPermission();
-      }
-      if (permiso == LocationPermission.denied) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'Permiso de ubicación denegado. Permítelo para usar esta función.',
-        );
-        return;
-      }
-      if (permiso == LocationPermission.deniedForever) {
-        if (!mounted) return;
-        NotificacionServicio.alerta(
-          context,
-          'El permiso de ubicación está bloqueado. Actívalo manualmente en Ajustes > Permisos.',
-        );
-        return;
-      }
-      final posicion = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 20),
-        ),
-      );
+      final posicion = await obtenerUbicacionGps();
       final nombre = await resolverNombreUbicacion(
-        latitud: posicion.latitude,
-        longitud: posicion.longitude,
-        provincias: _provincias,
-      );
-      if (nombre == null || nombre.isEmpty) {
+            latitud: posicion.lat,
+            longitud: posicion.lon,
+            provincias: _provincias,
+          ) ??
+          // Último recurso: tabla estática, siempre devuelve una provincia.
+          provinciaMasCercanaDirecta(posicion.lat, posicion.lon);
+      if (nombre.isEmpty) {
         if (!mounted) return;
         NotificacionServicio.alerta(
           context,
@@ -912,36 +923,13 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       if (!mounted) return;
       _ubicacionCtrl.text = nombre;
       _autocompleteCtrl?.text = nombre;
-      _ubicacionLat = posicion.latitude;
-      _ubicacionLon = posicion.longitude;
+      _ubicacionLat = posicion.lat;
+      _ubicacionLon = posicion.lon;
       setState(() {});
       NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
-    } on PlatformException catch (e) {
+    } on UbicacionException catch (e) {
       if (!mounted) return;
-      String mensaje;
-      switch (e.code) {
-        case 'location_unavailable':
-          mensaje = 'Ubicación no disponible. Verifica la señal GPS e intenta de nuevo.';
-          break;
-        case 'permission_denied':
-          mensaje = 'Permiso de ubicación denegado.';
-          break;
-        case 'timeout':
-          mensaje = 'Tiempo de espera agotado para obtener la ubicación. Intenta de nuevo.';
-          break;
-        case 'service_not_available':
-          mensaje = 'Servicio de ubicación no disponible en este dispositivo.';
-          break;
-        default:
-          mensaje = 'Error del GPS. Intenta de nuevo.';
-      }
-      NotificacionServicio.alerta(context, mensaje);
-    } on TimeoutException {
-      if (!mounted) return;
-      NotificacionServicio.alerta(
-        context,
-        'Tiempo de espera agotado al obtener la ubicación. Verifica la señal GPS e intenta de nuevo.',
-      );
+      NotificacionServicio.alerta(context, e.mensaje);
     } catch (_) {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -989,41 +977,6 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       }
     }
     return null;
-  }
-
-  Widget _permisoBoton({
-    required IconData icono,
-    required String label,
-    required bool activo,
-    required Color primario,
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        decoration: BoxDecoration(
-          color: activo ? Colors.green.withValues(alpha: 0.1) : primario.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: activo ? Colors.green : primario.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icono, color: activo ? Colors.green : primario, size: 24),
-            const SizedBox(width: 10),
-            Text(label,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: activo ? Colors.green : primario,
-                )),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _pasoLayout({
@@ -1092,30 +1045,37 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     );
   }
 
+  void _atras() {
+    if (_paso <= 0) return;
+    _pageCtrl.previousPage(
+        duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+  }
+
   Widget _botonSiguiente(Color primario) {
-    final esUltimo = _paso >= _totalPasos - 1;
     String texto = 'Continuar';
     if (_paso == 0) texto = 'Empezar';
+
+    final siguiente = SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: !_pasoValido ? null : _siguiente,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primario,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+          disabledBackgroundColor: primario.withValues(alpha: 0.3),
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.5),
+        ),
+        child: Text(texto, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+      ),
+    );
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-        child: SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: !_pasoValido ? null : _siguiente,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: primario,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 0,
-              disabledBackgroundColor: primario.withValues(alpha: 0.3),
-              disabledForegroundColor: Colors.white.withValues(alpha: 0.5),
-            ),
-            child: Text(texto, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          ),
-        ),
+        child: siguiente,
       ),
     );
   }

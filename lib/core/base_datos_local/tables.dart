@@ -87,6 +87,10 @@ class Usuarios extends Table {
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(false))();
   BoolColumn get esPerfilPropio => boolean().withDefault(const Constant(false))();
   BoolColumn get perfilCompletado => boolean().withDefault(const Constant(false))();
+  /// true para usuarios con rol de administrador: tienen acceso a todas las
+  /// funciones de la app sin necesidad de plan (se sincroniza desde
+  /// `profiles.is_admin`).
+  BoolColumn get isAdmin => boolean().withDefault(const Constant(false))();
 
   TextColumn get orientacionSexual => text().withDefault(const Constant(''))();
   TextColumn get situacionSentimental => text().withDefault(const Constant(''))();
@@ -257,6 +261,19 @@ class ConversacionesEliminadas extends Table {
   /// true cuando la conversación retomó actividad: ya no se oculta de la
   /// lista, pero eliminadoEn sigue filtrando el historial anterior al borrado.
   BoolColumn get reactivada => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {otroUsuarioId};
+}
+
+/// Marca de "leído hasta" de una conversación, guardada localmente por
+/// conversación (otroUsuarioId). Es la fuente de verdad local del estado de
+/// lectura del usuario, independiente de `matches`/`historial_likes`, lo que
+/// permite marcar como leídas conversaciones que no tienen match ni like
+/// (p. ej. las cuentas oficiales de sistema: Administrador y Flumi).
+class ConversacionesLeidas extends Table {
+  TextColumn get otroUsuarioId => text()();
+  DateTimeColumn get leidoHasta => dateTime()();
 
   @override
   Set<Column> get primaryKey => {otroUsuarioId};

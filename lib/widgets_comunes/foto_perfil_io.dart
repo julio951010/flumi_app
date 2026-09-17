@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'foto_desde_red.dart';
-import 'shimmer_caja.dart';
 
 Widget imagenFoto(String ruta,
     {BoxFit fit = BoxFit.cover, int? cacheWidth}) {

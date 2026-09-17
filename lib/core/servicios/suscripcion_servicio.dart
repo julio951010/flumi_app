@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 
 import '../base_datos_local/database.dart';
+import 'config_remota_servicio.dart';
 import 'connectivity_service.dart';
 import 'sync_service.dart';
 
@@ -107,30 +108,82 @@ class LimitesPlan {
 class SuscripcionServicio with ChangeNotifier {
   final AppDatabase _db;
   final SyncService _sync;
+  final ConfigRemotaServicio? _configRemota;
   PlanTipo _planActual = PlanTipo.gratis;
   Suscripcione? _suscripcionActual;
   UsosDiario? _usosHoy;
+  bool _esAdmin = false;
+  StreamSubscription<List<Usuario>>? _perfilSub;
 
-  SuscripcionServicio(this._db, this._sync) {
+  SuscripcionServicio(this._db, this._sync, {ConfigRemotaServicio? configRemota})
+      : _configRemota = configRemota {
     cargarSuscripcion();
+    // Refleja el rol de administrador en vivo: el perfil propio (con is_admin)
+    // se sincroniza después de iniciar sesión, por lo que la carga inicial
+    // puede no haberlo visto todavía.
+    _perfilSub = (_db.select(_db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true)))
+        .watch()
+        .listen(_alCambiarPerfilPropio);
+    _configRemota?.addListener(_onConfigCambiada);
   }
 
-  PlanTipo get planActual => _planActual;
+  void _onConfigCambiada() => notifyListeners();
+
+  bool get _suscripcionesHabilitadas =>
+      _configRemota?.suscripcionesHabilitadas ?? true;
+
+  void _alCambiarPerfilPropio(List<Usuario> filas) {
+    final admin = filas.isNotEmpty ? filas.first.isAdmin : false;
+    if (admin != _esAdmin) {
+      _esAdmin = admin;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _configRemota?.removeListener(_onConfigCambiada);
+    _perfilSub?.cancel();
+    _perfilSub = null;
+    super.dispose();
+  }
+
+  /// true si el usuario logueado tiene rol de administrador (profiles.is_admin).
+  /// En ese caso tiene acceso a todas las funciones sin importar el plan.
+  bool get esAdmin => _esAdmin;
+
+  PlanTipo get planActual =>
+      (!_suscripcionesHabilitadas || _esAdmin) ? PlanTipo.premium : _planActual;
   Suscripcione? get suscripcionActual => _suscripcionActual;
   UsosDiario? get usosHoy => _usosHoy;
 
-  LimitesPlan get limites => switch (_planActual) {
-        PlanTipo.gratis => LimitesPlan.gratis(),
-        PlanTipo.plus => LimitesPlan.plus(),
-        PlanTipo.premium => LimitesPlan.premium(),
-      };
+  bool get suscripcionesHabilitadas => _suscripcionesHabilitadas;
 
-  bool get esGratis => _planActual == PlanTipo.gratis;
-  bool get esPlus => _planActual == PlanTipo.plus;
-  bool get esPremium => _planActual == PlanTipo.premium;
+  LimitesPlan get limites {
+    if (!_suscripcionesHabilitadas) return LimitesPlan.premium();
+    return switch (planActual) {
+      PlanTipo.gratis => LimitesPlan.gratis(),
+      PlanTipo.plus => LimitesPlan.plus(),
+      PlanTipo.premium => LimitesPlan.premium(),
+    };
+  }
 
-  bool get tienePlus => _planActual.index >= PlanTipo.plus.index;
-  bool get tienePremium => _planActual == PlanTipo.premium;
+  bool get esGratis =>
+      _suscripcionesHabilitadas && !_esAdmin && _planActual == PlanTipo.gratis;
+  bool get esPlus =>
+      !_suscripcionesHabilitadas || (!_esAdmin && _planActual == PlanTipo.plus);
+  bool get esPremium =>
+      !_suscripcionesHabilitadas || _esAdmin || _planActual == PlanTipo.premium;
+
+  bool get tienePlus =>
+      !_suscripcionesHabilitadas ||
+      _esAdmin ||
+      _planActual.index >= PlanTipo.plus.index;
+  bool get tienePremium =>
+      !_suscripcionesHabilitadas ||
+      _esAdmin ||
+      _planActual == PlanTipo.premium;
 
   bool get meGustasDisponiblesHoy =>
       limites.meGustasPorDia.isNegative ||
@@ -163,6 +216,8 @@ class SuscripcionServicio with ChangeNotifier {
   }
 
   Future<void> _cargarDesdeLocal(String id) async {
+    final perfil = await (_db.select(_db.usuarios)..where((u) => u.uuid.equals(id))).getSingleOrNull();
+    _esAdmin = perfil?.isAdmin ?? false;
     final sub = await (_db.select(_db.suscripciones)..where((s) => s.usuarioId.equals(id))).getSingleOrNull();
     _suscripcionActual = sub;
     if (sub != null && sub.activa && (sub.vence == null || sub.vence!.isAfter(DateTime.now()))) {

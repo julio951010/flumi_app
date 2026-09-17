@@ -1,6 +1,7 @@
 ﻿import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
 import '../constantes/constantes.dart';
@@ -245,6 +246,34 @@ class SyncService {
   // ------------------------------------------------------------
   // Mensajes
   // ------------------------------------------------------------
+  /// Tombstones de mensajes borrados (persisten en prefs): la descarga del
+  /// historial los salta para que un borrado offline no resucite al
+  /// sincronizar.
+  static const _prefsBorrados = 'flumi_mensajes_borrados';
+  static const _maxBorrados = 500;
+
+  static Future<void> recordarMensajeBorrado(String uuid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_prefsBorrados) ?? <String>[];
+      lista.remove(uuid);
+      lista.add(uuid);
+      while (lista.length > _maxBorrados) {
+        lista.removeAt(0);
+      }
+      await prefs.setStringList(_prefsBorrados, lista);
+    } catch (_) {}
+  }
+
+  static Future<Set<String>> _leerMensajesBorrados() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getStringList(_prefsBorrados)?.toSet() ?? <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
   /// Sube de inmediato los mensajes pendientes (write-through tras enviar) y
   /// descarga del servidor el historial completo (los mensajes que el
   /// Realtime pudo perder mientras estuvo caído/cerrado).
@@ -312,6 +341,7 @@ class SyncService {
           .get())
           .map((m) => m.uuid)
           .toSet();
+      final borrados = await _leerMensajesBorrados();
 
       final companiones = <MensajesCompanion>[];
       // Cortes de borrado: el historial anterior al borrado de una
@@ -323,7 +353,11 @@ class SyncService {
       };
       for (final f in filas) {
         final id = f['id'] as String?;
-        if (id == null || pendientesLocales.contains(id)) continue;
+        if (id == null ||
+            pendientesLocales.contains(id) ||
+            borrados.contains(id)) {
+          continue;
+        }
         final emisor = f['emisor_id'] as String? ?? '';
         final timestamp =
             PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now();

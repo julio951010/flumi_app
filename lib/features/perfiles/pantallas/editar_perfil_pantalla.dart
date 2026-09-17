@@ -92,6 +92,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
           esMatch: true,
           esMeGusta: true,
           soloVista: true,
+          titulo: 'Vista previa',
         ),
       ),
     );

@@ -9,11 +9,15 @@ class OlvideContrasenaPantalla extends StatefulWidget {
   final VoidCallback onLogin;
   final VoidCallback onExito;
 
+  /// Se llama con el email cuando el código de recuperación fue enviado.
+  final ValueChanged<String> onCodigoEnviado;
+
   const OlvideContrasenaPantalla({
     super.key,
     required this.authService,
     required this.onLogin,
     required this.onExito,
+    required this.onCodigoEnviado,
   });
 
   @override
@@ -42,13 +46,13 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
         NotificacionServicio.alerta(context, 'No hay una cuenta asociada a este correo.');
         return;
       }
-      await widget.authService.solicitarRecuperacion(email: _emailCtrl.text.trim());
+      await widget.authService.solicitarCodigoRecuperacion(email: _emailCtrl.text.trim());
       if (!mounted) return;
       NotificacionServicio.exito(
         context,
-        'Revisa tu correo y haz clic en el enlace para restablecer tu contraseña.',
+        'Te enviamos un código a tu correo. Ingrésalo para restablecer tu contraseña.',
       );
-      widget.onExito();
+      widget.onCodigoEnviado(_emailCtrl.text.trim());
     } catch (e) {
       if (!mounted) return;
       NotificacionServicio.alerta(context, e.toString());
@@ -91,20 +95,24 @@ class _OlvideContrasenaPantallaState extends State<OlvideContrasenaPantalla> {
                     children: [
                       SizedBox(
                         width: double.infinity,
-                        child: Text(
-                          'Recuperar Contraseña',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: primario,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Recuperar Contraseña',
+                            maxLines: 1,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: primario,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 12),
                       const Text(
-                        'Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.',
+                        'Ingresa tu correo y te enviaremos un código para restablecer tu contraseña.',
                         style: TextStyle(fontSize: 14),
                         textAlign: TextAlign.center,
                       ),

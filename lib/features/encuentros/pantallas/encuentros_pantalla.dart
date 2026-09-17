@@ -9,6 +9,7 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../config/env.dart';
 import '../../../core/constantes/constantes.dart';
 import '../../../core/servicios/connectivity_service.dart';
+import '../../../core/servicios/notificacion_local_servicio.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
@@ -244,56 +245,74 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
   }
 
+  bool _deshaciendo = false;
+
   Future<void> _undo() async {
+    if (_deshaciendo) return;
     final engine = _matchEngine;
     if (engine == null) return;
-    final revividoId = _agotado
-        ? (_filtrados.isEmpty ? null : _filtrados[_motorBase].uuid)
-        : (engine.currentItem?.content as Usuario?)?.uuid;
-    if (revividoId == null) return;
-
-    // Fase 6: el cupo de Deshacer lo valida el servidor
-    // (registrar_deshacer); el límite local es solo un espejo.
-    final concedido =
-        await widget.votosServicio.quitarRechazo(revividoId);
-    if (!concedido) {
+    // El id sale del historial de Nopes (última carta barrida), no de la
+    // carta actual: así el servidor des-rechaza al perfil correcto y el
+    // cupo no se quema en un no-op.
+    final revividoId = widget.votosServicio.tomarUltimoNope();
+    if (revividoId == null) {
       if (mounted) {
-        mostrarBloqueoSuscripcion(
-          context,
-          funcionalidad: 'Deshacer',
-          planMinimo: PlanTipo.plus,
-          descripcion:
-              'Has alcanzado el límite diario de deshacer (${_suscripcion.limites.deshacerPorDia}). Suscríbete a Flumi Plus para deshacer ilimitado.',
-          onSuscribir: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const DetallePlanPantalla(
-                nombre: 'Flumi Plus',
-                periodo: 'mensual',
-                precio: '250 cup',
-                icono: Icons.auto_awesome,
-                detalle: 'Funciones extra',
-                destacado: true,
-              ),
-            ),
-          ),
-        );
+        NotificacionServicio.alerta(
+            context, 'No hay movimientos que deshacer.');
       }
       return;
     }
 
-    await _suscripcion.registrarDeshacer();
-    if (_agotado) {
-      setState(() {
-        _agotado = false;
-        _motorBase = _filtrados.length - 1;
-        _progresoFoto = 0;
-        _motorId++;
-        _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
-      });
-    } else if (engine.currentItem != null) {
-      engine.rewindMatch();
-      setState(() => _progresoFoto = 0);
+    _deshaciendo = true;
+    try {
+      // Fase 6: el cupo de Deshacer lo valida el servidor
+      // (registrar_deshacer); el límite local es solo un espejo.
+      final concedido =
+          await widget.votosServicio.quitarRechazo(revividoId);
+      if (!concedido) {
+        if (mounted) {
+          mostrarBloqueoSuscripcion(
+            context,
+            funcionalidad: 'Deshacer',
+            planMinimo: PlanTipo.plus,
+            descripcion:
+                'Has alcanzado el límite diario de deshacer (${_suscripcion.limites.deshacerPorDia}). Suscríbete a Flumi Plus para deshacer ilimitado.',
+            onSuscribir: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const DetallePlanPantalla(
+                  nombre: 'Flumi Plus',
+                  periodo: 'mensual',
+                  precio: '250 cup',
+                  icono: Icons.auto_awesome,
+                  detalle: 'Funciones extra',
+                  destacado: true,
+                ),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      await _suscripcion.registrarDeshacer();
+      if (_agotado) {
+        setState(() {
+          _agotado = false;
+          _motorBase = _filtrados.length - 1;
+          _progresoFoto = 0;
+          _motorId++;
+          _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
+        });
+      } else if (engine.currentItem != null) {
+        engine.rewindMatch();
+        setState(() => _progresoFoto = 0);
+      }
+      if (mounted) {
+        NotificacionServicio.exito(context, 'Deshecho.');
+      }
+    } finally {
+      _deshaciendo = false;
     }
   }
 
@@ -336,7 +355,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       // rendirse; las exclusiones (rechazos, gustados, bloqueos) se
       // mantienen en ambos modos.
       final acumulados = <Usuario>[];
-      while (acumulados.length < _loteTamanio && _hayMasRemoto) {
+      // Tope de llamadas remotas por carga (igual que en Cerca de ti).
+      var intentos = 0;
+      while (acumulados.length < _loteTamanio &&
+          _hayMasRemoto &&
+          intentos < 4) {
+        intentos++;
         final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
         if (lote.isEmpty) {
           if (!_amplitudAplicada) {
@@ -402,7 +426,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     if (_cargandoMas || !_hayMasRemoto || _cargando) return;
     _cargandoMas = true;
     try {
-      while (_hayMasRemoto) {
+      var intentos = 0;
+      while (_hayMasRemoto && intentos < 4) {
+        intentos++;
         final lote = await _siguienteLote(conAmpliacion: _amplitudAplicada);
         if (lote.isEmpty) {
           if (!_amplitudAplicada) {
@@ -476,7 +502,6 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
-    lista.removeWhere((u) => widget.votosServicio.esExcluidoPermanente(u.uuid));
 
     return lista;
   }
@@ -654,15 +679,26 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     );
   }
 
+  /// Devuelve la carta actual al mazo (el gesto ya la había avanzado pero
+  /// el voto no quedó registrado).
+  void _rebobinarCarta() {
+    try {
+      _matchEngine?.rewindMatch();
+    } catch (_) {}
+    if (mounted) setState(() => _progresoFoto = 0);
+  }
+
   Future<void> _aplicarMeGusta(Usuario usuario) async {
     // Fase 3: el RPC valida el límite diario y confirma el match.
     final resultado = await _historialLikes.registrarLike(usuario.uuid);
     if (resultado?.limite == true) {
+      _rebobinarCarta();
       if (mounted) _mostrarBloqueoMeGusta();
       return;
     }
     if (resultado == null && ConnectivityService.instancia.hayConexion) {
       // RPC falló teniendo red: el Me Gusta no se guardó ni se encoló.
+      _rebobinarCarta();
       if (mounted) {
         NotificacionServicio.advertencia(context,
             'Fallo de conexión: el Me Gusta no se guardó. Inténtalo de nuevo.');
@@ -682,6 +718,14 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     if (matchSeguro && mounted) {
       _abrirMatch(usuario);
     }
+
+    // Notificación inteligente: local si foreground, push si background
+    unawaited(NotificacionLocalServicio.instancia.notificarInteligente(
+      titulo: '¡Nuevo Me Gusta!',
+      cuerpo: 'Le gustaste a ${usuario.nombre}',
+      usuarioIdDestino: usuario.uuid,
+      categoria: 'lesGusto',
+    ));
   }
 
   bool _estaEnLinea(Usuario usuario) {
@@ -717,18 +761,19 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       );
       return;
     }
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ChatPantalla(
-          repositorio: _chatRepo,
-          otroUsuarioId: usuario.uuid,
-          miId: widget.miId,
-          nombreOtro: usuario.nombre,
-          online: _estaEnLinea(usuario),
+Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatPantalla(
+            repositorio: _chatRepo,
+            otroUsuarioId: usuario.uuid,
+            miId: widget.miId,
+            nombreOtro: usuario.nombre,
+            online: _estaEnLinea(usuario),
+            suscripcionServicio: widget.suscripcionServicio,
+          ),
         ),
-      ),
-    );
+      );
   }
 
   void _superlike(Usuario usuario) async {
@@ -741,11 +786,13 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     final resultado =
         await _historialLikes.registrarLike(usuario.uuid, esSuper: true);
     if (resultado?.limite == true) {
+      _rebobinarCarta();
       if (mounted) _mostrarBloqueoSuperlike();
       return;
     }
     if (resultado == null && ConnectivityService.instancia.hayConexion) {
       // RPC falló teniendo red: el Superlike no se guardó ni se encoló.
+      _rebobinarCarta();
       if (mounted) {
         NotificacionServicio.advertencia(context,
             'Fallo de conexión: el Superlike no se guardó. Inténtalo de nuevo.');
@@ -797,6 +844,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
           usuario: usuario,
           miId: widget.miId,
           chatRepo: _chatRepo,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );

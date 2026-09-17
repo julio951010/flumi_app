@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io';
+
+import 'dart:io' if (dart.library.html) 'socket_exception_stub.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -50,7 +51,6 @@ class EstadoServidorServicio with ChangeNotifier {
     return error is SocketException ||
         error is TimeoutException ||
         error is http.ClientException ||
-        error is IOException ||
         error is sb.AuthException;
   }
 
@@ -98,7 +98,7 @@ class EstadoServidorServicio with ChangeNotifier {
     try {
       if (!kUsarServidorLocal) {
         await sb.Supabase.instance.client
-            .from('perfiles')
+            .from('profiles')
             .select('id')
             .limit(1);
       }

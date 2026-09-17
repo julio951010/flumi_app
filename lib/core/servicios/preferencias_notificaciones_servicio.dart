@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../config/env.dart';
 
 /// Preferencias de notificaciones del usuario (pantalla Configuración →
 /// Notificaciones). Se persisten localmente con shared_preferences y se
@@ -71,5 +74,23 @@ class PreferenciasNotificacionesServicio extends ChangeNotifier {
     await prefs.setBool('${_prefijo}consejos', this.consejos);
     await prefs.setBool('${_prefijo}sondeos', this.sondeos);
     notifyListeners();
+    // Write-through al servidor (best-effort) para que los push la respeten.
+    if (!kUsarServidorLocal) {
+      try {
+        final uid = Supabase.instance.client.auth.currentUser?.id;
+        if (uid == null) return;
+        await Supabase.instance.client.from('notif_prefs').upsert({
+          'usuario_id': uid,
+          'mensajes': mensajes,
+          'matches': matches,
+          'les_gusto': lesGusto,
+          'visitas': visitas,
+          'cerca_de_ti': cercaDeTi,
+          'regalos': regalos,
+          'consejos': consejos,
+          'sondeos': sondeos,
+        });
+      } catch (_) {}
+    }
   }
 }

@@ -2,9 +2,13 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/servicios/connectivity_service.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
+import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
 import '../../../widgets_comunes/banner_gradiente.dart';
@@ -14,7 +18,6 @@ import 'cerca_de_ti_pantalla.dart' show PerfilDetallePage;
 import 'match_pantalla.dart';
 import '../../suscripcion/suscripcion_sheet.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
-import '../../perfiles/pantallas/quien_te_vio_pantalla.dart';
 
 class MeGustaPantalla extends StatefulWidget {
   final AppDatabase db;
@@ -55,6 +58,32 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   Set<String> _idsRecibidos = {};
   Set<String> _idsSuperRecibidos = {};
   bool _cargando = true;
+  Timer? _recargaTimer;
+
+  /// Completa [mapa] con los perfiles que faltan (visitantes/likers aún no
+  /// descargados) en una sola consulta, para que las grillas muestren
+  /// tarjetas reales en vez de descartarlos.
+  Future<void> _enriquecerPerfiles(
+      Map<String, Usuario> mapa, List<String> ids) async {
+    final faltantes =
+        ids.where((id) => !mapa.containsKey(id)).toSet().take(100).toList();
+    if (faltantes.isEmpty) return;
+    if (!ConnectivityService.instancia.hayConexion || kUsarServidorLocal) {
+      return;
+    }
+    try {
+      final remoto = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .inFilter('id', faltantes);
+      for (final r in remoto as List) {
+        final m = Map<String, dynamic>.from(r as Map);
+        final id = m['id'] as String?;
+        if (id == null) continue;
+        mapa[id] = PerfilMapeo.perfilRemotoAUsuario(m, esPropio: false);
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -71,26 +100,45 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   void _alCambiarContador() {
-    if (mounted) unawaited(_cargar());
+    // Debounce: los eventos llegan en ráfagas (realtime + watch); recargar
+    // solo local, sin golpear la red en cada uno.
+    if (!mounted || _cargando) return;
+    _recargaTimer?.cancel();
+    _recargaTimer = Timer(
+      const Duration(milliseconds: 1500),
+      () {
+        if (mounted && !_cargando) unawaited(_cargar(sincronizar: false));
+      },
+    );
   }
 
   @override
   void dispose() {
     widget.contador.removeListener(_alCambiarContador);
+    _recargaTimer?.cancel();
     _tabCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _cargar() async {
+  Future<void> _cargar({bool sincronizar = true}) async {
     setState(() => _cargando = true);
     try {
       final todos = await widget.db.select(widget.db.usuarios).get();
       final mapa = {for (final u in todos) u.uuid: u};
 
-      final recibidos =
-          await _historialLikesServicio.obtenerLikesRecibidosDetalle();
-      final gustados = await _historialLikesServicio.obtenerHistorial();
-      final visitas = await _visitasServicio.obtenerVisitas();
+      final recibidos = await _historialLikesServicio.obtenerLikesRecibidosDetalle(
+          sincronizar: sincronizar);
+      final gustados = await _historialLikesServicio.obtenerHistorial(
+          sincronizar: sincronizar);
+      final visitas = await _visitasServicio.obtenerVisitas(
+          sincronizar: sincronizar);
+
+      // Enriquece likers/visitantes sin perfil local (una sola consulta).
+      await _enriquecerPerfiles(mapa, [
+        ...recibidos.map((h) => h.usuarioId),
+        ...gustados.map((h) => h.usuarioLikeadoId),
+        ...visitas.map((v) => v.visitanteId),
+      ]);
 
       _idsGustados = gustados.map((h) => h.usuarioLikeadoId).toSet();
       _idsRecibidos = recibidos.map((h) => h.usuarioId).toSet();
@@ -131,13 +179,26 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
               timestamp: timestampsRecibidos[id] ?? DateTime.now()))
           .where((i) => i.usuario != null)
           .toList();
-      // Chips = tarjetas visibles y no vistas (converge aunque los eventos
-      // de like/match lleguen en cualquier orden).
+      // Chips = interacciones no vistas. Se cuentan los ids crudos (sin
+      // match) aunque el perfil aún no esté descargado: el chip cuenta
+      // interacciones, la grilla solo muestra perfiles conocidos.
       widget.contador.reconciliar(
-        likes: _likes.map((i) => i.usuario!.uuid).toList(),
-        visitas: _visitas.map((i) => i.usuario!.uuid).toList(),
-        misLikes: _misLikes.map((i) => i.usuario!.uuid).toList(),
-        matches: _matches.map((i) => i.usuario!.uuid).toList(),
+        likes: recibidos
+            .where((h) => !idsMatch.contains(h.usuarioId))
+            .map((h) => h.usuarioId)
+            .toSet()
+            .toList(),
+        visitas: visitas
+            .where((v) => !idsMatch.contains(v.visitanteId))
+            .map((v) => v.visitanteId)
+            .toSet()
+            .toList(),
+        misLikes: gustados
+            .where((h) => !idsMatch.contains(h.usuarioLikeadoId))
+            .map((h) => h.usuarioLikeadoId)
+            .toSet()
+            .toList(),
+        matches: idsMatch.toList(),
       );
     } finally {
       if (mounted) setState(() => _cargando = false);
@@ -217,12 +278,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                   controller: _tabCtrl,
                   children: [
                     _grilla(_likes, puedeVerLikes, CategoriaMeGusta.likes),
-                    puedeVerVisitas
-                        ? QuienTeVioPantalla(
-                            visitasServicio: _visitasServicio,
-                            suscripcionServicio: _suscripcion,
-                          )
-                        : _grilla(_visitas, false, CategoriaMeGusta.visitas),
+                    _grilla(_visitas, puedeVerVisitas,
+                        CategoriaMeGusta.visitas),
                     _grilla(_misLikes, true, CategoriaMeGusta.misLikes,
                         bloquearDetallesSinPlan: true),
                     _grilla(_matches, true, CategoriaMeGusta.matches),
@@ -395,6 +452,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
           miId: widget.miId,
           nombreOtro: usuario.nombre,
           online: _estaEnLinea(usuario),
+          suscripcionServicio: _suscripcion,
         ),
       ),
     );
@@ -453,7 +511,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
     );
   }
 
-  void _abrirMatch(Usuario usuario) {
+void _abrirMatch(Usuario usuario) {
     setState(() => _idsGustados.add(usuario.uuid));
     Navigator.push(
       context,
@@ -462,6 +520,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
           usuario: usuario,
           miId: widget.miId,
           chatRepo: _chatRepo,
+          suscripcionServicio: _suscripcion,
         ),
       ),
     );

@@ -59,6 +59,17 @@ class VisitasServicio with ChangeNotifier {
         .getSingleOrNull();
     if (perfil?.ocultarVisitas ?? false) return;
 
+    // Debounce: reabrir el mismo perfil en <30 min no genera otra visita.
+    final limite = DateTime.now().subtract(const Duration(minutes: 30));
+    final reciente = await (_db.select(_db.visitas)
+          ..where((v) =>
+              v.visitanteId.equals(visitanteId) &
+              v.visitadoId.equals(visitadoId) &
+              v.timestamp.isBiggerThanValue(limite))
+          ..limit(1))
+        .getSingleOrNull();
+    if (reciente != null) return;
+
     // Fase 3: online-first contra el RPC; sin conexión se queda local
     // pendiente para el siguiente sync.
     if (ConnectivityService.instancia.hayConexion && !kUsarServidorLocal) {
@@ -83,12 +94,13 @@ class VisitasServicio with ChangeNotifier {
     unawaited(_sync.sincronizarVisitas());
   }
 
-  Future<List<Visita>> obtenerVisitas({int? limite}) async {
+  Future<List<Visita>> obtenerVisitas({int? limite, bool sincronizar = true}) async {
     final visitadoId = await _obtenerUsuarioPropioId(_db);
     if (visitadoId == null) return [];
 
     // Online-first: refresca las visitas recibidas desde Supabase.
-    if (ConnectivityService.instancia.hayConexion) {
+    // Con sincronizar=false se lee solo local (realtime ya escribió).
+    if (sincronizar && ConnectivityService.instancia.hayConexion) {
       await _sync.sincronizarVisitas();
     }
 
@@ -190,12 +202,12 @@ class HistorialLikesServicio with ChangeNotifier {
     return null;
   }
 
-  Future<List<HistorialLike>> obtenerHistorial({int? limite}) async {
+  Future<List<HistorialLike>> obtenerHistorial({int? limite, bool sincronizar = true}) async {
     final usuarioId = await _obtenerUsuarioPropioId(_db);
     if (usuarioId == null) return [];
 
     // Online-first: refresca los likes desde Supabase.
-    if (ConnectivityService.instancia.hayConexion) {
+    if (sincronizar && ConnectivityService.instancia.hayConexion) {
       await _sync.sincronizarHistorialLikes();
     }
 
@@ -220,10 +232,10 @@ class HistorialLikesServicio with ChangeNotifier {
   }
 
   /// Perfiles que ME dieron like, más recientes primero (detecta matches).
-  Future<List<HistorialLike>> obtenerLikesRecibidosDetalle() async {
+  Future<List<HistorialLike>> obtenerLikesRecibidosDetalle({bool sincronizar = true}) async {
     final usuarioId = await _obtenerUsuarioPropioId(_db);
     if (usuarioId == null) return [];
-    if (ConnectivityService.instancia.hayConexion) {
+    if (sincronizar && ConnectivityService.instancia.hayConexion) {
       await _sync.sincronizarHistorialLikes();
     }
     final query = _db.select(_db.historialLikes)

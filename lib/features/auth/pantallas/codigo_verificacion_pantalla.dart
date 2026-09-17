@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,11 @@ class CodigoVerificacionPantalla extends StatefulWidget {
   final VoidCallback onLogin;
   final VoidCallback? onReenviar;
 
+  /// Tipo OTP explícito. Si es `OtpType.signup` se usa el flujo de
+  /// registro (verificar + reenviar con `resend`). Si es null se mantiene
+  /// la lógica anterior (password != null → email, si no recovery).
+  final OtpType? tipoOtp;
+
   const CodigoVerificacionPantalla({
     super.key,
     required this.authService,
@@ -21,6 +27,7 @@ class CodigoVerificacionPantalla extends StatefulWidget {
     required this.onExito,
     required this.onLogin,
     this.onReenviar,
+    this.tipoOtp,
   });
 
   @override
@@ -44,7 +51,8 @@ class _CodigoVerificacionPantallaState
     if (!_formKey.currentState!.validate()) return;
     setState(() => _cargando = true);
     try {
-      final tipo = widget.password != null ? OtpType.email : OtpType.recovery;
+      final tipo = widget.tipoOtp ??
+          (widget.password != null ? OtpType.email : OtpType.recovery);
       await widget.authService.verificarCodigo(
         email: widget.email,
         token: _codigoCtrl.text.trim(),
@@ -60,6 +68,13 @@ class _CodigoVerificacionPantallaState
           ? 'Cuenta verificada correctamente.'
           : 'Código verificado. Ahora puedes restablecer tu contraseña.';
       NotificacionServicio.exito(context, mensaje);
+      if (widget.tipoOtp == OtpType.signup) {
+        // Ya hay sesión: dispara la bienvenida de Flumi (idempotente,
+        // no bloquea si falla).
+        Future.microtask(
+          () => widget.authService.enviarBienvenida().catchError((_) {}),
+        );
+      }
       widget.onExito();
     } catch (e) {
       if (!mounted) return;
@@ -72,6 +87,15 @@ class _CodigoVerificacionPantallaState
   Future<void> _reenviar() async {
     setState(() => _cargando = true);
     try {
+      if (widget.tipoOtp == OtpType.signup) {
+        await widget.authService.reenviarCodigoRegistro(email: widget.email);
+        if (!mounted) return;
+        NotificacionServicio.exito(
+          context,
+          'Código reenviado. Revisa tu correo.',
+        );
+        return;
+      }
       final tipo = widget.password != null ? OtpType.email : OtpType.recovery;
       await widget.authService.reenviarCodigo(email: widget.email, tipo: tipo);
       if (!mounted) return;
@@ -119,13 +143,18 @@ class _CodigoVerificacionPantallaState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Código de Verificación',
-                        style: TextStyle(
-                          color: primario,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Código de Verificación',
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: primario,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -146,7 +175,8 @@ class _CodigoVerificacionPantallaState
                           letterSpacing: 8,
                         ),
                         validator: (v) {
-                          if (v == null || v.trim().length < 4) {
+                          final codigo = v?.trim() ?? '';
+                          if (codigo.length < 6 || codigo.length > 8) {
                             return 'Ingresa el código completo';
                           }
                           return null;

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
@@ -48,6 +49,21 @@ class EmailInvalidoException implements Exception {
 class RegistroDeshabilitadoException implements Exception {
   @override
   String toString() => 'El registro no está habilitado en este momento.';
+}
+
+class DemasiadosIntentosException implements Exception {
+  @override
+  String toString() => 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.';
+}
+
+class EmailNoConfirmadoException implements Exception {
+  @override
+  String toString() => 'Debes verificar tu correo antes de entrar. Revisa tu bandeja (y el spam) e ingresa el código.';
+}
+
+class MismaContrasenaException implements Exception {
+  @override
+  String toString() => 'La nueva contraseña debe ser diferente a la anterior.';
 }
 
 class ErrorInesperadoException implements Exception {
@@ -216,6 +232,13 @@ class AuthService {
         password: password,
         data: nombre != null ? {'nombre': nombre} : null,
       );
+      // Enviar mensaje de bienvenida desde el perfil "Flumi" al nuevo usuario.
+      // Usa fire-and-forget para no bloquear el registro si falla.
+      if (r.user != null) {
+        Future.microtask(() => sb.Supabase.instance.client
+            .rpc('enviar_bienvenida_nuevo_usuario')
+            .catchError((_) {}));
+      }
       return {'user': r.user?.toJson(), 'token': ''};
     });
   }
@@ -268,8 +291,17 @@ class AuthService {
     }
   }
 
+  /// Envía código OTP de RECUPERACIÓN (flujo con código, no enlace).
+  /// No abre sesión; el código se verifica con tipo `recovery`.
+  Future<void> solicitarCodigoRecuperacion({required String email}) async {
+    _requerirConexion();
+    return _ejecutar(() async {
+      await sb.Supabase.instance.client.auth.signInWithOtp(email: email);
+    });
+  }
+
   // -----------------------------------------------------------
-  // Solicitar recuperación
+  // Solicitar recuperación (por enlace, legado)
   // -----------------------------------------------------------
   Future<void> solicitarRecuperacion({required String email}) async {
     _requerirConexion();
@@ -302,9 +334,9 @@ class AuthService {
         throw ErrorServidorException();
       });
     }
-    await sb.Supabase.instance.client.auth.updateUser(
-      sb.UserAttributes(password: nuevaPassword),
-    );
+    return _ejecutar(() => sb.Supabase.instance.client.auth.updateUser(
+          sb.UserAttributes(password: nuevaPassword),
+        ));
   }
 
   // -----------------------------------------------------------
@@ -325,9 +357,9 @@ class AuthService {
         throw ErrorServidorException();
       });
     }
-    await sb.Supabase.instance.client.auth.updateUser(
-      sb.UserAttributes(email: nuevoEmail),
-    );
+    return _ejecutar(() => sb.Supabase.instance.client.auth.updateUser(
+          sb.UserAttributes(email: nuevoEmail),
+        ));
   }
 
   // -----------------------------------------------------------
@@ -360,6 +392,25 @@ class AuthService {
         type: tipo,
       );
       return {'user': r.user?.toJson(), 'token': ''};
+    });
+  }
+
+  /// Envía el mensaje de bienvenida de Flumi al usuario actual.
+  /// Llamar DESPUÉS de verificar (ya hay sesión). Idempotente en servidor.
+  Future<void> enviarBienvenida() async {
+    if (kUsarServidorLocal) return;
+    await sb.Supabase.instance.client.rpc('enviar_bienvenida_nuevo_usuario');
+  }
+
+  /// Reenvía el código de verificación de REGISTRO (signup).
+  /// Usa `resend` con tipo signup: no crea sesión, solo reenvía el email.
+  Future<void> reenviarCodigoRegistro({required String email}) async {
+    _requerirConexion();
+    return _ejecutar(() async {
+      await sb.Supabase.instance.client.auth.resend(
+        type: sb.OtpType.signup,
+        email: email,
+      );
     });
   }
 
@@ -405,6 +456,20 @@ class AuthService {
       throw ErrorServidorException();
     } on sb.AuthException catch (e) {
       final msg = e.message.toLowerCase();
+      if (msg.contains('rate limit') ||
+          msg.contains('too many requests') ||
+          msg.contains('over_email_send_rate_limit') ||
+          msg.contains('429')) {
+        throw DemasiadosIntentosException();
+      }
+      if (msg.contains('email not confirmed') ||
+          msg.contains('email_not_confirmed')) {
+        throw EmailNoConfirmadoException();
+      }
+      if (msg.contains('same_password') ||
+          (msg.contains('different from') && msg.contains('password'))) {
+        throw MismaContrasenaException();
+      }
       if (msg.contains('invalid format') || msg.contains('validation_failed')) {
         throw EmailInvalidoException();
       }

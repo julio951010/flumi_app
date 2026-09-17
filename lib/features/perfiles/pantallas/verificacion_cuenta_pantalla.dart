@@ -1,10 +1,13 @@
-import 'dart:io';
 import 'dart:math';
 
+import 'package:camera/camera.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
@@ -12,6 +15,8 @@ import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/perfil_foto_servicio.dart';
 import '../../../core/servicios/reconocimiento_gesto_servicio.dart';
 import '../../../core/servicios/verificacion_servicio.dart';
+import '../../../core/utilidades/verificacion_cuenta_io_native.dart'
+    if (dart.library.html) '../../../core/utilidades/verificacion_cuenta_io_web.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
 import '../perfil_repositorio.dart';
 
@@ -30,7 +35,8 @@ class VerificacionCuentaPantalla extends StatefulWidget {
       _VerificacionCuentaPantallaState();
 }
 
-class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla> {
+class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
+    with WidgetsBindingObserver {
   final _picker = ImagePicker();
   final _random = Random();
   final List<String> _gestos = [
@@ -40,7 +46,48 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     'assets/images/gestos/gesto4.png',
   ];
 
+  /// Gesto esperado (determinista) para cada imagen de referencia, según lo
+  /// que muestra cada ilustración. Evita depender de que el modelo clasifique
+  /// la ilustración, que suele fallar, y obliga a que la selfie contenga
+  /// exactamente este gesto. Los nombres coinciden con `GestureType` de
+  /// `hand_detection`.
+  static const Map<String, String> _gestoEsperado = {
+    'assets/images/gestos/gesto1.png': 'thumbUp',
+    'assets/images/gestos/gesto2.png': 'victory',
+    'assets/images/gestos/gesto3.png': 'openPalm',
+    'assets/images/gestos/gesto4.png': 'pointingUp',
+  };
+
   static const int _maxIntentos = 3;
+  static const Duration _ventanaIntentos = Duration(hours: 24);
+
+  String get _claveIntentos =>
+      'verificacion_intentos_${widget.perfil.uuid}';
+
+  /// Intentos de las últimas 24 h (persisten: salir y entrar no resetea).
+  Future<void> _cargarIntentos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ahora = DateTime.now().millisecondsSinceEpoch;
+      final lista = prefs.getStringList(_claveIntentos) ?? const <String>[];
+      final recientes = lista
+          .map(int.tryParse)
+          .whereType<int>()
+          .where((t) => ahora - t < _ventanaIntentos.inMilliseconds)
+          .toList();
+      if (!mounted) return;
+      setState(() => _intentos = recientes.length.clamp(0, _maxIntentos));
+    } catch (_) {}
+  }
+
+  Future<void> _registrarIntento() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_claveIntentos) ?? <String>[];
+      lista.add(DateTime.now().millisecondsSinceEpoch.toString());
+      await prefs.setStringList(_claveIntentos, lista);
+    } catch (_) {}
+  }
 
   late final String _gestoRuta;
   String? _rutaFoto;
@@ -49,13 +96,122 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
   late bool _verificado;
   int _intentos = 0;
 
+  CameraController? _controller;
+  bool _camaraIniciando = false;
+  bool _capturando = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _cargarIntentos();
     _gestoRuta = _gestos[_random.nextInt(_gestos.length)];
     _verificado = widget.perfil.verificadoStatus;
     _pendiente = widget.perfil.fotoVerificacion.isNotEmpty &&
         !widget.perfil.verificadoStatus;
+    if (!_verificado && !_pendiente) {
+      _inicializarCamara();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (state == AppLifecycleState.paused) {
+      controller.dispose();
+      if (mounted) setState(() => _controller = null);
+    } else if (state == AppLifecycleState.resumed) {
+      if (_rutaFoto == null) _inicializarCamara();
+    }
+  }
+
+  Future<void> _inicializarCamara() async {
+    if (kIsWeb || _controller != null) return;
+    if (!mounted) return;
+    setState(() {
+      _camaraIniciando = true;
+    });
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) setState(() => _camaraIniciando = false);
+        return;
+      }
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) setState(() => _camaraIniciando = false);
+        return;
+      }
+      // Siempre usamos la cámara frontal; si no hay frontal disponible,
+      // fallamos explícitamente en lugar de caer a la cámara trasera.
+      final frontal = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => throw Exception('sin-camara-frontal'),
+      );
+      final controller =
+          CameraController(frontal, ResolutionPreset.high, enableAudio: false);
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _controller = controller;
+        _camaraIniciando = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _camaraIniciando = false);
+    }
+  }
+
+  Future<void> _capturar() async {
+    if (_capturando) return;
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    setState(() => _capturando = true);
+    try {
+      final foto = await controller.takePicture();
+      // Espejamos la selfie horizontalmente (como un espejo) para que el
+      // gesto coincida con lo que el usuario ve en el preview y con la
+      // referencia. También horneamos la orientación EXIF si la hubiera.
+      final reflejo = await espejarSelfie(foto.path);
+      String rutaFinal = reflejo.$1;
+      var espejada = reflejo.$2;
+      await controller.dispose();
+      if (!mounted) return;
+      if (!espejada) {
+        NotificacionServicio.alerta(
+          context,
+          'No se pudo espejar la selfie; se guardó sin espejar.',
+        );
+      }
+      setState(() {
+        _controller = null;
+        _rutaFoto = rutaFinal;
+        _capturando = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _capturando = false);
+      NotificacionServicio.alerta(
+        context,
+        'No se pudo capturar la foto. Intenta de nuevo.',
+      );
+    }
+  }
+
+  void _rehacerFoto() {
+    if (!mounted) return;
+    setState(() => _rutaFoto = null);
+    _inicializarCamara();
   }
 
   Future<void> _tomarFoto() async {
@@ -87,8 +243,9 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       //    imagen mostrada.
       if (!kIsWeb) {
         final gesto = await ReconocimientoGestoServicio.verificarGesto(
-          selfie: File(ruta),
+          selfieRuta: ruta,
           referenciaRuta: _gestoRuta,
+          esperadoGesto: _gestoEsperado[_gestoRuta],
         );
         if (!mounted) return;
         if (!gesto.exito) {
@@ -145,6 +302,7 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       ));
       if (!mounted) return;
       _intentos++;
+      _registrarIntento();
       setState(() {
         _verificado = coincide;
         _pendiente = false;
@@ -177,20 +335,18 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
           _enviando = false;
           _rutaFoto = null;
         });
+        // Tras un intento (fallido o pendiente), si seguimos en captura,
+        // volvemos a abrir la cámara frontal para una nueva selfie.
+        if (!_verificado && !_pendiente) {
+          _inicializarCamara();
+        }
       }
     }
   }
 
-  /// Elimina el archivo local de la selfie. En web no aplica (el picker entrega
-  /// un blob efímero), por lo que se omite.
+  /// Elimina el archivo local de la selfie (nativo). En web no aplica.
   Future<void> _borrarFotoLocal(String ruta) async {
-    if (kIsWeb) return;
-    try {
-      final archivo = File(ruta);
-      if (await archivo.exists()) await archivo.delete();
-    } catch (_) {
-      // Si no se puede borrar (p. ej. ya removido), se ignora.
-    }
+    await borrarArchivo(ruta);
   }
 
   @override
@@ -217,6 +373,89 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     );
   }
 
+  Widget _contenidoTuFoto() {
+    if (_rutaFoto != null) {
+      return imagenOrigen(_rutaFoto!, fit: BoxFit.cover);
+    }
+    final controller = _controller;
+    if (controller != null && controller.value.isInitialized) {
+      final primario = FlumiTema.colorPrimario;
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          // El plugin de cámara ya muestra el preview de la frontal espejado
+          // (como la cámara nativa). La foto se espeja al guardar (flipHorizontal)
+          // para que preview y captura coincidan y queden como un selfie normal.
+          CameraPreview(controller),
+          // Tocar cualquier parte del preview captura la foto.
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: _capturando ? null : _capturar,
+              child: const ColoredBox(color: Colors.transparent),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 14,
+            child: Center(
+              child: GestureDetector(
+                onTap: _capturando ? null : _capturar,
+                child: Container(
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: primario,
+                    border: Border.all(color: Colors.white, width: 4),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.camera_alt,
+                      color: Colors.white, size: 30),
+                ),
+              ),
+            ),
+          ),
+          if (_capturando)
+            const Positioned.fill(
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      );
+    }
+    if (_camaraIniciando) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    // Sin cámara disponible (permiso denegado, sin cámara o web sin soporte).
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.camera_alt_outlined, size: 34, color: Colors.grey[400]),
+        const SizedBox(height: 8),
+        Text(
+          'No se pudo abrir la cámara frontal',
+          style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+          textAlign: TextAlign.center,
+        ),
+        if (!kIsWeb)
+          TextButton(
+            onPressed: _inicializarCamara,
+            child: const Text('Reintentar'),
+          ),
+        TextButton(
+          onPressed: _tomarFoto,
+          child: const Text('Usar cámara del sistema'),
+        ),
+      ],
+    );
+  }
+
   List<Widget> _seccionCaptura(Color primario) {
     final intentosRestantes = _maxIntentos - _intentos;
     final bloqueado = _intentos >= _maxIntentos;
@@ -224,12 +463,13 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: const Color(0xFF6C63FF).withValues(alpha: 0.08),
+          color: FlumiTema.colorPrimario.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Column(
+        child: Column(
           children: [
-            Icon(Icons.verified, size: 48, color: Color(0xFF6C63FF)),
+            Icon(Icons.verified,
+                size: 48, color: FlumiTema.colorPrimario),
             SizedBox(height: 12),
             Text(
               'Verifica tu cuenta con un gesto',
@@ -238,8 +478,9 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
             ),
             SizedBox(height: 8),
             Text(
-              'Imita el gesto que te mostramos y toma una foto de frente. '
-              'Flumi revisará que coincida con tu perfil.',
+              'Imita el gesto que te mostramos y asegúrate de que tu mano se '
+              'vea clara dentro del encuadre al tomar la foto de frente. '
+              'Flumi revisará que el gesto coincida.',
               style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
               textAlign: TextAlign.center,
             ),
@@ -255,36 +496,18 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
             Image.asset(_gestoRuta, fit: BoxFit.cover),
           ),
           const SizedBox(width: 12),
-          if (_rutaFoto != null)
-            _tarjetaLateral(
-              'Tu foto',
-              imagenOrigen(_rutaFoto!, fit: BoxFit.cover),
-            )
-          else
-            _tarjetaLateral(
-              'Tu foto',
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add_a_photo_outlined,
-                      size: 36, color: Colors.grey[400]),
-                  const SizedBox(height: 8),
-                  Text(
-                    kIsWeb ? 'Sube una foto' : 'Tómate una foto',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                  ),
-                ],
-              ),
-              onTap: _tomarFoto,
-            ),
+          _tarjetaLateral(
+            'Tu foto',
+            _contenidoTuFoto(),
+            onTap: kIsWeb && _rutaFoto == null ? _tomarFoto : null,
+          ),
         ],
       ),
       if (_rutaFoto != null)
         Padding(
           padding: const EdgeInsets.only(top: 12),
           child: TextButton.icon(
-            onPressed: _tomarFoto,
+            onPressed: _rehacerFoto,
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('Tomar otra foto'),
           ),
@@ -328,12 +551,12 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
           ),
         ),
       if (bloqueado)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
           child: Text(
-            'Has alcanzado el máximo de $_maxIntentos intentos. '
-            'Flumi revisará tu última foto.',
-            style: const TextStyle(fontSize: 13, color: Colors.black54),
+            'Has alcanzado el máximo de 3 intentos en 24 horas. '
+            'Vuelve mañana con buena luz de frente y el gesto bien visible.',
+            style: TextStyle(fontSize: 13, color: Colors.black54),
             textAlign: TextAlign.center,
           ),
         ),
@@ -422,7 +645,10 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         SizedBox(
           height: 52,
           child: OutlinedButton.icon(
-            onPressed: () => setState(() => _pendiente = false),
+            onPressed: () {
+              setState(() => _pendiente = false);
+              _inicializarCamara();
+            },
             style: OutlinedButton.styleFrom(
               foregroundColor: primario,
               side: BorderSide(color: primario),

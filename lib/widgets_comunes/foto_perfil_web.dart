@@ -1,15 +1,18 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'foto_desde_red.dart';
-import 'shimmer_caja.dart';
 
 Widget imagenFoto(String ruta,
     {BoxFit fit = BoxFit.cover, int? cacheWidth}) {
   if (ruta.startsWith('http')) {
     return FotoDesdeRed(ruta: ruta, fit: fit, cacheWidth: cacheWidth);
+  }
+  // Archivos recién elegidos con el picker en web (blob:/data:).
+  if (ruta.startsWith('blob:') || ruta.startsWith('data:')) {
+    return Image.network(ruta,
+        fit: fit,
+        errorBuilder: (context, error, stack) => const SizedBox.shrink());
   }
   return Image.asset(ruta,
       fit: fit,

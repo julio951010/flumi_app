@@ -1,11 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/constantes/constantes.dart';
 import '../../../core/estilos/tema.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
-import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart';
 import '../chat_repositorio.dart';
+import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart';
+
+/// IDs de los perfiles de sistema (Administrador / Flumi). Las conversaciones
+/// con ellos son de solo lectura para el usuario: solo recibe mensajes.
+final Set<String> _idsConversacionOficial = cuentasOficialesFlumi.keys.toSet();
 
 class ChatPantalla extends StatefulWidget {
   final ChatRepositorio repositorio;
@@ -15,6 +22,7 @@ class ChatPantalla extends StatefulWidget {
   final bool online;
   final bool esMeGusta;
   final bool esMatch;
+  final SuscripcionServicio suscripcionServicio;
 
   const ChatPantalla({
     super.key,
@@ -25,6 +33,7 @@ class ChatPantalla extends StatefulWidget {
     this.online = false,
     this.esMeGusta = false,
     this.esMatch = false,
+    required this.suscripcionServicio,
   });
 
   @override
@@ -129,6 +138,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
           online: widget.online,
           esMeGusta: widget.esMeGusta,
           esMatch: widget.esMatch,
+          suscripcionServicio: widget.suscripcionServicio,
         ),
       ),
     );
@@ -160,18 +170,20 @@ class _ChatPantallaState extends State<ChatPantalla> {
                   style: TextStyle(fontSize: 15, color: Colors.black87)),
               onTap: () => Navigator.pop(ctx, 'borrar'),
             ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.black87),
-              title: const Text('Reportar este perfil',
-                  style: TextStyle(fontSize: 15)),
-              onTap: () => Navigator.pop(ctx, 'reportar'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.block, color: Colors.redAccent),
-              title: const Text('Bloquear Usuario',
-                  style: TextStyle(fontSize: 15, color: Colors.redAccent)),
-              onTap: () => Navigator.pop(ctx, 'bloquear'),
-            ),
+            if (!esCuentaOficial(widget.otroUsuarioId)) ...[
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.black87),
+                title: const Text('Reportar este perfil',
+                    style: TextStyle(fontSize: 15)),
+                onTap: () => Navigator.pop(ctx, 'reportar'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.redAccent),
+                title: const Text('Bloquear Usuario',
+                    style: TextStyle(fontSize: 15, color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'bloquear'),
+              ),
+            ],
             const SizedBox(height: 8),
           ],
         ),
@@ -320,6 +332,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
     _leidoSub?.cancel();
     _usuarioSub?.cancel();
     _escribiendoSub?.cancel();
+    widget.repositorio.cerrarEscribiendo(widget.otroUsuarioId, widget.miId);
     _mensajeCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -350,15 +363,25 @@ class _ChatPantallaState extends State<ChatPantalla> {
   }
 
   Future<void> _enviar() async {
-    final texto = _mensajeCtrl.text.trim();
-    if (texto.isEmpty) return;
-    _mensajeCtrl.clear();
-    _apagarEscribiendo();
-    await widget.repositorio.enviarMensaje(
-      emisorId: widget.miId,
-      receptorId: widget.otroUsuarioId,
-      contenido: texto,
-    );
+    if (!widget.suscripcionServicio.esGratis) {
+      final texto = _mensajeCtrl.text.trim();
+      if (texto.isEmpty) return;
+      _mensajeCtrl.clear();
+      _apagarEscribiendo();
+      await widget.repositorio.enviarMensaje(
+        emisorId: widget.miId,
+        receptorId: widget.otroUsuarioId,
+        contenido: texto,
+      );
+    } else {
+      // Usuario en plan gratis: mostrar mensaje de upgrade
+      if (mounted) {
+        NotificacionServicio.advertencia(
+          context,
+          'Esta función requiere Flumi Plus o Premium. Actualiza tu plan para enviar mensajes.',
+        );
+      }
+    }
   }
 
   void _alCambiarTexto(String texto) {
@@ -599,9 +622,10 @@ class _ChatPantallaState extends State<ChatPantalla> {
             onTap: _abrirPerfil,
             child: AvatarUsuario(
               nombre: nombre,
-              fotoUrl: (_usuario != null && _usuario!.fotosUrls.isNotEmpty)
-                  ? _usuario!.fotosUrls.first
-                  : null,
+              fotoUrl: fotosOficialesFlumi[widget.otroUsuarioId] ??
+                  ((_usuario != null && _usuario!.fotosUrls.isNotEmpty)
+                      ? _usuario!.fotosUrls.first
+                      : null),
               size: 42,
               online: _online,
               radioPunto: 7,
@@ -851,6 +875,25 @@ class _ChatPantallaState extends State<ChatPantalla> {
   }
 
   Widget _campoEntrada() {
+    if (_idsConversacionOficial.contains(widget.otroUsuarioId)) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            'Conversación oficial. Solo puedes recibir mensajes del equipo de Flumi.',
+            style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    final bool esGratis = widget.suscripcionServicio.esGratis;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       child: Row(
@@ -894,8 +937,11 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 textInputAction: TextInputAction.send,
                 onChanged: _alCambiarTexto,
                 onSubmitted: (_) => _enviar(),
+                enabled: !esGratis,
                 decoration: InputDecoration(
-                  hintText: 'Escribe un mensaje...',
+                  hintText: esGratis
+                      ? 'Actualiza a Plus/Premium para enviar mensajes'
+                      : 'Escribe un mensaje...',
                   hintStyle: TextStyle(color: Colors.grey[400], fontSize: 15),
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 18, vertical: 12),
@@ -906,15 +952,19 @@ class _ChatPantallaState extends State<ChatPantalla> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: _enviar,
+            onTap: esGratis ? null : _enviar,
             child: Container(
               width: 44,
               height: 44,
-              decoration: const BoxDecoration(
-                color: FlumiTema.colorPrimario,
+              decoration: BoxDecoration(
+                color: esGratis ? Colors.grey[300] : FlumiTema.colorPrimario,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.send, color: Colors.white, size: 20),
+              child: Icon(
+                Icons.send,
+                color: esGratis ? Colors.grey[500] : Colors.white,
+                size: 20,
+              ),
             ),
           ),
         ],

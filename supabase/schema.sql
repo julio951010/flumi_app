@@ -57,6 +57,7 @@ alter table public.profiles add column if not exists ultima_conexion       times
 alter table public.profiles add column if not exists creado_en             timestamptz default now();
 alter table public.profiles add column if not exists ocultar_perfil        boolean default false;
 alter table public.profiles add column if not exists ocultar_visitas       boolean default false;
+alter table public.profiles add column if not exists is_admin              boolean default false;
 
 -- Restricción de edad mínima (solo se añade si no existe)
 do $$
@@ -295,6 +296,28 @@ drop policy if exists "participantes_borran_mensajes" on public.messages;
 create policy "participantes_borran_mensajes"
   on public.messages for delete
   using (auth.uid() = emisor_id or auth.uid() = receptor_id);
+
+-- Conversaciones oficiales (Administrador / Flumi): los usuarios solo reciben
+-- mensajes, no pueden escribir ni responder. El admin las envía como el bot
+-- (emisor = bot), lo cual sigue permitido.
+create or replace function public.bloquear_respuesta_bots()
+returns trigger
+language plpgsql
+as $$
+begin
+  if (new.receptor_id = '00000000-0000-0000-0000-00000000000a'
+   or new.receptor_id = '00000000-0000-0000-0000-00000000000f')
+     and new.emisor_id <> new.receptor_id then
+    raise exception 'No puedes enviar mensajes a esta conversacion oficial';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists bloquear_respuesta_bots_trg on public.messages;
+create trigger bloquear_respuesta_bots_trg
+  before insert on public.messages
+  for each row execute function public.bloquear_respuesta_bots();
 
 -- MATCHES
 drop policy if exists "matches_visibles_solo_para_participantes" on public.matches;
@@ -790,15 +813,16 @@ begin
     ordenar := 'order by ST_Distance(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography) asc, p.id asc';
   end if;
 
-  return query execute format(
-    'select p.* from public.profiles p
-     where p.ubicacion is not null
-       and p.id <> $1
-       and p.ocultar_perfil = false
-       %s
-       and not exists (select 1 from public.blocks b
-                       where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
-                          or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
+   return query execute format(
+     'select p.* from public.profiles p
+      where p.ubicacion is not null
+        and p.id <> $1
+        and p.ocultar_perfil = false
+        and p.id not in (''00000000-0000-0000-0000-00000000000a'', ''00000000-0000-0000-0000-00000000000f'')
+        %s
+        and not exists (select 1 from public.blocks b
+                        where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
+                           or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
        and not exists (
              select 1 from public.rechazos r
              where r.usuario_id = $1 and r.rechazado_id = p.id
@@ -887,6 +911,29 @@ create policy "usuario_gestiona_sus_tokens"
   using (auth.uid() = usuario_id)
   with check (auth.uid() = usuario_id);
 
+-- Preferencias de notificaciones (las sube la app; sin fila = todo ON).
+-- Los triggers de push las respetan vía enviar_push_pg(p_categoria).
+create table if not exists public.notif_prefs (
+  usuario_id uuid primary key references public.profiles(id) on delete cascade,
+  mensajes   boolean not null default true,
+  matches    boolean not null default true,
+  les_gusto  boolean not null default true,
+  visitas    boolean not null default true,
+  cerca_de_ti boolean not null default true,
+  regalos    boolean not null default true,
+  consejos   boolean not null default true,
+  sondeos    boolean not null default true,
+  actualizado_en timestamptz not null default now()
+);
+
+alter table public.notif_prefs enable row level security;
+
+drop policy if exists "usuario_gestiona_sus_prefs" on public.notif_prefs;
+create policy "usuario_gestiona_sus_prefs"
+  on public.notif_prefs for all
+  using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
+
 -- El cliente registra su token FCM (upsert por token).
 create or replace function public.registrar_device_token(p_token text, p_plataforma text default 'android')
 returns void
@@ -931,17 +978,19 @@ create policy "app_config_solo_service"
   on public.app_config for select
   using (auth.role() = 'service_role');
 
-insert into public.app_config (clave, valor)
+insert into public.app_config (clave, valor, tipo)
 values
-  ('push_url', 'REEMPLAZA_CON_URL_DE_LA_EDGE_FUNCTION'),
-  ('push_secret', 'REEMPLAZA_CON_SECRETO_ALEATORIO')
+  ('push_url', 'https://gzozmebdrsdcupgvxuiv.supabase.co/functions/v1/enviar-push', 'push'),
+  ('push_secret', 'HdSAjqJCMFko7DvLUblIigVBmx1eGNX8', 'push')
 on conflict (clave) do nothing;
 
 -- Envía un push sin bloquear la transacción que lo dispara.
+-- Respeta public.notif_prefs del destinatario (sin fila = todo ON).
 create or replace function public.enviar_push_pg(
   p_usuario_id uuid,
   p_titulo text,
-  p_cuerpo text
+  p_cuerpo text,
+  p_categoria text default 'mensajes'
 )
 returns void
 language plpgsql
@@ -952,7 +1001,25 @@ declare
   v_secret text;
   v_body jsonb;
   v_headers jsonb;
+  v_permitido boolean := true;
 begin
+  select case lower(coalesce(p_categoria, 'mensajes'))
+      when 'mensajes' then coalesce(mensajes, true)
+      when 'matches' then coalesce(matches, true)
+      when 'lesgusto' then coalesce(les_gusto, true)
+      when 'visitas' then coalesce(visitas, true)
+      when 'cercadeti' then coalesce(cerca_de_ti, true)
+      when 'regalos' then coalesce(regalos, true)
+      when 'consejos' then coalesce(consejos, true)
+      when 'sondeos' then coalesce(sondeos, true)
+      else true
+    end
+    into v_permitido
+    from public.notif_prefs
+    where usuario_id = p_usuario_id;
+  if v_permitido is false then
+    return;
+  end if;
   select valor into v_url from public.app_config where clave = 'push_url';
   if v_url is null or v_url like 'REEMPLAZA_%' or p_usuario_id is null then
     return;
@@ -968,10 +1035,11 @@ begin
     'cuerpo', p_cuerpo
   );
   begin
-    if to_regnamespace('net') is not null then
-      perform net.http_post(v_url, v_headers, v_body);
-    elsif to_regnamespace('supabase_functions') is not null then
+    -- Prioridad: supabase_functions (interno, no necesita egress) > net (requiere egress)
+    if to_regnamespace('supabase_functions') is not null then
       perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
+    elsif to_regnamespace('net') is not null then
+      perform net.http_post(v_url, v_headers, v_body);
     end if;
   exception when others then
     -- Un fallo de push nunca debe romper el insert original.
@@ -996,7 +1064,8 @@ begin
   perform public.enviar_push_pg(
     new.receptor_id,
     'Nuevo mensaje de ' || coalesce(v_nombre, 'Alguien'),
-    left(coalesce(new.contenido, ''), 100)
+    left(coalesce(new.contenido, ''), 100),
+    'mensajes'
   );
   return new;
 end;
@@ -1020,7 +1089,8 @@ begin
   perform public.enviar_push_pg(
     new.usuario_likeado_id,
     'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' te dio Me Gusta'
+    coalesce(v_nombre, 'Alguien') || ' te dio Me Gusta',
+    'lesGusto'
   );
   return new;
 end;
@@ -1044,7 +1114,8 @@ begin
   perform public.enviar_push_pg(
     new.visitado_id,
     'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' visitó tu perfil'
+    coalesce(v_nombre, 'Alguien') || ' visitó tu perfil',
+    'visitas'
   );
   return new;
 end;
@@ -1068,13 +1139,15 @@ begin
   perform public.enviar_push_pg(
     new.usuario_b_id,
     'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' hizo match contigo'
+    coalesce(v_nombre, 'Alguien') || ' hizo match contigo',
+    'matches'
   );
   select nombre into v_nombre from public.profiles where id = new.usuario_b_id;
   perform public.enviar_push_pg(
     new.usuario_a_id,
     'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' hizo match contigo'
+    coalesce(v_nombre, 'Alguien') || ' hizo match contigo',
+    'matches'
   );
   return new;
 end;

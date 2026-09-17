@@ -2,12 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/base_datos_local/database.dart';
-import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/flumi_loader.dart';
-import '../../../widgets_comunes/tarjeta_usuario.dart';
-import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart' show PerfilDetallePage;
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
 
 class HistorialLikesPantalla extends StatefulWidget {
