@@ -900,25 +900,31 @@ class _ChatPantallaState extends State<ChatPantalla> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           GestureDetector(
-            onTap: () => setState(() {
-              _panelEmojisAbierto = !_panelEmojisAbierto;
-            }),
+            onTap: esGratis
+                ? null
+                : () => setState(() {
+                      _panelEmojisAbierto = !_panelEmojisAbierto;
+                    }),
             child: Container(
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: _panelEmojisAbierto
-                    ? FlumiTema.colorPrimario.withValues(alpha: 0.12)
-                    : Colors.grey[100],
+                color: esGratis
+                    ? Colors.grey[100]
+                    : (_panelEmojisAbierto
+                        ? FlumiTema.colorPrimario.withValues(alpha: 0.12)
+                        : Colors.grey[100]),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 _panelEmojisAbierto
                     ? Icons.keyboard_alt_outlined
                     : Icons.emoji_emotions_outlined,
-                color: _panelEmojisAbierto
-                    ? FlumiTema.colorPrimario
-                    : Colors.black54,
+                color: esGratis
+                    ? Colors.grey[400]
+                    : (_panelEmojisAbierto
+                        ? FlumiTema.colorPrimario
+                        : Colors.black54),
                 size: 20,
               ),
             ),

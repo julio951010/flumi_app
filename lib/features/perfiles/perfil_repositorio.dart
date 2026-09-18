@@ -140,6 +140,19 @@ class PerfilRepositorio {
     if (existe != null) {
       companion = companion.copyWith(creadoEn: Value(existe.creadoEn));
     }
+    // fotosLocalesRutas (rutas de archivo en el dispositivo) es un campo
+    // puramente local: no existe en Supabase, así que perfilRemotoACompanion
+    // nunca lo incluye. Sin este parche, cada llamada a guardarOCambiarPerfil
+    // reconstruye el companion desde la respuesta remota y pierde en
+    // silencio cualquier actualización de fotosLocalesRutas que trajera el
+    // companion original — causando que, al agregar una foto nueva, el
+    // índice calculado para la siguiente terminara pisando una foto ya
+    // existente en vez de sumarse como una nueva.
+    companion = companion.copyWith(
+      fotosLocalesRutas: perfil.fotosLocalesRutas.present
+          ? perfil.fotosLocalesRutas
+          : Value(existe?.fotosLocalesRutas ?? const []),
+    );
     await _db.into(_db.usuarios).insertOnConflictUpdate(companion);
 
     final actualizado = await (_db.select(_db.usuarios)

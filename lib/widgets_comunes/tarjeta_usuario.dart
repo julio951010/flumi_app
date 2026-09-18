@@ -92,7 +92,7 @@ class TarjetaUsuario extends StatelessWidget {
                               imagenBorrosa
                                   ? ImagenDifuminada(
                                       ruta: fotosParaMostrar(usuario).first,
-                                      sigma: 12,
+                                      sigma: 20,
                                       fit: BoxFit.cover,
                                     )
                                   : imagenFoto(fotosParaMostrar(usuario).first,

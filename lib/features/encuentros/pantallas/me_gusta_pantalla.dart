@@ -478,6 +478,10 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       _mostrarBloqueoMeGusta();
       return false;
     }
+    // El feed en vivo no persiste perfiles ajenos: los cacheamos aquí para
+    // que, si esto termina en match, la conversación ya tenga nombre/foto
+    // desde el primer instante (sin esperar un refetch en chat_repositorio).
+    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     _suscripcion.registrarMeGusta();
     if (mounted) {
       setState(() => _idsGustados.add(usuario.uuid));

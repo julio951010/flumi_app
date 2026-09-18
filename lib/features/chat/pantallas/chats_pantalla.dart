@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
-import '../../../core/constantes/constantes.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
-import '../../suscripcion/suscripcion_sheet.dart';
-import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
 import '../chat_repositorio.dart';
 import 'chat_pantalla.dart';
 
@@ -70,12 +67,6 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   }
 
   void _abrirChat(ResumenConversacion conv) {
-    if (!esCuentaOficial(conv.otroUsuarioId) &&
-        !widget.suscripcionServicio.tienePremium &&
-        !conv.esMatch) {
-      _mostrarBloqueoChatSinMatch();
-      return;
-    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -88,29 +79,6 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
           esMeGusta: conv.esMeGusta,
           esMatch: conv.esMatch,
           suscripcionServicio: widget.suscripcionServicio,
-        ),
-      ),
-    );
-  }
-
-  void _mostrarBloqueoChatSinMatch() {
-    mostrarBloqueoSuscripcion(
-      context,
-      funcionalidad: 'Enviar mensaje',
-      planMinimo: PlanTipo.premium,
-      descripcion:
-          'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
-      onSuscribir: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const DetallePlanPantalla(
-            nombre: 'Flumi Premium',
-            periodo: 'mensual',
-            precio: '500 cup',
-            icono: Icons.workspace_premium,
-            detalle: 'Acceso total',
-            destacado: false,
-          ),
         ),
       ),
     );

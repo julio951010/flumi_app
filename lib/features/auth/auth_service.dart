@@ -363,9 +363,9 @@ class AuthService {
   }
 
   // -----------------------------------------------------------
-  // Eliminar cuenta
+  // Eliminar cuenta COMPLETA (borra auth, datos, storage, todo)
   // -----------------------------------------------------------
-  Future<void> eliminarCuenta() async {
+  Future<void> eliminarCuentaCompleta() async {
     if (kUsarServidorLocal) {
       _localUser = null;
       await LocalTokenStore.limpiar();
@@ -373,7 +373,20 @@ class AuthService {
       _localStreamCtrl!.add(const AuthState('SIGNED_OUT'));
       return;
     }
-    await sb.Supabase.instance.client.auth.signOut();
+
+    // Llama a la Edge Function que borra TODO (auth, datos, storage)
+    try {
+      await sb.Supabase.instance.client.functions.invoke('eliminar-cuenta');
+    } catch (e) {
+      // Fallback: si falla la Edge Function, al menos cerramos sesión
+      await sb.Supabase.instance.client.auth.signOut();
+      rethrow;
+    }
+  }
+
+  // Mantener compatibilidad: alias para código existente
+  Future<void> eliminarCuenta() async {
+    await eliminarCuentaCompleta();
   }
 
   // -----------------------------------------------------------

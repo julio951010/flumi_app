@@ -176,7 +176,7 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
-      final gustados = await _historialLikesServicio.obtenerHistorial();
+final gustados = await _historialLikesServicio.obtenerHistorial();
       final abiertas = await (widget.db.select(widget.db.notificacionesAbiertas))
           .get()
           .then((fs) => fs.map((f) => f.notificacionId).toSet());
@@ -198,6 +198,9 @@ class _BandejaNotificacionesPantallaState
           final prefs = PreferenciasNotificacionesServicio.instancia;
           items.removeWhere((n) => !_categoriaPermitida(prefs, n.tipo));
           _items = items;
+          // Cargar notificaciones ya leídas desde la BD
+          _leidas.clear();
+          _leidas.addAll(abiertas);
           if (!_marcadoVisto) {
             _marcadoVisto = true;
             for (final n in items) {
@@ -205,11 +208,13 @@ class _BandejaNotificacionesPantallaState
             }
           }
         });
-        if (_marcadoVisto) {
-          widget.onAbierto?.call();
-        }
       }
     } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+          }
+        } finally {
       if (mounted) setState(() => _cargando = false);
     }
   }
@@ -282,15 +287,28 @@ class _BandejaNotificacionesPantallaState
 
   int get _noLeidas => _items.where((n) => !_leidas.contains(n.id)).length;
 
-  void _marcarTodosLeidos() {
-    setState(() {
-      for (final n in _items) {
-        _leidas.add(n.id);
-      }
-    });
+  /// Verifica si una notificación está marcada como leída (local o BD).
+  Future<bool> _estaLeida(String notificacionId) async {
+    if (_leidas.contains(notificacionId)) return true;
+    final existe = await widget.db.select(widget.db.notificacionesAbiertas)
+        .where((n) => n.notificacionId.equals(notificacionId))
+        .getSingleOrNull();
+    return existe != null;
   }
 
-  void _abrir(_NotificacionInbox n) {
+  /// Cuenta notificaciones no leídas considerando BD y estado local.
+  Future<int> get noLeidasAsync async {
+    int count = 0;
+    for (final n in _items) {
+      if (!_leidas.contains(n.id)) {
+        // Verificar en BD si no está en memoria local
+        final existe = await widget.db.select(widget.db.notificacionesAbiertas)
+            .where((n) => n.notificacionId.equals(n.id))
+            .getSingleOrNull();
+        if (existe == null) count++;
+      }
+    return count;
+  }
     setState(() {
       _leidas.add(n.id);
       _items.removeWhere((item) => item.id == n.id && item.timestamp == n.timestamp);

@@ -788,7 +788,6 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
   Widget _buildVerificacion(Usuario u) {
     final items = <_ItemVerificacion>[
       _ItemVerificacion('Foto verificada', u.verificadoStatus),
-      _ItemVerificacion('Tel\u00e9fono verificado', u.verificadoStatus),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

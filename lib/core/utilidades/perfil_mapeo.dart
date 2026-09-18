@@ -253,6 +253,19 @@ class PerfilMapeo {
     };
   }
 
+  /// Guarda en la tabla local un perfil que llegó del feed en vivo
+  /// (Encuentros/Cerca de ti/Me gusta, vía `consultarFeedRemoto`, que no
+  /// persiste nada por sí solo). Se llama al dar like/superlike: si eso
+  /// termina en match, la conversación ya tiene nombre/foto en caché
+  /// desde el primer instante, sin depender de un refetch posterior.
+  static Future<void> cachearPerfilVisto(AppDatabase db, Usuario usuario) async {
+    final companion = usuario.toCompanion(true).copyWith(
+          esPerfilPropio: const Value(false),
+          pendienteDeSincronizar: const Value(false),
+        );
+    await db.into(db.usuarios).insertOnConflictUpdate(companion);
+  }
+
   // ------------------------------------------------------------
   // Utilidades de parseo
   // ------------------------------------------------------------

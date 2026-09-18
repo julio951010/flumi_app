@@ -969,7 +969,8 @@ $$;
 -- Rellenar tras desplegar la función (ver supabase/functions/enviar-push).
 create table if not exists public.app_config (
   clave text primary key,
-  valor text not null
+  valor text not null,
+  tipo text not null check (tipo in ('push', 'config', 'feature'))
 );
 
 alter table public.app_config enable row level security;

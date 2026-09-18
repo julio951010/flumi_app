@@ -9,6 +9,7 @@ import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
+import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
 import '../../../widgets_comunes/banner_gradiente.dart';
@@ -511,6 +512,10 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       }
       return false;
     }
+    // El feed en vivo no persiste perfiles ajenos: los cacheamos aquí para
+    // que, si esto termina en match, la conversación ya tenga nombre/foto
+    // desde el primer instante (sin esperar un refetch en chat_repositorio).
+    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     _suscripcion.registrarMeGusta();
     widget.votosServicio.quitarRechazo(usuario.uuid, comoDeshacer: false);
     if (mounted) {

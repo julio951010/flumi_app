@@ -15,6 +15,7 @@ import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
+import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
 import '../../../widgets_comunes/estado_vacio_encuentros.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
@@ -705,6 +706,10 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       }
       return;
     }
+    // El feed en vivo no persiste perfiles ajenos: los cacheamos aquí para
+    // que, si esto termina en match, la conversación ya tenga nombre/foto
+    // desde el primer instante (sin esperar un refetch en chat_repositorio).
+    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     _suscripcion.registrarMeGusta();
     widget.votosServicio.quitarRechazo(usuario.uuid, comoDeshacer: false);
     // El perfil gustado no vuelve a salir en el mazo (ni en el actual si se
@@ -799,6 +804,7 @@ Navigator.push(
       }
       return;
     }
+    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     await _suscripcion.registrarSuperlike();
     // El perfil superlikeado no vuelve a salir en el mazo.
     setState(() {

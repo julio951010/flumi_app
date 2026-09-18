@@ -99,6 +99,10 @@ class ChatRepositorio {
   final Map<String, RealtimeChannel> _canalesEscribiendo = {};
   final Map<String, StreamController<bool>> _escribiendoCtrls = {};
 
+  // Perfiles que se están trayendo de Supabase porque una conversación los
+  // necesita y no están en la tabla local (ver _refrescarPerfilesFaltantes).
+  final Set<String> _refrescandoPerfiles = {};
+
   ChatRepositorio(this._db, [this._sync]);
 
   Stream<List<ResumenConversacion>> observarConversaciones(String miId) {
@@ -298,6 +302,21 @@ class ChatRepositorio {
         continue;
       }
       porOtro.putIfAbsent(otro, () => []).add(m);
+    }
+
+    // Perfiles del "otro" que la conversación necesita pero que no están en
+    // la tabla local (típico ahora que Encuentros/Cerca de ti consultan el
+    // feed en vivo contra Supabase sin guardar esos perfiles localmente):
+    // se piden en segundo plano y, al llegar, subUsuarios dispara
+    // recalcular() solo por el cambio en la tabla local.
+    final idsEnJuego = {...porOtro.keys, ...tiemposMatch.keys};
+    for (final id in idsEnJuego) {
+      if (nombres.containsKey(id)) continue;
+      if (cuentasOficialesFlumi.containsKey(id)) continue;
+      if (!_refrescandoPerfiles.add(id)) continue;
+      unawaited(_sync?.refrescarPerfilRemoto(id).whenComplete(
+            () => _refrescandoPerfiles.remove(id),
+          ));
     }
 
     final resumenes = <ResumenConversacion>[];
