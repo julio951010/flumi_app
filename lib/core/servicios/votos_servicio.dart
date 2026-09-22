@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
@@ -37,18 +38,40 @@ class VotosServicio extends ChangeNotifier {
   final Map<String, ({int conteo, DateTime ultimo})> _rechazos = {};
   bool _inicializado = false;
 
-  /// Historial LIFO de Nopes de la sesión (uuids) para Deshacer.
-  /// Solo se apilan nopes; los likes no (deshacer un like es otra operación).
+  /// Historial LIFO de Nopes (uuids) para Deshacer. Persistido en
+  /// SharedPreferences para que sobreviva a kills en segundo plano en móvil
+  /// (antes era solo memoria y "hacía nada" tras volver del background).
   static const int _maxHistorialNope = 20;
+  static const String _prefsKeyHistorial = 'flumi_historial_nope';
   final List<String> _historialNope = [];
 
   bool get hayParaDeshacer => _historialNope.isNotEmpty;
+
+  Future<void> _persistirHistorial() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefsKeyHistorial, _historialNope);
+    } catch (_) {}
+  }
+
+  Future<void> _cargarHistorialPersistido() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList(_prefsKeyHistorial);
+      if (list != null && list.isNotEmpty) {
+        _historialNope
+          ..clear()
+          ..addAll(list.take(_maxHistorialNope));
+      }
+    } catch (_) {}
+  }
 
   /// Saca y devuelve el último Nope, o null si no hay nada que deshacer.
   String? tomarUltimoNope() {
     if (_historialNope.isEmpty) return null;
     final id = _historialNope.removeLast();
     notifyListeners();
+    unawaited(_persistirHistorial());
     return id;
   }
 
@@ -61,6 +84,7 @@ class VotosServicio extends ChangeNotifier {
         _historialNope.removeAt(0);
       }
       notifyListeners();
+      unawaited(_persistirHistorial());
     }
   }
 
@@ -72,8 +96,13 @@ class VotosServicio extends ChangeNotifier {
   /// antes desde Supabase (online-first).
   Future<void> inicializar() async {
     if (_inicializado) return;
+    await _cargarHistorialPersistido();
     final usuarioId = await _obtenerUsuarioPropioId(_db);
-    if (usuarioId == null) return;
+    if (usuarioId == null) {
+      _inicializado = true;
+      notifyListeners();
+      return;
+    }
     if (ConnectivityService.instancia.hayConexion) {
       try {
         await _sync.sincronizarRechazos(usuarioId);
@@ -94,6 +123,10 @@ class VotosServicio extends ChangeNotifier {
         );
       }
     }
+    // Limpia historial huérfano (ids que ya no tienen rechazo en BD, p.ej.
+    // tras limpiar remoto o deshacer administrativo).
+    _historialNope.removeWhere((id) => !_rechazos.containsKey(id));
+    unawaited(_persistirHistorial());
     _inicializado = true;
     notifyListeners();
   }
@@ -151,6 +184,7 @@ class VotosServicio extends ChangeNotifier {
     if (_historialNope.length > _maxHistorialNope) {
       _historialNope.removeAt(0);
     }
+    unawaited(_persistirHistorial());
     final prev = _rechazos[uuid];
     _rechazos[uuid] = (conteo: (prev?.conteo ?? 0) + 1, ultimo: DateTime.now());
     final usuarioId = await _obtenerUsuarioPropioId(_db);
@@ -183,13 +217,15 @@ class VotosServicio extends ChangeNotifier {
         !kUsarServidorLocal) {
       try {
         final resultado = await sb.Supabase.instance.client
-            .rpc('registrar_deshacer', params: {'perfil_id': uuid});
+            .rpc('registrar_deshacer', params: {'perfil_id': uuid}).timeout(
+                const Duration(seconds: 6));
         if (resultado is Map && resultado['limite'] == true) {
           return false;
         }
       } catch (e) {
+        // Timeout o fallo de red en móvil (datos inestables): no bloquea el
+        // deshacer local. Se marca fallo pero se continúa best-effort.
         EstadoServidorServicio.instancia.marcarFallo(e);
-        // Sin válida: cae al borrado local best-effort.
       }
     }
     _rechazos.remove(uuid);

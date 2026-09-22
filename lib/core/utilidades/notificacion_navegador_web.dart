@@ -53,3 +53,6 @@ Future<void> inicializarPush() async {}
 Future<void> registrarTokenPush() async {}
 
 Future<void> eliminarTokenPush() async {}
+
+void setNotificacionTapHandler(void Function(dynamic) _) {}
+void setNotifTapHandler(void Function(dynamic) _) {}

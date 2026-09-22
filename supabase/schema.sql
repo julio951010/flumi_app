@@ -1091,7 +1091,8 @@ begin
   v_body := jsonb_build_object(
     'usuario_id', p_usuario_id,
     'titulo', p_titulo,
-    'cuerpo', p_cuerpo
+    'cuerpo', p_cuerpo,
+    'categoria', coalesce(p_categoria, 'mensajes')
   );
   begin
     -- Prioridad: supabase_functions (interno, no necesita egress) > net (requiere egress)

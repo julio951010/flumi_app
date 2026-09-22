@@ -55,8 +55,13 @@ class NotificacionLocalServicio with WidgetsBindingObserver {
     );
   }
 
-  /// Lógica completa: si app en foreground -> notificación local;
-  /// si no, dispara push vía Supabase RPC.
+  /// Lógica corregida: el push del destinatario NO depende del estado del
+  /// emisor. El servidor (triggers enviar_push_pg) ya envía push a TODOS los
+  /// destinatarios en background/cerrado para mensajes, likes, visitas y
+  /// matches. Esta función solo decide qué mostrar *en el emisor* si está en
+  /// foreground (feedback local). Nunca dispara RPC enviar_push_pg desde el
+  /// cliente: evita duplicados y evita que el push dependa de que el emisor
+  /// esté en background.
   Future<void> notificarInteligente({
     required String titulo,
     required String cuerpo,
@@ -64,27 +69,28 @@ class NotificacionLocalServicio with WidgetsBindingObserver {
     String? categoria, // 'mensajes', 'matches', 'lesGusto', 'visitas', etc.
     String? payload,
   }) async {
+    // El push real lo hacen los triggers de la BD (schema.sql) en el
+    // destinatario. Aquí solo mostramos local si *el emisor* está en
+    // foreground (feedback inmediato) y si no, no hacemos nada.
     if (_enPrimerPlano) {
-      // App en foreground -> notificación local instantánea
       await notificarNavegador(titulo, cuerpo);
-      return;
     }
-
-    // App en background/cerrada -> disparar push via Supabase RPC
-    if (!kUsarServidorLocal) {
-      try {
-        await Supabase.instance.client.rpc('enviar_push_pg', params: {
-          'usuario_id': usuarioIdDestino,
-          'titulo': titulo,
-          'cuerpo': cuerpo,
-          'categoria': categoria ?? 'mensajes',
-        });
-      } catch (_) {
-        // Fallback: si falla el push, al menos mostramos local si estamos en foreground
-        if (_enPrimerPlano) {
-          await notificarNavegador(titulo, cuerpo);
-        }
-      }
-    }
+    // No llamar a enviar_push_pg desde el cliente: el servidor ya lo hace.
   }
+
+  /// Compat: alias del método corregido.
+  Future<void> notificarInteligenteLegacy({
+    required String titulo,
+    required String cuerpo,
+    required String usuarioIdDestino,
+    String? categoria,
+    String? payload,
+  }) =>
+      notificarInteligente(
+        titulo: titulo,
+        cuerpo: cuerpo,
+        usuarioIdDestino: usuarioIdDestino,
+        categoria: categoria,
+        payload: payload,
+      );
 }

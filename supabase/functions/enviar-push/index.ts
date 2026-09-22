@@ -13,6 +13,7 @@ interface PushPayload {
   usuario_id: string;
   titulo?: string;
   cuerpo?: string;
+  categoria?: string;
 }
 
 async function firmarJwtOauth(
@@ -105,7 +106,27 @@ Deno.serve(async (req) => {
               title: body.titulo ?? "Flumi",
               body: body.cuerpo ?? "",
             },
-            android: { priority: "high" },
+            data: {
+              categoria: body.categoria ?? "mensajes",
+              titulo: body.titulo ?? "Flumi",
+              cuerpo: body.cuerpo ?? "",
+            },
+            android: {
+              priority: "HIGH",
+              notification: {
+                channel_id: "flumi",
+                priority: "HIGH",
+                visibility: "PRIVATE",
+              },
+            },
+            apns: {
+              payload: {
+                aps: {
+                  sound: "default",
+                  badge: 1,
+                },
+              },
+            },
           },
         }),
       },

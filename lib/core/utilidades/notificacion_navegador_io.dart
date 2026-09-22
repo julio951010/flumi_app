@@ -8,6 +8,23 @@ import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
 
+/// Handler de segundo plano (top-level, requerido por FCM en Android).
+/// Se ejecuta en un isolate separado cuando llega un push con la app
+/// cerrada o en background y el mensaje es de tipo `data`.
+@pragma('vm:entry-point')
+Future<void> _fcmBackgroundHandler(RemoteMessage mensaje) async {
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {}
+}
+
+/// Callback global para taps en notificaciones (foreground/background/cerrada).
+/// La app lo asigna al arrancar para navegar a la bandeja/chat correspondiente.
+typedef NotifTapCallback = void Function(RemoteMessage mensaje);
+NotifTapCallback? _onTap;
+
+void setNotifTapHandler(NotifTapCallback cb) => _onTap = cb;
+
 /// Implementación móvil (Android/iOS): push real con Firebase Cloud
 /// Messaging. Las notificaciones que llegan con la app en primer plano se
 /// muestran localmente (con el logo de la app); las que llegan con la app en
@@ -28,10 +45,32 @@ class _PushMovil {
       await Firebase.initializeApp();
       _fcm = FirebaseMessaging.instance;
 
+      // Canal Android 8+ (obligatorio para background). Sin esto, los push en
+      // segundo plano no suenan / no aparecen en algunos OEMs.
       const androidInit = AndroidInitializationSettings('ic_launcher');
       const init = InitializationSettings(android: androidInit);
-      await _locales.initialize(init);
+      await _locales.initialize(
+        init,
+        onDidReceiveNotificationResponse: (resp) {
+          // Tap en notificación local (foreground) → placeholder, el FCM lleva el payload real.
+        },
+      );
       _mostrarLocales = true;
+
+      // Crea el canal 'flumi' explícitamente para que los FCM en background
+      // usen el mismo canal con importancia alta.
+      try {
+        const canal = AndroidNotificationChannel(
+          'flumi',
+          'Flumi',
+          description: 'Mensajes, Me Gustas, visitas y matches',
+          importance: Importance.high,
+        );
+        await _locales
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(canal);
+      } catch (_) {}
 
       await _fcm!.requestPermission(
         alert: true,
@@ -44,19 +83,44 @@ class _PushMovil {
         sound: true,
       );
 
-      // App en primer plano: mostrar la notificación localmente.
+      // Foreground: mostrar local.
       FirebaseMessaging.onMessage.listen(_mostrarMensajeFcm);
+      // Background: handler top-level (data messages cuando app cerrada).
+      FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
+      // Tap en notificación del sistema (background / terminada).
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleTap);
+      // App abierta desde notificación estando terminada.
+      try {
+        final inicial = await _fcm!.getInitialMessage();
+        if (inicial != null) _handleTap(inicial);
+      } catch (_) {}
+      // Refresh token: Android lo rota periódicamente.
+      _fcm!.onTokenRefresh.listen((nuevo) {
+        _token = nuevo;
+        registrarToken();
+      });
+
       _disponible = true;
     } catch (_) {
       _disponible = false;
     }
   }
 
+  void _handleTap(RemoteMessage mensaje) {
+    try {
+      _onTap?.call(mensaje);
+    } catch (_) {}
+  }
+
   Future<void> _mostrarMensajeFcm(RemoteMessage mensaje) {
-    return notificarNavegador(
-      mensaje.notification?.title ?? 'Flumi',
-      mensaje.notification?.body ?? '',
-    );
+    // Usa data si viene, sino notification.
+    final titulo = mensaje.notification?.title ??
+        mensaje.data['titulo'] ??
+        'Flumi';
+    final cuerpo = mensaje.notification?.body ??
+        mensaje.data['cuerpo'] ??
+        '';
+    return notificarNavegador(titulo, cuerpo);
   }
 
   Future<String?> _obtenerToken() async {
@@ -83,7 +147,9 @@ class _PushMovil {
   Future<void> registrarToken() async {
     if (kUsarServidorLocal) return;
     final token = await _obtenerToken();
-    if (token == null || token == _token) return;
+    if (token == null) return;
+    // Evita spam si es el mismo, pero siempre re-registra tras refresh.
+    if (token == _token) return;
     _token = token;
     try {
       await sb.Supabase.instance.client.rpc(
@@ -94,6 +160,12 @@ class _PushMovil {
         },
       );
     } catch (_) {}
+  }
+
+  /// Fuerza re-registro (tras login).
+  Future<void> forzarRegistro() async {
+    _token = null;
+    await registrarToken();
   }
 
   /// Elimina el token de Supabase al cerrar sesión.
@@ -118,7 +190,7 @@ class _PushMovil {
         final datos = await rootBundle.load('assets/images/flumi_logo.png');
         logo = ByteArrayAndroidBitmap(datos.buffer.asUint8List());
       } catch (_) {}
-      const canal = AndroidNotificationDetails(
+      const canalBase = AndroidNotificationDetails(
         'flumi',
         'Flumi',
         channelDescription: 'Mensajes, Me Gustas, visitas y matches',
@@ -132,7 +204,7 @@ class _PushMovil {
         cuerpo,
         NotificationDetails(
           android: logo == null
-              ? canal
+              ? canalBase
               : AndroidNotificationDetails(
                   'flumi',
                   'Flumi',
@@ -140,8 +212,8 @@ class _PushMovil {
                   importance: Importance.high,
                   priority: Priority.high,
                   icon: 'ic_launcher',
-                  styleInformation:
-                      BigPictureStyleInformation(logo, contentTitle: titulo, summaryText: cuerpo),
+                  styleInformation: BigPictureStyleInformation(logo,
+                      contentTitle: titulo, summaryText: cuerpo),
                 ),
         ),
       );
@@ -163,6 +235,10 @@ Future<void> inicializarPush() => _push.inicializar();
 
 /// Registra el token FCM en Supabase (al iniciar sesión).
 Future<void> registrarTokenPush() => _push.registrarToken();
+Future<void> forzarRegistroPush() => _push.forzarRegistro();
 
 /// Elimina el token FCM de Supabase (al cerrar sesión).
 Future<void> eliminarTokenPush() => _push.eliminarToken();
+
+/// Asigna handler de tap en notificación (usado por main.dart para navegar).
+void setNotificacionTapHandler(NotifTapCallback cb) => setNotifTapHandler(cb);

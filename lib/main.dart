@@ -14,9 +14,11 @@ import 'core/constantes/constantes.dart';
 import 'core/estilos/tema.dart';
 import 'core/servicios/connectivity_service.dart';
 import 'core/servicios/estado_servidor_servicio.dart';
+import 'core/servicios/notificacion_local_servicio.dart';
 import 'core/servicios/notificacion_servicio.dart';
 import 'core/servicios/preferencias_notificaciones_servicio.dart';
 import 'core/servicios/sync_service.dart';
+import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
@@ -45,7 +47,6 @@ import 'core/servicios/config_remota_servicio.dart';
 import 'core/servicios/suscripcion_servicio.dart';
 import 'core/servicios/visitas_historial_servicio.dart';
 import 'core/servicios/votos_servicio.dart';
-import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/indicador_conexion.dart';
 import 'widgets_comunes/logo_flotante.dart';
 import 'widgets_comunes/encabezado_pagina.dart';
@@ -60,6 +61,12 @@ late final HistorialLikesServicio historialLikesServicio;
 late final VotosServicio votosServicio;
 late final PerfilRepositorio perfilRepositorio;
 late final ChatRepositorio chatRepositorio;
+
+/// Navigator global para abrir pantallas desde handlers de push en background.
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+/// Key del scaffold principal para cambiar de pestaña al tocar una push.
+final GlobalKey<_NavegacionPrincipalState> navPrincipalKey =
+    GlobalKey<_NavegacionPrincipalState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,6 +92,21 @@ void main() async {
   // Push móvil (FCM): no bloquea el arranque y no lanza si Firebase aún no
   // está configurado.
   unawaited(inicializarPush());
+  // Foreground vs background: necesario para que notificarInteligente y los
+  // canales locales sepan si la app está en 2do plano.
+  NotificacionLocalServicio.instancia.inicializar();
+  // Handler de tap en notificación (background / app cerrada) → navega a la
+  // sección correcta (mensajes, matches, etc.).
+  setNotificacionTapHandler((msg) {
+    final cat = (msg.data['categoria'] ??
+            msg.data['category'] ??
+            msg.notification?.title ??
+            '')
+        .toString()
+        .toLowerCase();
+    // Usa el navigator global para cambiar de pestaña.
+    navPrincipalKey.currentState?.manejarTapPush(cat);
+  });
   ConnectivityService.instancia.stream.listen((estado) {
     if (estado == EstadoConexion.conectado) {
       syncService.sincronizarTodo(alIniciarSesion: true);
@@ -114,6 +136,7 @@ class FlumiApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: appNombre,
       debugShowCheckedModeBanner: false,
       theme: FlumiTema.tema,
@@ -551,7 +574,7 @@ bool _esperandoSincronizacion = false;
         },
       );
     }
-    return IndicadorConexion(child: const _NavegacionPrincipal());
+    return IndicadorConexion(child: _NavegacionPrincipal(key: navPrincipalKey));
   }
 }
 
@@ -694,7 +717,7 @@ class _AuthWrapperState extends State<_AuthWrapper>
 }
 
 class _NavegacionPrincipal extends StatefulWidget {
-  const _NavegacionPrincipal();
+  const _NavegacionPrincipal({super.key});
 
   @override
   State<_NavegacionPrincipal> createState() => _NavegacionPrincipalState();
@@ -706,6 +729,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   FiltrosEncuentros _filtros = FiltrosEncuentros();
   final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
   final GlobalKey _undoBotonKey = GlobalKey();
+  final LayerLink _undoLink = LayerLink();
   final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
   /// Notificaciones NUEVAS (solo sociales: likes, visitas y matches): alimenta
   /// el chip de la campana dentro de la página de Chats. Los mensajes de
@@ -762,7 +786,14 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     chatRepositorio.iniciarPresencia(miId);
     unawaited(votosServicio.inicializar());
     unawaited(_inicializarContadoresMeGusta(miId));
-    unawaited(solicitarPermisoNotificaciones());
+    unawaited(solicitarPermisoNotificaciones().then((_) {
+      // Tras conceder permiso (Android 13+), registra el token FCM para
+      // que el 2do plano funcione para TODAS las categorías (mensajes,
+      // matches, likes, visitas, cerca).
+      registrarTokenPush();
+    }));
+    // Inicializa observer de foreground/background (si no se hizo en main).
+    NotificacionLocalServicio.instancia.inicializar();
     // Se restaura el feedback cuando el servidor vuelve a responder.
     EstadoServidorServicio.instancia.addListener(_alCambiarEstadoServidor);
   }
@@ -1079,6 +1110,29 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     super.dispose();
   }
 
+  /// Llamado desde el handler de tap en push (app en 2do plano / cerrada).
+  void manejarTapPush(String categoria) {
+    final c = categoria.toLowerCase();
+    if (c.contains('mensaj')) {
+      setState(() => _indice = 3); // Chats
+    } else if (c.contains('match')) {
+      setState(() {
+        _indice = 2;
+        _indiceMeGusta = 1; // pestaña Matches dentro de Me Gusta
+      });
+    } else if (c.contains('gusto') || c.contains('les_gusto') || c.contains('lesgusto')) {
+      setState(() {
+        _indice = 2;
+        _indiceMeGusta = 0; // Le gustas
+      });
+    } else if (c.contains('visita')) {
+      _abrirBandejaNotificaciones();
+    } else {
+      // Fallback: bandeja general
+      _abrirBandejaNotificaciones();
+    }
+  }
+
   void _abrirBandejaNotificaciones() {
     // Chrome ignora requestPermission() sin gesto de usuario: el tap sobre la
     // campana es el momento natural para pedirlo.
@@ -1135,13 +1189,17 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   }
 
   /// Aviso de "match perdido": se dispara cuando un Nope destruye un match
-  /// potencial con alguien que te dio Me Gusta. Usa NotificacionServicio
-  /// (Overlay flotante, fuera del layout de la pantalla) en vez de un
-  /// widget embebido en el header, que se podía desbordar según el ancho
-  /// disponible para las acciones del encabezado.
+  /// potencial con alguien que te dio Me Gusta. Burbuja flotante anclada
+  /// debajo del botón Deshacer con flechita apuntando al botón.
   void _avisarMatchPerdidoEnDeshacer() {
     debugPrint('[MatchPerdido] disparando aviso');
-    NotificacionServicio.advertencia(context, 'Te has perdido un match');
+    // Follower anclado al LayerLink del botón Deshacer: nunca se sale de
+    // pantalla (usa coordenadas del Overlay, no cálculos manuales).
+    NotificacionServicio.mostrarBurbujaConLink(
+      context,
+      link: _undoLink,
+      mensaje: 'Te has perdido un match',
+    );
   }
 
   void _abrirFiltros() async {
@@ -1291,17 +1349,20 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                                   listenable: votosServicio,
                                   builder: (_, __) {
                                     final hay = votosServicio.hayParaDeshacer;
-                                    return IconButton(
-                                      key: _undoBotonKey,
-                                      icon: Icon(Icons.undo,
-                                          color: hay
-                                              ? primario
-                                              : Colors.grey[400],
-                                          size: 24),
-                                      onPressed: hay
-                                          ? () => _undoSignal.value++
-                                          : null,
-                                      tooltip: 'Deshacer',
+                                    return CompositedTransformTarget(
+                                      link: _undoLink,
+                                      child: IconButton(
+                                        key: _undoBotonKey,
+                                        icon: Icon(Icons.undo,
+                                            color: hay
+                                                ? primario
+                                                : Colors.grey[400],
+                                            size: 24),
+                                        onPressed: hay
+                                            ? () => _undoSignal.value++
+                                            : null,
+                                        tooltip: 'Deshacer',
+                                      ),
                                     );
                                   },
                                 ),

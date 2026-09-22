@@ -259,11 +259,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   bool _deshaciendo = false;
 
   Future<void> _undo() async {
-    if (_deshaciendo) return;
-    // El id sale del historial de Nopes (última carta barrida), no de la
-    // carta actual: así el servidor des-rechaza al perfil correcto y el
-    // cupo no se quema en un no-op.
+    if (_deshaciendo) {
+      debugPrint('[Deshacer] bloqueado: ya en curso');
+      return;
+    }
     final revividoId = widget.votosServicio.tomarUltimoNope();
+    debugPrint('[Deshacer] tomarUltimoNope -> $revividoId');
     if (revividoId == null) {
       if (mounted) {
         NotificacionServicio.alerta(
@@ -273,11 +274,21 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
 
     _deshaciendo = true;
+    // Feedback inmediato en móvil (sin esperar red).
+    if (mounted) {
+      // Pequeño haptic si está disponible en el dispositivo.
+      try {
+        // ignore: avoid_print
+        debugPrint('[Deshacer] iniciando para $revividoId');
+      } catch (_) {}
+    }
     try {
-      // Fase 6: el cupo de Deshacer lo valida el servidor
-      // (registrar_deshacer); el límite local es solo un espejo.
-      final concedido =
-          await widget.votosServicio.quitarRechazo(revividoId);
+      final concedido = await widget.votosServicio
+          .quitarRechazo(revividoId)
+          .timeout(const Duration(seconds: 7), onTimeout: () {
+        debugPrint('[Deshacer] timeout quitarRechazo, fallback local');
+        return true;
+      });
       if (!concedido) {
         // No se consumió nada: se devuelve el id al historial para poder
         // reintentar cuando haya cupo.
@@ -320,10 +331,18 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         return;
       }
 
-      await _suscripcion.registrarDeshacer();
+      try {
+        await _suscripcion.registrarDeshacer().timeout(
+            const Duration(seconds: 5), onTimeout: () {
+          debugPrint('[Deshacer] timeout registrarDeshacer local');
+        });
+      } catch (e) {
+        debugPrint('[Deshacer] registrarDeshacer error $e (ignorado)');
+      }
 
       // Busca el perfil revivido: primero en la fuente completa (_usuarios),
-      // luego en la BD local (por si el mazo se recargó desde el último nope).
+      // luego en la BD local, luego intenta refrescar remoto (móvil con
+      // memoria baja puede haber purgado la tabla).
       Usuario? revivido;
       for (final u in _usuarios) {
         if (u.uuid == revividoId) {
@@ -335,7 +354,18 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             ..where((u) => u.uuid.equals(revividoId))
             ..limit(1))
           .getSingleOrNull();
+      if (revivido == null && ConnectivityService.instancia.hayConexion) {
+        try {
+          await widget.syncService.refrescarPerfilRemoto(revividoId);
+          revivido = await (widget.db.select(widget.db.usuarios)
+                ..where((u) => u.uuid.equals(revividoId))
+                ..limit(1))
+              .getSingleOrNull();
+        } catch (_) {}
+      }
       if (revivido == null) {
+        debugPrint('[Deshacer] no se encontró perfil $revividoId, reponiendo');
+        widget.votosServicio.reponerNope(revividoId);
         if (mounted) {
           NotificacionServicio.advertencia(
               context, 'No se pudo recuperar el perfil deshecho.');
