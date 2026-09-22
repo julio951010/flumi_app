@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'placeholder_foto.dart';
 import 'shimmer_caja.dart';
 
 final Map<String, Uint8List> _cacheFotos = {};
@@ -94,7 +95,9 @@ class _FotoDesdeRedState extends State<FotoDesdeRed> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error) return const SizedBox.shrink();
+    if (_error) {
+      return PlaceholderFoto(width: widget.width, height: widget.height);
+    }
     Widget imagen;
     if (_bytes != null) {
       imagen = Image.memory(
@@ -104,7 +107,10 @@ class _FotoDesdeRedState extends State<FotoDesdeRed> {
         fit: widget.fit,
         cacheWidth: widget.cacheWidth,
         gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        errorBuilder: (_, __, ___) => PlaceholderFoto(
+          width: widget.width,
+          height: widget.height,
+        ),
       );
     } else {
       imagen = const ShimmerCaja(radius: 0);

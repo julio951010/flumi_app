@@ -1,5 +1,8 @@
-// Elimina cuenta completa: auth, datos, storage
-// Requiere: PUSH_SECRET (para triggers), FIREBASE_SERVICE_ACCOUNT
+// Elimina la cuenta del usuario autenticado: auth, datos y storage.
+// Se identifica al usuario por su propio JWT (el que `functions.invoke`
+// del cliente Flutter ya adjunta automáticamente como Authorization) —
+// nunca por un usuario_id que mande el body, porque eso permitiría que
+// cualquiera borrara la cuenta de otra persona con solo conocer su id.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -10,43 +13,47 @@ Deno.serve(async (req) => {
     return new Response("Método no permitido", { status: 405 });
   }
 
-  // Verificar secreto compartido
-  const secret = req.headers.get("x-flumi-secret");
-  if (secret !== Deno.env.get("PUSH_SECRET")) {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
     return new Response("No autorizado", { status: 401 });
   }
 
-  // Parsear body
-  let body: { usuario_id?: string } = { usuario_id: "" };
-  try {
-    const bodyText = await req.text();
-    if (bodyText) body = JSON.parse(bodyText);
-  } catch {
-    return new Response("JSON inválido", { status: 400 });
+  // Cliente con el JWT del usuario, solo para saber quién es.
+  const supabaseUsuario = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } }
+  );
+  const { data: { user }, error: userError } =
+    await supabaseUsuario.auth.getUser();
+  if (userError || !user) {
+    return new Response("No autorizado", { status: 401 });
   }
+  const usuarioId = user.id;
 
-  const usuarioId = body.usuario_id;
-  if (!usuarioId) {
-    return new Response("Falta usuario_id", { status: 400 });
-  }
-
-  // Cliente Supabase con service_role para operaciones admin
+  // Cliente con service_role para las operaciones admin (storage, auth).
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
   try {
-    // 1. Borrar archivos de storage del usuario
+    // 1. Borrar archivos de storage del usuario.
+    // Las fotos se guardan como '{usuarioId}_{timestamp}.jpg' en la RAÍZ
+    // del bucket (ver perfil_foto_servicio.dart), no dentro de una carpeta
+    // '{usuarioId}/' — por eso se busca con `search`, filtrando por
+    // prefijo exacto para no atrapar nada de otro usuario por accidente.
     try {
       const { data: files, error: listError } = await supabase.storage
         .from('profile-photos')
-        .list(`${usuarioId}/`, { limit: 100 });
+        .list('', { limit: 100, search: usuarioId });
 
-      if (!listError && files && files.length > 0) {
-        const paths = files.map(f => `${usuarioId}/${f.name}`);
+      const propios = (files ?? []).filter(f =>
+        f.name.startsWith(`${usuarioId}_`)
+      );
+      if (!listError && propios.length > 0) {
         await supabase.storage.from('profile-photos').remove(
-          paths.map(f => `${usuarioId}/${f.name}`)
+          propios.map(f => f.name)
         );
       }
     } catch (e) {

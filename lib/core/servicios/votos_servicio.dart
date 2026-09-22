@@ -52,6 +52,18 @@ class VotosServicio extends ChangeNotifier {
     return id;
   }
 
+  /// Devuelve un id al historial cuando el deshacer no se pudo completar
+  /// (p. ej. el servidor negó el cupo). Así no se pierde el movimiento.
+  void reponerNope(String id) {
+    if (_historialNope.isEmpty || _historialNope.last != id) {
+      _historialNope.add(id);
+      if (_historialNope.length > _maxHistorialNope) {
+        _historialNope.removeAt(0);
+      }
+      notifyListeners();
+    }
+  }
+
   VotosServicio(this._db, this._sync);
 
   bool get inicializado => _inicializado;
@@ -103,6 +115,14 @@ class VotosServicio extends ChangeNotifier {
   }
 
   DateTime? ultimoRechazo(String uuid) => _rechazos[uuid]?.ultimo;
+
+  /// Ids rechazados del más antiguo al más reciente, para reencolarlos al
+  /// agotar el mazo (segunda vuelta de reconsideración).
+  List<String> rechazadosPorAntiguedad() {
+    final ids = _rechazos.keys.toList()
+      ..sort((a, b) => _rechazos[a]!.ultimo.compareTo(_rechazos[b]!.ultimo));
+    return ids;
+  }
 
   /// Compone el mazo con la regla de reciclaje según la cantidad de perfiles
   /// nuevos que queden:

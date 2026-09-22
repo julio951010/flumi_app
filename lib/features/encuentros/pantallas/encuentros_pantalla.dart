@@ -15,7 +15,6 @@ import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
-import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../../widgets_comunes/barra_progreso_rio.dart';
 import '../../../widgets_comunes/estado_vacio_encuentros.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
@@ -79,6 +78,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   bool _hayMasRemoto = true;
   bool _cargandoMas = false;
   bool _amplitudAplicada = false;
+  bool _reciclando = false;
   MatchEngine? _matchEngine;
   late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
@@ -90,7 +90,13 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     super.initState();
     widget.undoSignal.addListener(_undo);
     _suscripcion.addListener(_alCambiarSuscripcion);
-    widget.votosServicio.addListener(_alCambiarVotos);
+    // NOTA: no escuchamos a votosServicio aquí a propósito. Cada nope
+    // llamaba a _alCambiarVotos, que recreaba el MatchEngine con índice 0 y
+    // expulsaba el perfil del _filtrados: rewindMatch() quedaba sin historial
+    // (su guard `_currentItemIndex != 0` fallaba) y el deshacer "no hacía nada".
+    // El avance tras un nope lo hace el propio engine vía cycleMatch; la
+    // recomposición solo se invoca explícitamente tras cargar más (_cargarMas)
+    // o al reinsertar en _undo.
     _cargar();
   }
 
@@ -100,7 +106,6 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     _matchEngine?.removeListener(_alCambiarCarta);
     widget.undoSignal.removeListener(_undo);
     _suscripcion.removeListener(_alCambiarSuscripcion);
-    widget.votosServicio.removeListener(_alCambiarVotos);
     super.dispose();
   }
 
@@ -166,6 +171,8 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
   }
 
+  /// Recomposición explícita tras cargar más perfiles (llamada manual desde
+  /// [_cargarMas]). Ya NO es listener automático de votos (ver initState).
   void _alCambiarVotos() {
     if (!mounted || _cargando) return;
     final engine = _matchEngine;
@@ -174,6 +181,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             !widget.votosServicio.esRechazado(actual.uuid))
         ? actual
         : engine?.nextItem?.content as Usuario?;
+    // Se suelta el listener del motor viejo antes de reemplazarlo para no
+    // acumular conteos de _consumidasEnMotor.
+    _matchEngine?.removeListener(_alCambiarCarta);
     setState(() {
       final sinRechazados = widget.votosServicio.componerDeck(_filtrados);
       if (sinRechazados.isEmpty) {
@@ -250,8 +260,6 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
 
   Future<void> _undo() async {
     if (_deshaciendo) return;
-    final engine = _matchEngine;
-    if (engine == null) return;
     // El id sale del historial de Nopes (última carta barrida), no de la
     // carta actual: así el servidor des-rechaza al perfil correcto y el
     // cupo no se quema en un no-op.
@@ -271,44 +279,99 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       final concedido =
           await widget.votosServicio.quitarRechazo(revividoId);
       if (!concedido) {
+        // No se consumió nada: se devuelve el id al historial para poder
+        // reintentar cuando haya cupo.
+        widget.votosServicio.reponerNope(revividoId);
         if (mounted) {
-          mostrarBloqueoSuscripcion(
-            context,
-            funcionalidad: 'Deshacer',
-            planMinimo: PlanTipo.plus,
-            descripcion:
-                'Has alcanzado el límite diario de deshacer (${_suscripcion.limites.deshacerPorDia}). Suscríbete a Flumi Plus para deshacer ilimitado.',
-            onSuscribir: () => Navigator.push(
+          // Defensa: si la app ya lo considera Plus/Premium/Admin, el
+          // "límite" es un desajuste con el servidor (p. ej. RPC sin
+          // desplegar), no un motivo de upsell. Se refresca la suscripción
+          // y se avisa sin ofrecerle Plus a quien ya lo tiene.
+          if (_suscripcion.tienePlus) {
+            unawaited(_suscripcion.cargarSuscripcion());
+            NotificacionServicio.advertencia(
               context,
-              MaterialPageRoute(
-                builder: (_) => const DetallePlanPantalla(
-                  nombre: 'Flumi Plus',
-                  periodo: 'mensual',
-                  precio: '250 cup',
-                  icono: Icons.auto_awesome,
-                  detalle: 'Funciones extra',
-                  destacado: true,
+              'No se pudo validar tu plan con el servidor. '
+              'Revisa tu conexión e inténtalo de nuevo.',
+            );
+          } else {
+            mostrarBloqueoSuscripcion(
+              context,
+              funcionalidad: 'Deshacer',
+              planMinimo: PlanTipo.plus,
+              descripcion:
+                  'Has alcanzado el límite diario de deshacer (${_suscripcion.limites.deshacerPorDia}). Suscríbete a Flumi Plus para deshacer ilimitado.',
+              onSuscribir: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const DetallePlanPantalla(
+                    nombre: 'Flumi Plus',
+                    periodo: 'mensual',
+                    precio: '250 cup',
+                    icono: Icons.auto_awesome,
+                    detalle: 'Funciones extra',
+                    destacado: true,
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
         }
         return;
       }
 
       await _suscripcion.registrarDeshacer();
-      if (_agotado) {
-        setState(() {
-          _agotado = false;
-          _motorBase = _filtrados.length - 1;
-          _progresoFoto = 0;
-          _motorId++;
-          _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
-        });
-      } else if (engine.currentItem != null) {
-        engine.rewindMatch();
-        setState(() => _progresoFoto = 0);
+
+      // Busca el perfil revivido: primero en la fuente completa (_usuarios),
+      // luego en la BD local (por si el mazo se recargó desde el último nope).
+      Usuario? revivido;
+      for (final u in _usuarios) {
+        if (u.uuid == revividoId) {
+          revivido = u;
+          break;
+        }
       }
+      revivido ??= await (widget.db.select(widget.db.usuarios)
+            ..where((u) => u.uuid.equals(revividoId))
+            ..limit(1))
+          .getSingleOrNull();
+      if (revivido == null) {
+        if (mounted) {
+          NotificacionServicio.advertencia(
+              context, 'No se pudo recuperar el perfil deshecho.');
+        }
+        return;
+      }
+      final perfil = revivido;
+
+      // Garantiza que la fuente completa lo conserve para futuras
+      // recomposiciones (filtros, más lotes).
+      if (!_usuarios.any((u) => u.uuid == perfil.uuid)) {
+        _usuarios.insert(0, perfil);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _agotado = false;
+        // Inserta el revivido justo delante de la carta actual para que sea
+        // lo próximo que se vea. Si el mazo estaba vacío o agotado, queda
+        // como única carta.
+        final actual = _matchEngine?.currentItem?.content as Usuario?;
+        var indiceInsercion = _filtrados
+            .indexWhere((u) => actual != null && u.uuid == actual.uuid);
+        if (indiceInsercion < 0) indiceInsercion = 0;
+        _filtrados.removeWhere((u) => u.uuid == perfil.uuid);
+        // Re-calcula por si el removeWhere movió el índice.
+        if (indiceInsercion > _filtrados.length) {
+          indiceInsercion = _filtrados.length;
+        }
+        _filtrados.insert(indiceInsercion, perfil);
+        _motorBase = indiceInsercion;
+        _progresoFoto = 0;
+        _motorId++;
+        _matchEngine?.removeListener(_alCambiarCarta);
+        _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
+      });
       if (mounted) {
         NotificacionServicio.exito(context, 'Deshecho.');
       }
@@ -461,6 +524,64 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
   }
 
+  /// Segunda vuelta al agotar el mazo: reencola los perfiles rechazados
+  /// (más antiguo primero) para reconsiderarlos. Los gustados no vuelven
+  /// (viven en Me Gusta/Matches). Si no hay nada que repasar, marca agotado.
+  Future<void> _reciclarRechazados() async {
+    if (!mounted || _cargando || _cargandoMas || _reciclando) return;
+    _reciclando = true;
+    try {
+      final orden = widget.votosServicio.rechazadosPorAntiguedad();
+      if (orden.isEmpty) {
+        if (mounted) setState(() => _agotado = true);
+        return;
+      }
+      final porId = {for (final u in _usuarios) u.uuid: u};
+      // Completa desde la BD local por si el mazo se recargó.
+      if (porId.length < orden.length) {
+        try {
+          final filas = await (widget.db.select(widget.db.usuarios)
+                ..where((u) => u.uuid.isIn(orden)))
+              .get();
+          for (final u in filas) {
+            porId.putIfAbsent(u.uuid, () => u);
+            if (!_usuarios.any((e) => e.uuid == u.uuid)) _usuarios.add(u);
+          }
+        } catch (_) {}
+      }
+      var candidatos =
+          _filtrar(orden.map((id) => porId[id]).nonNulls.toList(),
+              conAmpliacion: _amplitudAplicada);
+      // Sin los gustados: ya tienen su lugar en Me Gusta/Matches.
+      candidatos.removeWhere((u) => _idsGustados.contains(u.uuid));
+      // Si con los filtros actuales no queda nada, reintenta sin filtros
+      // estrictos (solo criterios base del perfil) para cumplir el requisito:
+      // "cuando no hay más perfiles, cargar los rechazados".
+      if (candidatos.isEmpty && !_amplitudAplicada) {
+        candidatos = _filtrar(
+            orden.map((id) => porId[id]).nonNulls.toList(),
+            conAmpliacion: true);
+        candidatos.removeWhere((u) => _idsGustados.contains(u.uuid));
+      }
+      if (!mounted) return;
+      if (candidatos.isEmpty) {
+        setState(() => _agotado = true);
+        return;
+      }
+      _matchEngine?.removeListener(_alCambiarCarta);
+      setState(() {
+        _filtrados = candidatos;
+        _motorBase = 0;
+        _agotado = false;
+        _progresoFoto = 0;
+        _motorId++;
+        _matchEngine = _crearMotor(candidatos);
+      });
+    } finally {
+      _reciclando = false;
+    }
+  }
+
   /// Aplica los filtros a [entrada]. Con `conAmpliacion` se relaja la
   /// búsqueda (sin distancia, en línea, rango de edad del filtro, etc.)
   /// tal y como exige el estado límite de la Fase 3; el género y el rango
@@ -527,6 +648,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     // agregan al final los rechazos reciclables (más antiguos primero).
     lista = widget.votosServicio.componerDeck(lista);
 
+    _matchEngine?.removeListener(_alCambiarCarta);
     setState(() {
       _filtrados = lista;
       _motorBase = 0;
@@ -556,6 +678,20 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     if (_filtrados.isEmpty || _agotado) {
       if (_hayMasRemoto) {
         unawaited(_cargarMas());
+      } else if (!_cargandoMas &&
+          !_reciclando &&
+          !_agotado &&
+          widget.votosServicio.rechazadosPorAntiguedad().isNotEmpty) {
+        // Sin más perfiles nuevos: segunda vuelta con los rechazados
+        // (más antiguo primero). Se programa post-frame para no hacer
+        // setState durante el build.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _filtrados.isEmpty && !_agotado && !_hayMasRemoto) {
+            unawaited(_reciclarRechazados());
+          }
+        });
+        // Muestra carga mientras se recicla en vez del vacío inmediato.
+        return _esqueleto();
       }
       return EstadoVacioEncuentros(
         mensaje: _filtrados.isEmpty
@@ -593,7 +729,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
                   unawaited(_cargarMas());
                   return;
                 }
-                setState(() => _agotado = true);
+                // Sin más perfiles nuevos: segunda vuelta con los rechazados
+                // para reconsiderar, del más antiguo al más reciente.
+                unawaited(_reciclarRechazados());
               },
               itemBuilder: (context, index) {
                 // El índice interno del engine (_currentItemIndex) puede quedar
@@ -632,7 +770,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     final gustado = _idsGustados.contains(usuario.uuid);
     return TarjetaDetalleUsuario(
       usuario: usuario,
-      onRechazar: () => _matchEngine?.currentItem?.nope(),
+      onRechazar: () => _nopeUsuario(usuario),
       onChat: () => _abrirChat(usuario),
       onMeGusta: () => _meGusta(usuario),
       mostrarProgreso: false,
@@ -646,6 +784,32 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       esMeGusta: gustado,
       esSuperRecibido: _idsSuperRecibidos.contains(usuario.uuid),
     );
+  }
+
+  Future<void> _nopeUsuario(Usuario usuario) async {
+    // El boton sigue el mismo camino que el gesto: decision=nope para que la
+    // carta se anime a la izquierda y cycleMatch avance. Antes se llamaba a
+    // rewindMatch(), que retrocede (y no hace nada en la primera carta), por
+    // eso el boton parecia no funcionar.
+    final engine = _matchEngine;
+    final actual = engine?.currentItem?.content as Usuario?;
+    if (actual != null && actual.uuid == usuario.uuid) {
+      engine!.currentItem!.nope();
+      return;
+    }
+    // Fallback: la carta no es la actual. Registra el rechazo y la quita de
+    // la lista visible sin tocar _idsGustados (ese set es solo para likes).
+    widget.votosServicio.registrarRechazo(usuario.uuid);
+    unawaited(_avisarMatchPerdido(usuario));
+    if (!mounted) return;
+    setState(() {
+      _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+      if (!_agotado && _filtrados.length < 5 && _hayMasRemoto) {
+        unawaited(_cargarMas());
+      } else if (_filtrados.isEmpty) {
+        _agotado = true;
+      }
+    });
   }
 
   Future<void> _meGusta(Usuario usuario) async {
@@ -706,10 +870,6 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       }
       return;
     }
-    // El feed en vivo no persiste perfiles ajenos: los cacheamos aquí para
-    // que, si esto termina en match, la conversación ya tenga nombre/foto
-    // desde el primer instante (sin esperar un refetch en chat_repositorio).
-    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     _suscripcion.registrarMeGusta();
     widget.votosServicio.quitarRechazo(usuario.uuid, comoDeshacer: false);
     // El perfil gustado no vuelve a salir en el mazo (ni en el actual si se
@@ -804,7 +964,6 @@ Navigator.push(
       }
       return;
     }
-    unawaited(PerfilMapeo.cachearPerfilVisto(widget.db, usuario));
     await _suscripcion.registrarSuperlike();
     // El perfil superlikeado no vuelve a salir en el mazo.
     setState(() {

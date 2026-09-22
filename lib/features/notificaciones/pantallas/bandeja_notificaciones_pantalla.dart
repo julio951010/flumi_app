@@ -22,6 +22,7 @@ class BandejaNotificacionesPantalla extends StatefulWidget {
   final HistorialLikesServicio historialLikesServicio;
   final SuscripcionServicio suscripcionServicio;
   final VoidCallback? onAbierto;
+
   /// Navega a la pestaña principal correspondiente (2 = Me Gusta, 3 = Chats)
   /// cuando la notificación no se puede abrir sin plan.
   final void Function(int tab, int subindice)? onNavegarA;
@@ -112,8 +113,7 @@ class _BandejaNotificacionesPantallaState
       }
 
       final visitasList = await _visitasServicio.obtenerVisitas();
-      final visitasConteo =
-          await _visitasServicio.contarPorVisitante();
+      final visitasConteo = await _visitasServicio.contarPorVisitante();
       for (final v in visitasList) {
         final u = mapa[v.visitanteId];
         if (u == null) continue;
@@ -142,8 +142,8 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
-      final cortes = await (widget.db.select(widget.db.conversacionesEliminadas))
-          .get();
+      final cortes =
+          await (widget.db.select(widget.db.conversacionesEliminadas)).get();
       final cortesMap = {
         for (final t in cortes) t.otroUsuarioId: t.eliminadoEn
       };
@@ -176,10 +176,11 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
-final gustados = await _historialLikesServicio.obtenerHistorial();
-      final abiertas = await (widget.db.select(widget.db.notificacionesAbiertas))
-          .get()
-          .then((fs) => fs.map((f) => f.notificacionId).toSet());
+      final gustados = await _historialLikesServicio.obtenerHistorial();
+      final abiertas =
+          await (widget.db.select(widget.db.notificacionesAbiertas))
+              .get()
+              .then((fs) => fs.map((f) => f.notificacionId).toSet());
 
       await PreferenciasNotificacionesServicio.instancia.asegurarCargada();
 
@@ -210,11 +211,6 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
         });
       }
     } finally {
-      if (mounted) setState(() => _cargando = false);
-    }
-  }
-          }
-        } finally {
       if (mounted) setState(() => _cargando = false);
     }
   }
@@ -290,9 +286,9 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
   /// Verifica si una notificación está marcada como leída (local o BD).
   Future<bool> _estaLeida(String notificacionId) async {
     if (_leidas.contains(notificacionId)) return true;
-    final existe = await widget.db.select(widget.db.notificacionesAbiertas)
-        .where((n) => n.notificacionId.equals(notificacionId))
-        .getSingleOrNull();
+    final query = widget.db.select(widget.db.notificacionesAbiertas)
+      ..where((n) => n.notificacionId.equals(notificacionId));
+    final existe = await query.getSingleOrNull();
     return existe != null;
   }
 
@@ -302,22 +298,85 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
     for (final n in _items) {
       if (!_leidas.contains(n.id)) {
         // Verificar en BD si no está en memoria local
-        final existe = await widget.db.select(widget.db.notificacionesAbiertas)
-            .where((n) => n.notificacionId.equals(n.id))
-            .getSingleOrNull();
+        final query = widget.db.select(widget.db.notificacionesAbiertas)
+          ..where((na) => na.notificacionId.equals(n.id));
+        final existe = await query.getSingleOrNull();
         if (existe == null) count++;
       }
+    }
     return count;
   }
+
+  /// Marca todas las notificaciones como leídas y las persiste.
+  Future<void> _marcarTodosLeidos() async {
+    setState(() {
+      for (final n in _items) {
+        _leidas.add(n.id);
+      }
+    });
+    for (final n in _items) {
+      unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
+            NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
+            mode: InsertMode.insertOrIgnore,
+          ));
+    }
+    widget.onAbierto?.call();
+  }
+
+  /// Pide confirmacion y borra todas las notificaciones visibles.
+  Future<void> _confirmarLimpiar() async {
+    if (_items.isEmpty) return;
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpiar notificaciones'),
+        content: const Text(
+            'Se eliminaran todas las notificaciones de esta bandeja.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmado == true) await _limpiarTodo();
+  }
+
+  /// Elimina todas las notificaciones visibles y persiste el borrado para
+  /// que no reaparezcan al reabrir (igual que al abrir una por una).
+  Future<void> _limpiarTodo() async {
+    final ids = _items.map((n) => n.id).toList();
+    if (ids.isEmpty) return;
+    setState(() {
+      _items.clear();
+      _leidas.addAll(ids);
+    });
+    for (final id in ids) {
+      unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
+            NotificacionesAbiertasCompanion.insert(notificacionId: id),
+            mode: InsertMode.insertOrIgnore,
+          ));
+    }
+    widget.onAbierto?.call();
+  }
+
+  /// Abre la notificación: navega al perfil, chat o pestaña correspondiente.
+  Future<void> _abrir(_NotificacionInbox n) async {
     setState(() {
       _leidas.add(n.id);
-      _items.removeWhere((item) => item.id == n.id && item.timestamp == n.timestamp);
+      _items.removeWhere(
+          (item) => item.id == n.id && item.timestamp == n.timestamp);
     });
     // Persiste el borrado: al reabrir la bandeja la notificación ya no aparece.
     unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
-      NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
-      mode: InsertMode.insertOrIgnore,
-    ));
+          NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
+          mode: InsertMode.insertOrIgnore,
+        ));
     final usuario = n.usuario;
     if (usuario == null) return;
     final esMatch = n.tipo == TipoNotificacion.match ||
@@ -329,6 +388,7 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
 
     // El match siempre abre los detalles del usuario, tenga o no plan.
     if (esMatch) {
+      if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -362,6 +422,7 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
           tab = 2;
           subindice = 3;
       }
+      if (!mounted) return;
       Navigator.pop(context);
       widget.onNavegarA?.call(tab, subindice);
       return;
@@ -370,6 +431,7 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
     if (n.tipo == TipoNotificacion.mensaje) {
       _abrirChat(usuario, esMatch: esMatch, esMeGusta: true);
     } else {
+      if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -418,6 +480,12 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
         ),
         actions: [
+          if (_items.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: primario, size: 22),
+              onPressed: _confirmarLimpiar,
+              tooltip: 'Limpiar notificaciones',
+            ),
           if (_noLeidas > 0)
             IconButton(
               icon: Icon(Icons.done_all, color: primario, size: 22),
@@ -501,7 +569,8 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
                           color: Colors.white,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(_icono(n.tipo), color: _colorIcono(n.tipo), size: 14),
+                        child: Icon(_icono(n.tipo),
+                            color: _colorIcono(n.tipo), size: 14),
                       ),
                     ),
                   ],
@@ -606,7 +675,8 @@ final gustados = await _historialLikesServicio.obtenerHistorial();
             Text(
               'Cuando tengas matches, mensajes, likes o visitas te avisaremos aqu\u00ed.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[500], height: 1.4),
+              style: TextStyle(
+                  fontSize: 14, color: Colors.grey[500], height: 1.4),
             ),
           ],
         ),

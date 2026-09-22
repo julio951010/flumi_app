@@ -246,25 +246,36 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                 Tab(
                   child: _tabConBadge(
                     etiqueta: 'Le gustas',
-                    cantidad: widget.contador.likesNoLeidos,
+                    // Sin contenido cargado no hay chip: el contador global
+                    // puede traer una foto provisional (inicializar) antes de
+                    // que termine _cargar()/reconciliar().
+                    cantidad: _cargando
+                        ? 0
+                        : widget.contador.likesNoLeidos,
                   ),
                 ),
                 Tab(
                   child: _tabConBadge(
                     etiqueta: 'Visitas',
-                    cantidad: widget.contador.visitasNoLeidas,
+                    cantidad: _cargando
+                        ? 0
+                        : widget.contador.visitasNoLeidas,
                   ),
                 ),
                 Tab(
                   child: _tabConBadge(
                     etiqueta: 'Me gustan',
-                    cantidad: widget.contador.misLikesNoLeidos,
+                    cantidad: _cargando
+                        ? 0
+                        : widget.contador.misLikesNoLeidos,
                   ),
                 ),
                 Tab(
                   child: _tabConBadge(
                     etiqueta: 'Matches',
-                    cantidad: widget.contador.matchesNoLeidos,
+                    cantidad: _cargando
+                        ? 0
+                        : widget.contador.matchesNoLeidos,
                   ),
                 ),
               ],

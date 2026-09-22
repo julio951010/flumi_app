@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'foto_desde_red.dart';
+import 'placeholder_foto.dart';
 
 Widget imagenFoto(String ruta,
     {BoxFit fit = BoxFit.cover, int? cacheWidth}) {
@@ -12,12 +13,12 @@ Widget imagenFoto(String ruta,
   if (ruta.startsWith('blob:') || ruta.startsWith('data:')) {
     return Image.network(ruta,
         fit: fit,
-        errorBuilder: (context, error, stack) => const SizedBox.shrink());
+        errorBuilder: (context, error, stack) => const PlaceholderFoto());
   }
   return Image.asset(ruta,
       fit: fit,
       cacheWidth: cacheWidth,
-      errorBuilder: (context, error, stack) => const SizedBox.shrink());
+      errorBuilder: (context, error, stack) => const PlaceholderFoto());
 }
 
 Future<Uint8List> bytesDeArchivo(String ruta) async {

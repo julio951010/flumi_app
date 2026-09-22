@@ -706,11 +706,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   FiltrosEncuentros _filtros = FiltrosEncuentros();
   final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
   final GlobalKey _undoBotonKey = GlobalKey();
-  bool _mostrandoAvisoMatch = false;
-  Timer? _timerAvisoMatch;
   final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
-  /// Pendientes REALES (mensajes + sociales): alimenta el chip de la campana
-  /// dentro de la página de Chats, que nunca se apaga al entrar.
+  /// Notificaciones NUEVAS (solo sociales: likes, visitas y matches): alimenta
+  /// el chip de la campana dentro de la página de Chats. Los mensajes de
+  /// las conversaciones NO cuentan aquí.
   final ValueNotifier<int> _notificacionesPendientes = ValueNotifier<int>(0);
   final ValueNotifier<int> _socialesNoLeidas = ValueNotifier<int>(0);
   int _chatsNoLeidos = 0;
@@ -790,18 +789,20 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     }
   }
 
-  /// Badge de la pestaña Chats = mensajes no leídos + notificaciones nuevas
-  /// (likes, visitas y matches) que aún no se revisaron en la bandeja.
+  /// Campana de Notificaciones = solo notificaciones nuevas (likes, visitas
+  /// y matches) sin revisar en la bandeja. Los mensajes de las conversaciones
+  /// NO cuentan aquí. El indicador del nav inferior de Chats sí suma ambos.
   void _actualizarBadgeNotificaciones() {
+    _notificacionesPendientes.value = _socialesNoLeidas.value;
     final total = _chatsNoLeidos + _socialesNoLeidas.value;
-    _notificacionesPendientes.value = total;
     // Mientras se está viendo la pestaña Chats el indicador del nav queda
-    // apagado; el chip de la campana (pendientes reales) se mantiene.
+    // apagado; el chip de la campana (solo sociales) se mantiene.
     _notificacionesNoLeidas.value = _indice == 3 ? 0 : total;
   }
 
-  /// Registra una notificación social nueva: sube el badge de Chats, refresca
-  /// la pestaña Me Gusta y avisa con una notificación del navegador si el
+  /// Registra una notificación social nueva: sube la campana de
+  /// Notificaciones, refresca la pestaña Me Gusta y avisa con una
+  /// notificación del navegador si el
   /// usuario no está mirando la app.
   Future<void> _registrarNotificacionSocial(
       String tipo, String usuarioId) async {
@@ -1011,9 +1012,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   }
 
   Future<void> _inicializarContadoresMeGusta(String miId) async {
-    // Restaura las tarjetas ya vistas para que al recargar no vuelvan a
-    // contar como nuevas en los chips de la página Me Gusta.
-    unawaited(_contadorMeGusta.cargarVistos());
+    // Restaura las tarjetas ya vistas ANTES de fijar la foto inicial: si se
+    // deja en unawaited, inicializar() pisa con el total sin filtrar vistos
+    // y los chips parpadean con números que luego corrige reconciliar().
+    await _contadorMeGusta.cargarVistos();
     // Refresca el espejo local para que el watch de la BD tenga la foto real
     // y el badge cuente los likes/visitas pendientes desde la última vista.
     try {
@@ -1028,8 +1030,13 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
         if (m.usuarioAId == miId || m.usuarioBId == miId)
           m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId,
     };
-    final gustadosSinMatch =
-        gustados.where((h) => !otrosMatch.contains(h.usuarioLikeadoId)).length;
+    final gustadosSinMatch = gustados
+        .where((h) => !otrosMatch.contains(h.usuarioLikeadoId))
+        // Solo cuentan los no vistos: la fuente final es reconciliar(), pero
+        // la foto inicial no debe inflar el chip con historial ya visto.
+        .where((h) => _contadorMeGusta.esNuevo(
+            CategoriaMeGusta.misLikes, h.usuarioLikeadoId))
+        .length;
     // Si llega en vivo un like/visita/match mientras este inicializador hace
     // sus awaits (p. ej. match justo al arrancar), no debe pisar lo contado:
     // aplica la foto inicial solo para categorías que el watch aún no maneja.
@@ -1062,8 +1069,6 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
     _visitasWatchSub = null;
     _matchesSub?.cancel();
     _matchesSub = null;
-    _timerAvisoMatch?.cancel();
-    _timerAvisoMatch = null;
     _undoSignal.dispose();
     _contadorMeGusta.dispose();
     _meGustaNoLeidas.dispose();
@@ -1130,21 +1135,13 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   }
 
   /// Aviso de "match perdido": se dispara cuando un Nope destruye un match
-  /// potencial con alguien que te dio Me Gusta. Muestra un tooltip simple
-  /// bajo el botón Deshacer (header) y se oculta solo a los 4 s.
+  /// potencial con alguien que te dio Me Gusta. Usa NotificacionServicio
+  /// (Overlay flotante, fuera del layout de la pantalla) en vez de un
+  /// widget embebido en el header, que se podía desbordar según el ancho
+  /// disponible para las acciones del encabezado.
   void _avisarMatchPerdidoEnDeshacer() {
     debugPrint('[MatchPerdido] disparando aviso');
-    setState(() => _mostrandoAvisoMatch = true);
-    _timerAvisoMatch?.cancel();
-    _timerAvisoMatch = Timer(const Duration(seconds: 4), () {
-      if (mounted) _ocultarAvisoMatch();
-    });
-  }
-
-  void _ocultarAvisoMatch() {
-    if (mounted) setState(() => _mostrandoAvisoMatch = false);
-    _timerAvisoMatch?.cancel();
-    _timerAvisoMatch = null;
+    NotificacionServicio.advertencia(context, 'Te has perdido un match');
   }
 
   void _abrirFiltros() async {
@@ -1316,26 +1313,6 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
                               ),
                             ],
                           ),
-                          // Tooltip simple de "match perdido" bajo el botón
-                          // Deshacer. Se renderiza en el header (siempre visible).
-                          if (_mostrandoAvisoMatch)
-                            Container(
-                              margin: const EdgeInsets.only(top: 4, right: 4),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFB8C00),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text(
-                                'Te has perdido un match',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
                         ],
                       )
                     : _indice == 2

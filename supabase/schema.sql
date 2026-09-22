@@ -499,6 +499,58 @@ create trigger historial_likes_try_match
   for each row execute function public.try_crear_match();
 
 -- ============================================================
+-- Fuente canónica del plan (app + RPCs deben coincidir).
+-- Orden (espejo de SuscripcionServicio.planActual en la app):
+--  1. kill-switch: app_config.suscripciones_habilitadas = 'false' -> premium
+--     (modo sin monetización: todo ilimitado, igual que en la app).
+--  2. admin: profiles.is_admin = true -> premium.
+--  3. suscripción activa y vigente; si no hay, gratis.
+-- Independientemente de cómo se obtuvo el plan (fila suscripciones,
+-- is_admin o kill-switch), todos los RPCs leen de aquí.
+-- ============================================================
+create or replace function public.plan_efectivo(p_uid uuid)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v text;
+  v_bool boolean := false;
+begin
+  if p_uid is null then
+    return 'gratis';
+  end if;
+
+  select valor into v
+    from public.app_config
+   where clave = 'suscripciones_habilitadas';
+  if v is not null and lower(v) = 'false' then
+    return 'premium';
+  end if;
+
+  select coalesce(is_admin, false) into v_bool
+    from public.profiles
+   where id = p_uid;
+  if v_bool then
+    return 'premium';
+  end if;
+
+  select coalesce(plan, 'gratis') into v
+    from public.suscripciones
+   where usuario_id = p_uid
+     and coalesce(activa, true) = true
+     and (vence is null or vence > now());
+  if v is null then
+    return 'gratis';
+  end if;
+  return v;
+end;
+$$;
+
+revoke all on function public.plan_efectivo(uuid) from public;
+grant execute on function public.plan_efectivo(uuid) to authenticated;
+
+-- ============================================================
 -- FASE 3: RPC registrar_me_gusta (valida límite + like + match)
 -- Retorna {match, likeado, limite}. El límite diario vive en
 -- usos_diarios (server), no en el reloj del teléfono.
@@ -519,9 +571,8 @@ begin
     return jsonb_build_object('match', false, 'likeado', false, 'limite', false, 'error', 'destino_invalido');
   end if;
 
-  select coalesce(plan, 'gratis') into plane
-    from public.suscripciones
-   where usuario_id = yo;
+  -- Fuente canónica (admin / kill-switch / suscripción vigente).
+  plane := public.plan_efectivo(yo);
 
   -- Límites por plan (espejo de LimitesPlan en la app):
   -- gratis: 15 me gustas/día, 0 superlikes; plus: -1 y 10; premium: -1 y -1.
@@ -618,6 +669,7 @@ grant execute on function public.registrar_visita(uuid) to authenticated;
 -- FASE 6: RPC registrar_deshacer (cupo de Deshacer en el servidor)
 -- Retorna {ok, limite}. gratis: 1/día; plus/premium: -1 (ilimitado).
 -- Si el cupo está agotado NO borra el rechazo.
+-- Plan desde public.plan_efectivo (fuente canónica).
 -- ============================================================
 create or replace function public.registrar_deshacer(perfil_id uuid)
 returns jsonb
@@ -634,9 +686,8 @@ begin
     return jsonb_build_object('ok', false, 'limite', false, 'error', 'destino_invalido');
   end if;
 
-  select coalesce(plan, 'gratis') into plane
-    from public.suscripciones
-   where usuario_id = yo;
+  -- Fuente canónica (admin / kill-switch / suscripción vigente).
+  plane := public.plan_efectivo(yo);
 
   if plane in ('plus', 'premium') then
     cupo := -1;
@@ -823,14 +874,11 @@ begin
         and not exists (select 1 from public.blocks b
                         where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
                            or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
-       and not exists (
-             select 1 from public.rechazos r
-             where r.usuario_id = $1 and r.rechazado_id = p.id
-             group by r.rechazado_id
-             having count(*) >= 3
-           )
-       and not exists (select 1 from public.historial_likes h
-                       where h.usuario_id = $1 and h.usuario_likeado_id = p.id)
+        -- Sin veto permanente por nopes: el rechazo solo ordena/recicla en
+        -- el cliente (VotosServicio.componerDeck) y el Deshacer borra la fila.
+        -- El abuso por ciclado nope/deshacer ya lo frena el cupo de Deshacer.
+        and not exists (select 1 from public.historial_likes h
+                        where h.usuario_id = $1 and h.usuario_likeado_id = p.id)
      %s
      limit $10 offset $11',
     clausulas, ordenar)
@@ -979,10 +1027,20 @@ create policy "app_config_solo_service"
   on public.app_config for select
   using (auth.role() = 'service_role');
 
+-- La app (authenticated) solo puede leer el kill-switch de suscripciones,
+-- nunca los secretos push. El RPC plan_efectivo (security definer) lee
+-- todo sin RLS, así app y servidor comparten la misma fuente.
+drop policy if exists "app_config_flag_publica" on public.app_config;
+create policy "app_config_flag_publica"
+  on public.app_config for select
+  to authenticated
+  using (clave = 'suscripciones_habilitadas');
+
 insert into public.app_config (clave, valor, tipo)
 values
   ('push_url', 'https://gzozmebdrsdcupgvxuiv.supabase.co/functions/v1/enviar-push', 'push'),
-  ('push_secret', 'HdSAjqJCMFko7DvLUblIigVBmx1eGNX8', 'push')
+  ('push_secret', 'HdSAjqJCMFko7DvLUblIigVBmx1eGNX8', 'push'),
+  ('suscripciones_habilitadas', 'true', 'feature')
 on conflict (clave) do nothing;
 
 -- Envía un push sin bloquear la transacción que lo dispara.

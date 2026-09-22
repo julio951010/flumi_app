@@ -1,7 +1,21 @@
 -- ============================================================
 -- ELIMINAR CUENTA COMPLETA: Borra usuario, datos, storage y auth
--- Ejecutar en Supabase SQL Editor
 -- ============================================================
+-- ADVERTENCIA: la app NO usa esta función — usa la Edge Function
+-- supabase/functions/eliminar-cuenta/index.ts, que es la que
+-- realmente funciona. Este archivo queda solo como referencia de
+-- cómo se intentó hacer directo en SQL, y por qué no sirve así:
+--
+-- `auth.delete_user(...)` NO es una función invocable desde SQL/RPC.
+-- Borrar un usuario de auth.users requiere la Admin API de Supabase
+-- (`supabase.auth.admin.deleteUser`), que solo puede llamarse desde
+-- un contexto de servidor con la service_role key — nunca desde un
+-- RPC plano, ni siquiera con `security definer`. Si se ejecuta esta
+-- función tal cual, el último paso lanza un error y, al estar todo
+-- dentro de una sola transacción implícita, se revierte TODO lo
+-- anterior (storage y borrado de profiles incluidos) — es decir,
+-- no se borra nada, aunque parezca que sí porque no hay excepción
+-- visible hasta ese punto.
 
 -- Función para borrar completamente una cuenta
 create or replace function public.eliminar_cuenta_completa()
@@ -22,41 +36,32 @@ begin
   -- 1. Obtener URLs de fotos del usuario ANTES de borrar el perfil
   select fotos_urls into v_foto_urls from public.profiles where id = v_usuario_id;
 
-  -- 2. Borrar archivos de Storage (profile-photos bucket)
+  -- 2. Borrar archivos de Storage (profile-photos bucket).
+  -- Las fotos se guardan como '{usuario_id}_{timestamp}.jpg' en la RAÍZ
+  -- del bucket (ver perfil_foto_servicio.dart), no en una carpeta por
+  -- usuario, así que se borra por nombre de archivo directo, no por path.
   if array_length(v_foto_urls, 1) > 0 then
     foreach v_url in array v_foto_urls loop
-      -- Extraer el path del archivo desde la URL pública
-      -- Formato típico: https://xxx.supabase.co/storage/v1/object/public/profile-photos/archivo.jpg
+      -- Extraer el nombre de archivo desde la URL pública
+      -- Formato típico: https://xxx.supabase.co/storage/v1/object/public/profile-photos/{uuid}_{timestamp}.jpg
       declare
-        v_path text := regexp_replace(v_url, '^.*/storage/v1/object/public/[^/]+/', '');
+        v_nombre text := regexp_replace(v_url, '^.*/storage/v1/object/public/[^/]+/', '');
       begin
         delete from storage.objects
-        where bucket_id = 'profile-photos' and name = v_path;
+        where bucket_id = 'profile-photos' and name = v_nombre;
       exception when others then
         -- Ignorar errores de archivos que no existan
       end;
     end loop;
   end if;
 
-  -- 2. Borrar avatar del usuario si existe en bucket 'avatars'
-  begin
-    delete from storage.objects
-    where bucket_id = 'avatars' and name like v_usuario_id || '%';
-  exception when others then
-    -- Ignorar errores
-  end;
-
   -- 3. Borrar datos de la app (cascada borra tablas relacionadas por FK)
-  -- El trigger on_auth_user_created creó el perfil, ahora lo borramos
   delete from public.profiles where id = v_usuario_id;
 
-  -- 4. Borrar usuario de Auth (requiere service_role)
-  -- NOTA: Esto requiere que la función se ejecute con service_role
-  -- En Supabase, auth.uid() devuelve el usuario actual en la sesión
-  -- Para borrar el usuario auth, usamos la función admin
-  perform auth.delete_user(v_usuario_id);
+  -- 4. Borrar usuario de Auth: ESTO NO FUNCIONA DESDE AQUÍ.
+  -- `auth.delete_user` no existe. Usa la Edge Function en su lugar.
+  -- perform auth.delete_user(v_usuario_id);
 
-  -- Si llegamos aquí, todo se borró correctamente
   return;
 end;
 $$;
@@ -73,38 +78,10 @@ grant execute on function public.eliminar_cuenta_completa() to authenticated;
 -- En supabase/functions/eliminar-cuenta/index.ts:
 --
 -- import { createClient } from '@supabase/supabase-js'
--- 
--- Deno.serve(async (req) => {
---   const authHeader = req.headers.get('Authorization')!
---   const supabase = createClient(
---     Deno.env.get('SUPABASE_URL')!,
---     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
---     { global: { headers: { Authorization: authHeader } } }
---   )
--- 
---   const { data: { user } } = await supabase.auth.getUser()
---   if (!user) return new Response('No autorizado', { status: 401 })
--- 
---   // 1. Borrar storage
---   const { data: files } = await supabase.storage
---     .from('profile-photos')
---     .list(`${user.id}/`, { limit: 100 })
---   if (files) {
---     await supabase.storage.from('profile-photos').remove(
---       files.map(f => `${user.id}/${f.name}`)
---     )
---   }
--- 
---   // 2. Borrar datos app (cascada)
---   await supabase.from('profiles').delete().eq('id', user.id)
--- 
---   // 3. Borrar usuario auth (requiere service_role)
---   await supabase.auth.admin.deleteUser(user.id)
--- 
---   return new Response(JSON.stringify({ success: true }), {
---     headers: { 'Content-Type': 'application/json' }
---   })
--- }
+-- El código real y actualizado de la Edge Function vive en:
+--   supabase/functions/eliminar-cuenta/index.ts
+-- (no se duplica aquí para evitar que las dos copias queden
+-- desincronizadas — ya pasó una vez con la ruta de storage).
 
 -- Para invocarla desde la app:
 -- await supabase.functions.invoke('eliminar-cuenta')

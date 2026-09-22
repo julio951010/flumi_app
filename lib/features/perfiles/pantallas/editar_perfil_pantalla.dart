@@ -9,6 +9,7 @@ import '../../../core/base_datos_local/tables.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/perfil_foto_servicio.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
+import '../../../widgets_comunes/placeholder_foto.dart';
 import '../../../widgets_comunes/flumi_loader.dart';
 import '../../../widgets_comunes/recortar_imagen_pantalla.dart';
 import '../../configuracion/pantallas/informacion_basica_pantalla.dart';
@@ -760,17 +761,28 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Future<void> _reordenarFotos(int from, int to) async {
     final perfil = _perfil;
     if (perfil == null) return;
-    final nuevas = [...perfil.fotosLocalesRutas];
-    final nuevasUrls = [...perfil.fotosUrls];
-    if (from < 0 || from >= nuevas.length) return;
-    if (to < 0 || to >= nuevas.length) return;
+    final total = _fotosGrilla.length;
+    if (from < 0 || from >= total) return;
+    if (to < 0 || to >= total) return;
     if (from == to) return;
+    // Se rellenan ambas listas hasta `total` (el mismo largo que usa la
+    // grilla visible) antes de reordenar — si se reordena directo sobre
+    // fotosLocalesRutas/fotosUrls tal como estén, una de las dos podría
+    // ser más corta (p. ej. tras sincronizar el perfil desde Supabase) y
+    // el reordenamiento fallar en silencio o desalinear una respecto a
+    // la otra.
+    final nuevas = [...perfil.fotosLocalesRutas];
+    while (nuevas.length < total) {
+      nuevas.add('');
+    }
+    final nuevasUrls = [...perfil.fotosUrls];
+    while (nuevasUrls.length < total) {
+      nuevasUrls.add('');
+    }
     final item = nuevas.removeAt(from);
     nuevas.insert(to, item);
-    if (from < nuevasUrls.length && to < nuevasUrls.length) {
-      final itemUrl = nuevasUrls.removeAt(from);
-      nuevasUrls.insert(to, itemUrl);
-    }
+    final itemUrl = nuevasUrls.removeAt(from);
+    nuevasUrls.insert(to, itemUrl);
     await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
       uuid: Value(perfil.uuid),
       fotosLocalesRutas: Value(nuevas),
@@ -790,7 +802,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
         ruta,
         fit: BoxFit.cover,
         webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        errorBuilder: (_, __, ___) => const PlaceholderFoto(),
       );
     }
     return imagenFoto(ruta, fit: BoxFit.cover);
@@ -855,8 +867,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   }
 
   Future<void> _seleccionarFoto() async {
-    final fotos = _perfil?.fotosLocalesRutas ?? [];
-    if (fotos.length >= 4) {
+    if (_fotosGrilla.length >= 4) {
       NotificacionServicio.advertencia(context, 'Solo puedes subir 4 fotos.');
       return;
     }
@@ -884,7 +895,16 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Future<void> _agregarFoto(XFile foto) async {
     final perfil = _perfil;
     if (perfil == null) return;
-    final nuevas = [...perfil.fotosLocalesRutas, foto.path];
+    // Índice real del próximo slot: el mismo que usa la grilla visible
+    // (máximo entre fotosUrls y fotosLocalesRutas), no fotosLocalesRutas
+    // en crudo — que puede llegar vacía tras sincronizar el perfil desde
+    // Supabase, aunque fotosUrls ya tenga fotos reales.
+    final indice = _fotosGrilla.length;
+    final nuevas = [...perfil.fotosLocalesRutas];
+    while (nuevas.length <= indice) {
+      nuevas.add('');
+    }
+    nuevas[indice] = foto.path;
     await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
       uuid: Value(perfil.uuid),
       fotosLocalesRutas: Value(nuevas),
@@ -893,7 +913,6 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
     if (!mounted) return;
     setState(() =>
         _perfil = perfil.copyWith(fotosLocalesRutas: nuevas, pendienteDeSincronizar: true));
-    final indice = nuevas.length - 1;
     PerfilFotoServicio.subirFotoPerfil(usuarioId: perfil.uuid, archivo: foto)
         .then((url) async {
       if (url == null || !mounted) return;
@@ -919,8 +938,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Future<void> _cambiarFoto(int index) async {
     final perfil = _perfil;
     if (perfil == null) return;
-    final fotos = perfil.fotosLocalesRutas;
-    if (index >= fotos.length) return;
+    if (index >= _fotosGrilla.length) return;
     final fuente = await _elegirFuente();
     if (fuente == null) return;
     try {
@@ -935,7 +953,10 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
       final urlAnterior = index < perfil.fotosUrls.length
           ? perfil.fotosUrls[index]
           : '';
-      final nuevas = [...fotos];
+      final nuevas = [...perfil.fotosLocalesRutas];
+      while (nuevas.length <= index) {
+        nuevas.add('');
+      }
       nuevas[index] = recortada.path;
       await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
         uuid: Value(perfil.uuid),
@@ -1045,16 +1066,18 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   Future<void> _eliminarFoto(int index) async {
     final perfil = _perfil;
     if (perfil == null) return;
+    if (index >= _fotosGrilla.length) return;
     final nuevas = [...perfil.fotosLocalesRutas];
-    if (index >= nuevas.length) {
+    while (nuevas.length <= index) {
       nuevas.add('');
-    } else {
-      nuevas.removeAt(index);
     }
+    nuevas.removeAt(index);
     final nuevasUrls = [...perfil.fotosUrls];
-    final urlEliminada =
-        index < nuevasUrls.length ? nuevasUrls[index] : '';
-    if (index < nuevasUrls.length) nuevasUrls.removeAt(index);
+    final urlEliminada = index < nuevasUrls.length ? nuevasUrls[index] : '';
+    while (nuevasUrls.length <= index) {
+      nuevasUrls.add('');
+    }
+    nuevasUrls.removeAt(index);
     await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
       uuid: Value(perfil.uuid),
       fotosLocalesRutas: Value(nuevas),

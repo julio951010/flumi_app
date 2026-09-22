@@ -9,6 +9,7 @@ import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
+import '../../../widgets_comunes/placeholder_foto.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/visor_fotos_pantalla.dart';
 import '../../auth/auth_service.dart';
@@ -369,7 +370,7 @@ class _PerfilFlumi extends StatelessWidget {
         fit: BoxFit.cover,
         webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
         loadingBuilder: (_, __, ___) => const ShimmerCaja(radius: 0),
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        errorBuilder: (_, __, ___) => const PlaceholderFoto(),
       );
     }
     return imagenFoto(ruta, fit: BoxFit.cover);
