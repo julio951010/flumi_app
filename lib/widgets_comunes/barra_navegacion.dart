@@ -18,7 +18,7 @@ class BarraNavegacion extends StatelessWidget {
   static const _nombres = [
     'Cerca',
     'Encuentros',
-    'Me Gusta',
+    'Actividad',
     'Chats',
     'Perfil',
   ];

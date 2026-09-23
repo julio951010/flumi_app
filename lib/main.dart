@@ -763,7 +763,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   static const _nombresPaginas = [
     'Cerca de ti',
     'Encuentros',
-    'Me Gusta',
+    'Actividad',
     'Chats',
     'Perfil',
   ];

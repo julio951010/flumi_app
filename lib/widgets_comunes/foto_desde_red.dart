@@ -40,6 +40,8 @@ class FotoDesdeRed extends StatefulWidget {
   final double? width;
   final double? height;
   final int? cacheWidth;
+  final VoidCallback? onError;
+  final VoidCallback? onLoad;
 
   const FotoDesdeRed({
     super.key,
@@ -48,6 +50,8 @@ class FotoDesdeRed extends StatefulWidget {
     this.width,
     this.height,
     this.cacheWidth,
+    this.onError,
+    this.onLoad,
   });
 
   @override
@@ -82,14 +86,23 @@ class _FotoDesdeRedState extends State<FotoDesdeRed> {
   Future<void> _cargar() async {
     final cache = _cacheFotos[widget.ruta];
     if (cache != null) {
-      if (mounted) setState(() => _bytes = cache);
+      if (mounted) {
+        setState(() => _bytes = cache);
+        widget.onLoad?.call();
+      }
       return;
     }
     try {
       final bytes = await _descargarBytes(widget.ruta);
-      if (mounted) setState(() => _bytes = bytes);
+      if (mounted) {
+        setState(() => _bytes = bytes);
+        widget.onLoad?.call();
+      }
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      if (mounted) {
+        setState(() => _error = true);
+        widget.onError?.call();
+      }
     }
   }
 
@@ -107,10 +120,13 @@ class _FotoDesdeRedState extends State<FotoDesdeRed> {
         fit: widget.fit,
         cacheWidth: widget.cacheWidth,
         gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => PlaceholderFoto(
-          width: widget.width,
-          height: widget.height,
-        ),
+        errorBuilder: (_, __, ___) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => widget.onError?.call());
+          return PlaceholderFoto(
+            width: widget.width,
+            height: widget.height,
+          );
+        },
       );
     } else {
       imagen = const ShimmerCaja(radius: 0);

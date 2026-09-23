@@ -319,7 +319,7 @@ class _SinPerfil extends StatelessWidget {
   }
 }
 
-class _PerfilFlumi extends StatelessWidget {
+class _PerfilFlumi extends StatefulWidget {
   final Usuario perfil;
   final AuthService authService;
   final PerfilRepositorio repositorio;
@@ -327,6 +327,7 @@ class _PerfilFlumi extends StatelessWidget {
   final VoidCallback? onActualizar;
 
   const _PerfilFlumi({
+    super.key,
     required this.perfil,
     required this.authService,
     required this.repositorio,
@@ -334,7 +335,23 @@ class _PerfilFlumi extends StatelessWidget {
     this.onActualizar,
   });
 
+  @override
+  State<_PerfilFlumi> createState() => _PerfilFlumiState();
+}
+
+class _PerfilFlumiState extends State<_PerfilFlumi> {
+  bool _fotoPrincipalError = false;
+
   static const _gradiente = [Color(0xFF6C63FF), Color(0xFFFF6584)];
+
+  @override
+  void didUpdateWidget(covariant _PerfilFlumi oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.perfil.uuid != widget.perfil.uuid ||
+        oldWidget.perfil.fotosUrls.join() != widget.perfil.fotosUrls.join()) {
+      _fotoPrincipalError = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -346,11 +363,11 @@ class _PerfilFlumi extends StatelessWidget {
           _encabezado(context),
           const SizedBox(height: 16),
           _tarjetaCompletado(context),
-          if (!perfil.verificadoStatus) ...[
+          if (!widget.perfil.verificadoStatus) ...[
             const SizedBox(height: 12),
             _tarjetaVerificacion(context),
           ],
-          if (suscripcionServicio.suscripcionesHabilitadas) ...[
+          if (widget.suscripcionServicio.suscripcionesHabilitadas) ...[
             const SizedBox(height: 28),
             const _SeccionTitulo('Planes de suscripción'),
             const SizedBox(height: 12),
@@ -370,21 +387,36 @@ class _PerfilFlumi extends StatelessWidget {
         fit: BoxFit.cover,
         webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
         loadingBuilder: (_, __, ___) => const ShimmerCaja(radius: 0),
-        errorBuilder: (_, __, ___) => const PlaceholderFoto(),
+        errorBuilder: (_, __, ___) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && !_fotoPrincipalError) setState(() => _fotoPrincipalError = true);
+          });
+          return const PlaceholderFoto();
+        },
       );
     }
-    return imagenFoto(ruta, fit: BoxFit.cover);
+    return imagenFoto(
+      ruta,
+      fit: BoxFit.cover,
+      onError: () {
+        if (mounted && !_fotoPrincipalError) setState(() => _fotoPrincipalError = true);
+      },
+      onLoad: () {
+        if (mounted && _fotoPrincipalError) setState(() => _fotoPrincipalError = false);
+      },
+    );
   }
 
   Widget _encabezado(BuildContext context) {
-    final inicial =
-        perfil.nombre.isNotEmpty ? perfil.nombre[0].toUpperCase() : '?';
-    final fotos = fotosParaMostrar(perfil);
-    final tieneFoto = fotos.isNotEmpty;
+    final inicial = widget.perfil.nombre.isNotEmpty
+        ? widget.perfil.nombre[0].toUpperCase()
+        : '?';
+    final fotos = fotosParaMostrar(widget.perfil);
+    final tieneFoto = fotos.isNotEmpty && !_fotoPrincipalError;
     return Row(
       children: [
         GestureDetector(
-          onTap: () => _abrirGaleria(context, fotos),
+          onTap: tieneFoto ? () => _abrirGaleria(context, fotos) : null,
           child: Container(
             width: 104,
             height: 104,
@@ -423,7 +455,7 @@ class _PerfilFlumi extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        '${perfil.nombre}, ${perfil.edad}',
+                        '${widget.perfil.nombre}, ${widget.perfil.edad}',
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -432,7 +464,7 @@ class _PerfilFlumi extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (perfil.verificadoStatus) ...[
+                    if (widget.perfil.verificadoStatus) ...[
                       const SizedBox(width: 6),
                       const Icon(Icons.verified, color: Colors.blueAccent, size: 22),
                     ],
@@ -446,8 +478,8 @@ class _PerfilFlumi extends StatelessWidget {
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
-                        perfil.ciudad.trim().isNotEmpty
-                            ? perfil.ciudad
+                        widget.perfil.ciudad.trim().isNotEmpty
+                            ? widget.perfil.ciudad
                             : 'Cerca de ti',
                         style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                         overflow: TextOverflow.ellipsis,
@@ -488,16 +520,16 @@ class _PerfilFlumi extends StatelessWidget {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => EditarPerfilPantalla(
-          perfil: perfil,
-          repositorio: repositorio,
+          perfil: widget.perfil,
+          repositorio: widget.repositorio,
         ),
       ),
     );
-    onActualizar?.call();
+    widget.onActualizar?.call();
   }
 
   Widget _tarjetaPlanActual(BuildContext context) {
-    final s = suscripcionServicio;
+    final s = widget.suscripcionServicio;
     final (icono, nombre, detalle) = switch (s.planActual) {
       PlanTipo.gratis => (
           Icons.eco,
@@ -528,7 +560,7 @@ class _PerfilFlumi extends StatelessWidget {
   }
 
   Widget _tarjetaCompletado(BuildContext context) {
-    final porcentaje = calcularCompletadoPerfil(perfil);
+    final porcentaje = calcularCompletadoPerfil(widget.perfil);
     final completo = porcentaje >= 100;
     return _tarjetaInfo(
       icono: Icons.fact_check_outlined,
@@ -543,19 +575,19 @@ class _PerfilFlumi extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => EditarPerfilPantalla(
-                    perfil: perfil,
-                    repositorio: repositorio,
+                    perfil: widget.perfil,
+                    repositorio: widget.repositorio,
                   ),
                 ),
               );
-              onActualizar?.call();
+              widget.onActualizar?.call();
             },
     );
   }
 
   Widget _tarjetaVerificacion(BuildContext context) {
-    final enRevision =
-        perfil.fotoVerificacion.isNotEmpty && !perfil.verificadoStatus;
+    final enRevision = widget.perfil.fotoVerificacion.isNotEmpty &&
+        !widget.perfil.verificadoStatus;
     return _tarjetaInfo(
       icono: Icons.verified_outlined,
       titulo: enRevision
@@ -569,12 +601,12 @@ class _PerfilFlumi extends StatelessWidget {
           context,
           MaterialPageRoute(
             builder: (_) => VerificacionCuentaPantalla(
-              perfil: perfil,
-              repositorio: repositorio,
+              perfil: widget.perfil,
+              repositorio: widget.repositorio,
             ),
           ),
         );
-        if (verificada == true) onActualizar?.call();
+        if (verificada == true) widget.onActualizar?.call();
       },
     );
   }
@@ -629,7 +661,7 @@ class _PerfilFlumi extends StatelessWidget {
   }
 
   Widget _planes() {
-    final planActual = suscripcionServicio.planActual;
+    final planActual = widget.suscripcionServicio.planActual;
     return _CarruselPlanes(
       planes: [
         _TarjetaPlan(
