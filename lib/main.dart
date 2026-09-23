@@ -18,6 +18,7 @@ import 'core/servicios/notificacion_local_servicio.dart';
 import 'core/servicios/notificacion_servicio.dart';
 import 'core/servicios/preferencias_notificaciones_servicio.dart';
 import 'core/servicios/sync_service.dart';
+import 'core/servicios/ubicacion_auto_servicio.dart';
 import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
@@ -723,7 +724,8 @@ class _NavegacionPrincipal extends StatefulWidget {
   State<_NavegacionPrincipal> createState() => _NavegacionPrincipalState();
 }
 
-class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
+class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
+    with WidgetsBindingObserver {
   int _indice = 1;
   int _indiceMeGusta = 0;
   FiltrosEncuentros _filtros = FiltrosEncuentros();
@@ -769,6 +771,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Ubicación real al abrir la app: GPS → provincia más cercana → guarda
+    // ciudad + lat/lon para "cerca de ti" preciso en cada apertura.
+    unawaited(UbicacionAutoServicio.actualizarAlAbrirApp(
+        db: database, repo: perfilRepositorio));
     final miId = authService.usuarioActual!['id'] as String;
     _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) {
       _chatsNoLeidos =
@@ -1086,7 +1093,17 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Al volver a primer plano: refresca ubicación real para "cerca de ti".
+      unawaited(UbicacionAutoServicio.actualizarAlAbrirApp(
+          db: database, repo: perfilRepositorio));
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     chatRepositorio.cancelarRealtime();
     _convSub?.cancel();
     _convSub = null;

@@ -1043,6 +1043,60 @@ values
   ('suscripciones_habilitadas', 'true', 'feature')
 on conflict (clave) do nothing;
 
+-- ============================================================
+-- PAGOS: configuración de datos de transferencia por método
+-- Gestionado desde flumi_admin. La app lee la fila activa por método
+-- y muestra tarjeta/QR/móvil. Si no hay fila, usa fallback local.
+-- ============================================================
+create table if not exists public.pagos_config (
+  id uuid primary key default uuid_generate_v4(),
+  metodo text not null check (metodo in ('transfermovil','enzona')),
+  tarjeta_destino text not null default '',
+  movil_confirmar text not null default '',
+  qr_url text not null default '',
+  concepto text not null default 'Flumi',
+  activo boolean not null default true,
+  actualizado_en timestamptz not null default now(),
+  unique(metodo)
+);
+
+alter table public.pagos_config enable row level security;
+
+drop policy if exists "pagos_config_lectura" on public.pagos_config;
+create policy "pagos_config_lectura"
+  on public.pagos_config for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "pagos_config_admin" on public.pagos_config;
+create policy "pagos_config_admin"
+  on public.pagos_config for all
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+-- Datos de prueba (EnZona usa el QR de prueba del repo)
+insert into public.pagos_config (metodo, tarjeta_destino, movil_confirmar, qr_url, concepto, activo)
+values
+  ('transfermovil', '9225 9598 7143 2108', '+53 5 123 45 67', '', 'Flumi', true),
+  ('enzona', '9225 9598 7143 2108', '+53 5 123 45 67', '', 'Flumi EnZona', true)
+on conflict (metodo) do nothing;
+
+-- Bucket para QR de pagos (Transfermóvil y EnZona). Público para que la app pueda mostrarlos sin auth.
+insert into storage.buckets (id, name, public)
+values ('pagos_qr', 'pagos_qr', true)
+on conflict (id) do nothing;
+
+-- Políticas de storage para pagos_qr: lectura pública, escritura solo admin/service_role
+drop policy if exists "pagos_qr_lectura_publica" on storage.objects;
+create policy "pagos_qr_lectura_publica"
+  on storage.objects for select
+  using (bucket_id = 'pagos_qr');
+
+drop policy if exists "pagos_qr_escritura_admin" on storage.objects;
+create policy "pagos_qr_escritura_admin"
+  on storage.objects for all
+  using (bucket_id = 'pagos_qr' and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (bucket_id = 'pagos_qr' and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
 -- Envía un push sin bloquear la transacción que lo dispara.
 -- Respeta public.notif_prefs del destinatario (sin fila = todo ON).
 create or replace function public.enviar_push_pg(
@@ -1217,3 +1271,277 @@ drop trigger if exists notificar_push_match_trg on public.matches;
 create trigger notificar_push_match_trg
   after insert on public.matches
   for each row execute function public.notificar_push_match();
+
+-- ============================================================
+-- PAGOS MANUALES (Transfermóvil / EnZona) — verificación segura
+-- ============================================================
+create table if not exists public.pagos (
+  id uuid primary key default uuid_generate_v4(),
+  usuario_id uuid not null references public.profiles(id) on delete cascade,
+  metodo text not null check (metodo in ('transfermovil','enzona')),
+  plan text not null check (plan in ('Flumi Plus','Flumi Premium')),
+  dias int not null check (dias in (7,30,90)),
+  monto int not null,
+  tarjeta_destino text not null,
+  movil_confirmar text not null,
+  qr_url text not null default '',
+  nro_transaccion text not null,
+  estado text not null default 'pendiente' check (estado in ('pendiente','aprobado','rechazado')),
+  creado_en timestamptz not null default now(),
+  verificado_en timestamptz,
+  verificado_por uuid references public.profiles(id),
+  motivo_rechazo text,
+  unique(nro_transaccion)
+);
+
+create index if not exists pagos_usuario_idx on public.pagos (usuario_id);
+create index if not exists pagos_estado_idx on public.pagos (estado);
+create index if not exists pagos_nro_idx on public.pagos (nro_transaccion);
+
+alter table public.pagos enable row level security;
+
+drop policy if exists "pagos_usuario_gestiona" on public.pagos;
+create policy "pagos_usuario_gestiona"
+  on public.pagos for all
+  using (auth.uid() = usuario_id)
+  with check (auth.uid() = usuario_id);
+
+drop policy if exists "pagos_admin_ve_todo" on public.pagos;
+create policy "pagos_admin_ve_todo"
+  on public.pagos for select
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+drop policy if exists "pagos_admin_actualiza" on public.pagos;
+create policy "pagos_admin_actualiza"
+  on public.pagos for update
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+-- Realtime para admin (pendientes en vivo)
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='pagos') then
+    alter publication supabase_realtime add table public.pagos;
+  end if;
+end $$;
+
+-- Solicitar pago: valida en servidor (monto, formato, anti-replay, rate-limit)
+-- Si se adjunta prueba SMS (p_sms_nro/monto/remitente) y coincide con lo que
+-- el usuario escribió + remitente esperado + monto, se auto-aprueba sin admin.
+create or replace function public.solicitar_pago(
+  p_metodo text,
+  p_plan text,
+  p_dias int,
+  p_nro text,
+  p_sms_nro text default null,
+  p_sms_monto numeric default null,
+  p_sms_remitente text default null,
+  p_sms_fecha text default null,
+  p_sms_beneficiario text default null
+) returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  v_monto int;
+  v_tarjeta text;
+  v_movil text;
+  v_qr text;
+  v_existe int;
+  v_pendientes int;
+  v_auto boolean := false;
+  v_sms_nro_norm text;
+  v_sms_rem_norm text;
+begin
+  if yo is null then
+    return jsonb_build_object('ok', false, 'error', 'no_autenticado');
+  end if;
+  p_metodo := lower(trim(p_metodo));
+  p_plan := trim(p_plan);
+  p_nro := upper(trim(p_nro));
+  p_nro := regexp_replace(p_nro, '\s+', '', 'g');
+
+  if p_metodo not in ('transfermovil','enzona') then
+    return jsonb_build_object('ok', false, 'error', 'metodo_invalido');
+  end if;
+  if p_plan not in ('Flumi Plus','Flumi Premium') then
+    return jsonb_build_object('ok', false, 'error', 'plan_invalido');
+  end if;
+  if p_dias not in (7,30,90) then
+    return jsonb_build_object('ok', false, 'error', 'dias_invalido');
+  end if;
+
+  -- Formato Nro: 13 Transfermóvil / 12 EnZona, alfanumérico
+  if p_metodo = 'transfermovil' and p_nro !~ '^[A-Za-z0-9]{13}$' then
+    return jsonb_build_object('ok', false, 'error', 'nro_formato_transfermovil');
+  end if;
+  if p_metodo = 'enzona' and p_nro !~ '^[A-Za-z0-9]{12}$' then
+    return jsonb_build_object('ok', false, 'error', 'nro_formato_enzona');
+  end if;
+
+  -- Monto canónico según plan/días (espejo de DetallePlanPantalla._precios)
+  if p_plan = 'Flumi Premium' then
+    v_monto := case p_dias when 7 then 200 when 30 then 500 when 90 then 1300 else 0 end;
+  else
+    v_monto := case p_dias when 7 then 100 when 30 then 250 when 90 then 650 else 0 end;
+  end if;
+
+  -- Config activa para el método
+  select tarjeta_destino, movil_confirmar, qr_url into v_tarjeta, v_movil, v_qr
+    from public.pagos_config where metodo = p_metodo and activo = true limit 1;
+  if v_tarjeta is null then
+    v_tarjeta := '9225 9598 7143 2108';
+    v_movil := '+53 5 123 45 67';
+    v_qr := '';
+  end if;
+
+  -- Anti-replay global
+  select count(*) into v_existe from public.pagos where nro_transaccion = p_nro;
+  if v_existe > 0 then
+    return jsonb_build_object('ok', false, 'error', 'nro_duplicado');
+  end if;
+
+  -- Rate-limit: máx 3 pendientes por 24h por usuario
+  select count(*) into v_pendientes from public.pagos
+    where usuario_id = yo and creado_en > now() - interval '24 hours' and estado = 'pendiente';
+  if v_pendientes >= 3 then
+    return jsonb_build_object('ok', false, 'error', 'rate_limit');
+  end if;
+
+  -- Auto-verificación por SMS: si el Nro del SMS coincide con el que el
+  -- usuario escribió, el remitente es el esperado (PAGOxMOVIL/ENZONA) y el
+  -- monto coincide (si el SMS lo trae), se aprueba automáticamente.
+  if p_sms_nro is not null and p_sms_remitente is not null then
+    v_sms_nro_norm := upper(regexp_replace(trim(p_sms_nro), '\s+', '', 'g'));
+    v_sms_rem_norm := upper(trim(p_sms_remitente));
+    if v_sms_nro_norm = p_nro then
+      if (p_metodo = 'transfermovil' and v_sms_rem_norm = 'PAGOXMOVIL') or
+         (p_metodo = 'enzona' and v_sms_rem_norm = 'ENZONA') then
+        if p_sms_monto is null or abs(p_sms_monto - v_monto) < 0.01 then
+          -- Beneficiario: 4 primeros y 4 últimos deben coincidir con tarjeta configurada
+          declare
+            v_ben_norm text;
+            v_tar_norm text;
+            v_ben_first4 text;
+            v_ben_last4 text;
+            v_tar_first4 text;
+            v_tar_last4 text;
+            v_ben_ok boolean := true;
+            v_fecha_ok boolean := true;
+          begin
+            if p_sms_beneficiario is not null and length(regexp_replace(p_sms_beneficiario, '[^0-9]', '', 'g')) >= 8 then
+              v_ben_norm := regexp_replace(p_sms_beneficiario, '[^0-9]', '', 'g');
+              v_tar_norm := regexp_replace(coalesce(v_tarjeta,''), '[^0-9]', '', 'g');
+              if length(v_tar_norm) >= 8 then
+                v_ben_first4 := substring(v_ben_norm from 1 for 4);
+                v_ben_last4 := substring(v_ben_norm from length(v_ben_norm)-3 for 4);
+                v_tar_first4 := substring(v_tar_norm from 1 for 4);
+                v_tar_last4 := substring(v_tar_norm from length(v_tar_norm)-3 for 4);
+                if v_ben_first4 <> v_tar_first4 or v_ben_last4 <> v_tar_last4 then
+                  v_ben_ok := false;
+                end if;
+              end if;
+            end if;
+            -- Fecha: debe ser hoy (fecha del pago en app) con tolerancia 1 día
+            if p_sms_fecha is not null and p_sms_fecha <> '' then
+              begin
+                -- p_sms_fecha viene como 'YYYY-MM-DD' desde el cliente
+                if abs(extract(epoch from (current_date - p_sms_fecha::date))/86400) > 1 then
+                  v_fecha_ok := false;
+                end if;
+              exception when others then
+                v_fecha_ok := true; -- si no se puede parsear, no bloquea
+              end;
+            end if;
+            if v_ben_ok and v_fecha_ok then
+              v_auto := true;
+            end if;
+          end;
+        end if;
+      end if;
+    end if;
+  end if;
+
+  if v_auto then
+    insert into public.pagos (usuario_id, metodo, plan, dias, monto, tarjeta_destino, movil_confirmar, qr_url, nro_transaccion, estado, verificado_en, verificado_por)
+    values (yo, p_metodo, p_plan, p_dias, v_monto, coalesce(v_tarjeta,''), coalesce(v_movil,''), coalesce(v_qr,''), p_nro, 'aprobado', now(), yo);
+    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa)
+    values (yo, case when p_plan = 'Flumi Premium' then 'premium' else 'plus' end, now(), now() + (p_dias || ' days')::interval, true)
+    on conflict (usuario_id) do update set plan = excluded.plan, inicio = excluded.inicio, vence = excluded.vence, activa = true;
+    perform public.enviar_push_pg(yo, 'Pago verificado', 'Tu suscripción ' || p_plan || ' (' || p_dias || ' días) está activa', 'regalos');
+    return jsonb_build_object('ok', true, 'monto', v_monto, 'auto_aprobado', true);
+  end if;
+
+  insert into public.pagos (usuario_id, metodo, plan, dias, monto, tarjeta_destino, movil_confirmar, qr_url, nro_transaccion)
+  values (yo, p_metodo, p_plan, p_dias, v_monto, coalesce(v_tarjeta,''), coalesce(v_movil,''), coalesce(v_qr,''), p_nro);
+
+  return jsonb_build_object('ok', true, 'monto', v_monto, 'auto_aprobado', false);
+end;
+$$;
+
+revoke all on function public.solicitar_pago(text,text,int,text) from public;
+revoke all on function public.solicitar_pago(text,text,int,text,text,numeric,text) from public;
+revoke all on function public.solicitar_pago(text,text,int,text,text,numeric,text,text,text) from public;
+grant execute on function public.solicitar_pago(text,text,int,text) to authenticated;
+grant execute on function public.solicitar_pago(text,text,int,text,text,numeric,text) to authenticated;
+grant execute on function public.solicitar_pago(text,text,int,text,text,numeric,text,text,text) to authenticated;
+
+-- Verificar pago (solo admin): aprueba/rechaza y activa suscripción
+create or replace function public.verificar_pago(
+  p_pago_id uuid,
+  p_estado text,
+  p_motivo text default null
+) returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  es_admin boolean := false;
+  r public.pagos%rowtype;
+begin
+  if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
+  select coalesce(is_admin,false) into es_admin from public.profiles where id = yo;
+  if not es_admin then return jsonb_build_object('ok', false, 'error', 'no_admin'); end if;
+  p_estado := lower(trim(p_estado));
+  if p_estado not in ('aprobado','rechazado') then return jsonb_build_object('ok', false, 'error', 'estado_invalido'); end if;
+
+  select * into r from public.pagos where id = p_pago_id for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'no_encontrado'); end if;
+  if r.estado <> 'pendiente' then return jsonb_build_object('ok', false, 'error', 'ya_verificado'); end if;
+
+  update public.pagos
+    set estado = p_estado,
+        verificado_en = now(),
+        verificado_por = yo,
+        motivo_rechazo = case when p_estado='rechazado' then coalesce(p_motivo,'') else null end
+    where id = p_pago_id;
+
+  if p_estado = 'aprobado' then
+    -- Activa suscripción (plan en minúsculas para la tabla suscripciones)
+    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa)
+    values (
+      r.usuario_id,
+      case when r.plan = 'Flumi Premium' then 'premium' else 'plus' end,
+      now(),
+      now() + (r.dias || ' days')::interval,
+      true
+    )
+    on conflict (usuario_id) do update set
+      plan = excluded.plan,
+      inicio = excluded.inicio,
+      vence = excluded.vence,
+      activa = true;
+    -- Notifica al usuario
+    perform public.enviar_push_pg(r.usuario_id, 'Pago aprobado', 'Tu suscripción ' || r.plan || ' (' || r.dias || ' días) está activa', 'regalos');
+  else
+    perform public.enviar_push_pg(r.usuario_id, 'Pago rechazado', coalesce(p_motivo, 'Tu pago fue rechazado. Revisa el Nro. e intenta de nuevo.'), 'regalos');
+  end if;
+
+  return jsonb_build_object('ok', true, 'estado', p_estado);
+end;
+$$;
+
+revoke all on function public.verificar_pago(uuid,text,text) from public;
+grant execute on function public.verificar_pago(uuid,text,text) to authenticated;

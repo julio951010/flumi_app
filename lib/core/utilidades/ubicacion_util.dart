@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/services.dart';
@@ -197,3 +198,40 @@ double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
 }
 
 double _aRadianes(double grados) => grados * pi / 180;
+
+/// Carga el mapa provincia -> municipios desde el JSON asset.
+Future<Map<String, List<String>>> cargarMapaProvincias() async {
+  try {
+    final jsonStr =
+        await rootBundle.loadString('assets/data/cuba_provincias_municipios.json');
+    return parsearMapaProvincias(jsonStr);
+  } catch (_) {
+    return {};
+  }
+}
+
+/// Parsea el JSON de provincias/municipios a mapa.
+Map<String, List<String>> parsearMapaProvincias(String jsonStr) {
+  try {
+    final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final paises = decoded['paises'] as List?;
+    if (paises == null || paises.isEmpty) return {};
+    final pais = paises.first as Map<String, dynamic>;
+    final provincias = pais['provincias'] as List?;
+    if (provincias == null) return {};
+    final mapa = <String, List<String>>{};
+    for (final p in provincias) {
+      final m = p as Map<String, dynamic>;
+      final nombre = (m['nombre'] as String?) ?? '';
+      if (nombre.isEmpty) continue;
+      final municipios = (m['municipios'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          <String>[];
+      mapa[nombre] = municipios;
+    }
+    return mapa;
+  } catch (_) {
+    return {};
+  }
+}

@@ -67,6 +67,9 @@ dependencies:
   # --- Georreferencia ---
   geolocator: ^13.0.1
 
+  # --- SMS (verificación automática de pagos) ---
+  telephony: ^0.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

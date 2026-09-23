@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/servicios/notificacion_servicio.dart';
+import '../../pagos/modelos/pago_datos.dart';
+import '../../pagos/pantallas/pago_metodo_pantalla.dart';
 
 class DetallePlanPantalla extends StatefulWidget {
   final String nombre;
@@ -246,8 +247,17 @@ class _DetallePlanPantallaState extends State<DetallePlanPantalla> {
               height: 52,
               child: FilledButton(
                 onPressed: () {
-                  NotificacionServicio.exito(
-                      context, 'Suscripci\u00f3n pr\u00f3ximamente');
+                  final datos = PagoDatos(
+                    nombrePlan: widget.nombre,
+                    dias: _periodos[_seleccionado],
+                    precio: _precios[_seleccionado],
+                  );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PagoMetodoPantalla(datos: datos),
+                    ),
+                  );
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: primario,
