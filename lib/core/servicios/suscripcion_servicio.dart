@@ -398,6 +398,10 @@ class SuscripcionServicio with ChangeNotifier {
     unawaited(_sync.sincronizarUsosDiarios(userId));
   }
 
+  /// Helper SOLO local (tests/servidor local): no es el flujo de compra real
+  /// (ese pasa por solicitar_pago/verificar_pago en Supabase). Con el sync
+  /// solo-descarga, lo que se active aquí se sobrescribe con el servidor en
+  /// el próximo sync si difiere.
   Future<void> activarPlan(PlanTipo plan, {Duration? duracion}) async {
     final userList = await (_db.select(_db.usuarios)
           ..where((u) => u.esPerfilPropio.equals(true))
@@ -413,8 +417,12 @@ class SuscripcionServicio with ChangeNotifier {
       usuarioId: Value(userId),
       plan: Value(plan.name),
       inicio: Value(inicio),
-      vence: vence != null ? Value(vence) : const Value.absent(),
+      vence: Value(vence),
       activa: const Value(true),
+      // Una activación fresca no hereda reservas rancias.
+      planReserva: const Value(null),
+      venceReserva: const Value(null),
+      inicioReserva: const Value(null),
     );
     await _db.into(_db.suscripciones).insertOnConflictUpdate(comp);
     _planActual = plan;

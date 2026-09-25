@@ -51,7 +51,9 @@ class _MatchPantallaState extends State<MatchPantalla>
 
   Future<void> _enviarYConversar() async {
     final texto = _mensajeCtrl.text.trim();
-    if (texto.isNotEmpty) {
+    // Mismo gate que ChatPantalla._enviar: gratis no puede enviar mensajes.
+    // Sin esto, el match permitía saltarse el paywall de mensajería.
+    if (texto.isNotEmpty && !widget.suscripcionServicio.esGratis) {
       await widget.chatRepo.enviarMensaje(
         emisorId: widget.miId,
         receptorId: widget.usuario.uuid,

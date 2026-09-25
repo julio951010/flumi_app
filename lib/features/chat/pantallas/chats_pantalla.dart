@@ -117,7 +117,7 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
             final totalMatches = perfiles.where((p) => p.esMatch).length;
 
             return RefreshIndicator(
-              onRefresh: () async {},
+              onRefresh: () => widget.repositorio.sincronizarAhora(),
               child: ListView(
                 controller: _scrollCtrl,
                 physics: const AlwaysScrollableScrollPhysics(),

@@ -191,11 +191,13 @@ class HistorialLikesServicio with ChangeNotifier {
     }
 
     // Sin conexión: queda pendiente (el trigger de match correrá en el sync).
+    // Se conserva esSuper para no perder el Superlike offline al sincronizar.
     final comp = HistorialLikesCompanion(
       uuid: Value(const Uuid().v4()),
       usuarioId: Value(usuarioId),
       usuarioLikeadoId: Value(usuarioLikeadoId),
       timestamp: Value(DateTime.now()),
+      esSuper: Value(esSuper),
     );
     await _db.into(_db.historialLikes).insert(comp);
     unawaited(_sync.sincronizarHistorialLikes());

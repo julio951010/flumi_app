@@ -677,8 +677,8 @@ class _PerfilFlumiState extends State<_PerfilFlumi> {
         _TarjetaPlan(
           icono: Icons.auto_awesome,
           nombre: 'Flumi Plus',
-          periodo: '30 d\u00edas',
-          precio: '250 cup',
+          periodo: '7 · 30 · 90 d\u00edas',
+          precio: 'desde 100 cup',
           detalle: 'Funciones extra',
           destacado: true,
           activo: planActual == PlanTipo.plus,
@@ -686,8 +686,8 @@ class _PerfilFlumiState extends State<_PerfilFlumi> {
         _TarjetaPlan(
           icono: Icons.workspace_premium,
           nombre: 'Flumi Premium',
-          periodo: '30 d\u00edas',
-          precio: '500 cup',
+          periodo: '7 · 30 · 90 d\u00edas',
+          precio: 'desde 200 cup',
           detalle: 'Acceso total',
           activo: planActual == PlanTipo.premium,
         ),

@@ -89,22 +89,25 @@ class SmsVerificacionServicio {
     if (!esTransfermovil && !esEnzona) return;
 
     // Nro: prioriza el campo "Nro. Transaccion: XXX" del formato oficial.
-    // Ej Transfermóvil: "Nro. Transaccion: MM6047281W987" (13 alfanumérico)
-    String? nro = RegExp(r'NRO\.?\s*TRANSACCION\s*:\s*([A-Z0-9]{10,16})', caseSensitive: false)
+    // Ej Transfermóvil: "Nro. Transaccion: MM6047281W987" (13 alfanumérico).
+    // Se normaliza (sin guiones/espacios) y se exige la longitud exacta del
+    // método: 13 Transfermóvil, 12 EnZona. Sin coincidencia exacta se ignora
+    // el SMS (el pago queda pendiente para revisión manual).
+    final longitud = esTransfermovil ? 13 : 12;
+    String? nro = RegExp(r'NRO\.?\s*TRANSACCION\s*:\s*([A-Z0-9\- ]+)', caseSensitive: false)
             .firstMatch(body)
             ?.group(1)
-            ?.toUpperCase() ??
-        RegExp(r'NRO\.?\s*TRANSAC\w*\s*:\s*([A-Z0-9]{10,16})', caseSensitive: false).firstMatch(body)?.group(1)?.toUpperCase();
+            ?.toUpperCase()
+            .replaceAll(RegExp(r'[^A-Z0-9]'), '') ??
+        RegExp(r'NRO\.?\s*TRANSAC\w*\s*:\s*([A-Z0-9\- ]+)', caseSensitive: false)
+            .firstMatch(body)
+            ?.group(1)
+            ?.toUpperCase()
+            .replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
-    // Fallback por longitud esperada si no se encontró el campo etiquetado
-    if (nro == null && esTransfermovil) {
-      nro = RegExp(r'\b([A-Z0-9]{13})\b').firstMatch(bodyUpper)?.group(1);
-    }
-    if (nro == null && esEnzona) {
-      nro = RegExp(r'\b([A-Z0-9]{12})\b').firstMatch(bodyUpper)?.group(1);
-    }
-    nro ??= RegExp(r'\b([A-Z0-9]{12,13})\b').firstMatch(bodyUpper)?.group(1);
-    if (nro == null) return;
+    // Fallback por longitud exacta si no se encontró el campo etiquetado
+    nro ??= RegExp('\\b([A-Z0-9]{$longitud})\\b').firstMatch(bodyUpper)?.group(1);
+    if (nro == null || nro.length != longitud) return;
 
     // Monto: formato oficial "Monto: 1640.00 CUP" — prioriza esa línea
     double? monto;

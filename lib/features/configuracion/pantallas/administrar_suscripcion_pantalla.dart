@@ -184,6 +184,14 @@ class _AdministrarSuscripcionPantallaState
     required String detalle,
     required bool destacado,
   }) {
+    // Sin doble pago: con un pago en verificación se espera a que se resuelva.
+    if (_tienePagoPendiente) {
+      NotificacionServicio.advertencia(
+        context,
+        'Tienes un pago en verificación. Espera a que se resuelva antes de pagar de nuevo.',
+      );
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -196,7 +204,9 @@ class _AdministrarSuscripcionPantallaState
           destacado: destacado,
         ),
       ),
-    );
+    ).then((_) {
+      if (mounted) _cargarEstadoPendiente();
+    });
   }
 
   List<String> _beneficios(PlanTipo plan) {

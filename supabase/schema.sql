@@ -1494,7 +1494,7 @@ begin
   -- usuario escribió, el remitente es el esperado (PAGOxMOVIL/ENZONA) y el
   -- monto coincide (si el SMS lo trae), se aprueba automáticamente.
   if p_sms_nro is not null and p_sms_remitente is not null then
-    v_sms_nro_norm := upper(regexp_replace(trim(p_sms_nro), '\s+', '', 'g'));
+    v_sms_nro_norm := upper(regexp_replace(trim(p_sms_nro), '[^A-Za-z0-9]', '', 'g'));
     v_sms_rem_norm := upper(trim(p_sms_remitente));
     if v_sms_nro_norm = p_nro then
       if (p_metodo = 'transfermovil' and v_sms_rem_norm = 'PAGOXMOVIL') or
@@ -1720,6 +1720,11 @@ begin
   select * into r from public.suscripciones where usuario_id = yo;
   if not found then return jsonb_build_object('ok', false, 'error', 'sin_suscripcion'); end if;
   if r.plan_reserva is null then return jsonb_build_object('ok', false, 'error', 'sin_reserva'); end if;
+  -- Cancelado explícito no se resucita: la cancelación limpia la reserva,
+  -- pero si quedara resto legacy, no promover sobre un activa=false.
+  if coalesce(r.activa, true) = false then
+    return jsonb_build_object('ok', false, 'error', 'cancelado');
+  end if;
   -- Solo promueve si el plan actual ya no está vigente
   if coalesce(r.activa, true) = true and (r.vence is null or r.vence > now()) then
     return jsonb_build_object('ok', false, 'error', 'plan_vigente');

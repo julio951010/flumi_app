@@ -300,8 +300,11 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         verificadoStatus: Value(coincide),
       ));
       if (!mounted) return;
-      _intentos++;
-      _registrarIntento();
+      // El éxito no consume cupo: solo los fallos cuentan para los 3/24h.
+      if (!coincide) {
+        _intentos++;
+        _registrarIntento();
+      }
       setState(() {
         _verificado = coincide;
         _pendiente = false;

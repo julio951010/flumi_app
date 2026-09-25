@@ -1006,6 +1006,15 @@ class SyncService {
 
       if (kUsarServidorLocal) return;
 
+      // Reintenta deshacer pendientes antes de descargar, para no resucitarlos.
+      await _reintentarDeshacerRechazos();
+      final deshechos = await _leerDeshacerRechazos();
+      final deshechosIds = deshechos
+          .map((c) => c.split('|'))
+          .where((p) => p.length == 2 && p[0] == userIdResuelto)
+          .map((p) => p[1])
+          .toSet();
+
       final remoto = await sb.Supabase.instance.client
           .from('rechazos')
           .select()
@@ -1019,7 +1028,7 @@ class SyncService {
           timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
           pendienteDeSincronizar: const Value(false),
         );
-      }).toList();
+      }).where((c) => !deshechosIds.contains(c.rechazadoId.value)).toList();
       if (filas.isNotEmpty) {
         await _db.batch((batch) {
           batch.insertAllOnConflictUpdate(_db.rechazos, filas);
@@ -1047,17 +1056,82 @@ class SyncService {
     }
   }
 
-  /// Borra el rechazo remoto (Deshacer). Best-effort: si falla, el siguiente
-  /// sync de rechazos no lo reintenta (el rechazo ya no existe localmente).
+  /// Tombstones de deshacer (persisten en prefs): si el borrado remoto falla
+  /// (offline o error), se reintenta en cada sincronizarRechazos y la descarga
+  /// no resucita esas filas en local hasta que el servidor las borra.
+  static const _prefsDeshacerRechazos = 'flumi_rechazos_deshacer';
+
+  static Future<Set<String>> _leerDeshacerRechazos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getStringList(_prefsDeshacerRechazos)?.toSet() ?? <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  static Future<void> _recordarDeshacerRechazo(String usuarioId, String rechazadoId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_prefsDeshacerRechazos) ?? <String>[];
+      final clave = '$usuarioId|$rechazadoId';
+      if (!lista.contains(clave)) {
+        lista.add(clave);
+        if (lista.length > 200) lista.removeAt(0);
+        await prefs.setStringList(_prefsDeshacerRechazos, lista);
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> _olvidarDeshacerRechazo(String usuarioId, String rechazadoId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_prefsDeshacerRechazos) ?? <String>[];
+      lista.remove('$usuarioId|$rechazadoId');
+      await prefs.setStringList(_prefsDeshacerRechazos, lista);
+    } catch (_) {}
+  }
+
+  Future<void> _reintentarDeshacerRechazos() async {
+    final pendientes = await _leerDeshacerRechazos();
+    for (final clave in pendientes) {
+      final partes = clave.split('|');
+      if (partes.length != 2) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final lista = prefs.getStringList(_prefsDeshacerRechazos) ?? <String>[];
+          lista.remove(clave);
+          await prefs.setStringList(_prefsDeshacerRechazos, lista);
+        } catch (_) {}
+        continue;
+      }
+      try {
+        await sb.Supabase.instance.client
+            .from('rechazos')
+            .delete()
+            .match({'usuario_id': partes[0], 'rechazado_id': partes[1]});
+        await _olvidarDeshacerRechazo(partes[0], partes[1]);
+      } catch (_) {}
+    }
+  }
+
+  /// Borra el rechazo remoto (Deshacer). Si falla u offline, guarda tombstone
+  /// y lo reintenta en el siguiente sync (antes la falla divergía para siempre).
   Future<void> borrarRechazoRemoto(String usuarioId, String rechazadoId) async {
-    if (!ConnectivityService.instancia.hayConexion) return;
     if (kUsarServidorLocal) return;
+    if (!ConnectivityService.instancia.hayConexion) {
+      await _recordarDeshacerRechazo(usuarioId, rechazadoId);
+      return;
+    }
     try {
       await sb.Supabase.instance.client
           .from('rechazos')
           .delete()
           .match({'usuario_id': usuarioId, 'rechazado_id': rechazadoId});
-    } catch (_) {}
+      await _olvidarDeshacerRechazo(usuarioId, rechazadoId);
+    } catch (_) {
+      await _recordarDeshacerRechazo(usuarioId, rechazadoId);
+    }
   }
 
   // ------------------------------------------------------------
@@ -1324,6 +1398,7 @@ class SyncService {
       'usuario_id': like.usuarioId,
       'usuario_likeado_id': like.usuarioLikeadoId,
       'timestamp': like.timestamp.toIso8601String(),
+      'es_super': like.esSuper,
     };
 
     if (kUsarServidorLocal) {

@@ -283,8 +283,12 @@ class _HistorialPagosPantallaState extends State<HistorialPagosPantalla> {
             _detalleFila('Fecha de pago', _fmtFechaHora(p.creadoEn)),
             if (p.verificadoEn != null)
               _detalleFila('Verificado el', _fmtFechaHora(p.verificadoEn!)),
-            if (p.motivoRechazo.isNotEmpty)
-              _detalleFila('Motivo', p.motivoRechazo),
+            if (p.estado == 'rechazado')
+              _detalleFila(
+                  'Motivo',
+                  p.motivoRechazo.isNotEmpty
+                      ? p.motivoRechazo
+                      : 'Sin motivo especificado'),
           ],
         ),
       ),

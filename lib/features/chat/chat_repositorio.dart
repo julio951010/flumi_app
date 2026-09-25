@@ -58,7 +58,9 @@ class ResumenConversacion {
 
 class ChatRepositorio {
   /// Ventana de frescura de `ultima_conexion` para considerar en línea.
-  static const _umbralEnLinea = Duration(minutes: 2);
+  /// 5 min en toda la app (antes 2 aquí y 5 en encuentros/tarjetas: el mismo
+  /// usuario salía online en una pantalla y offline en otra).
+  static const _umbralEnLinea = Duration(minutes: 5);
   /// Tolerancia de reloj entre dispositivos para el corte de mensajes de una
   /// conversación borrada: un mensaje del otro usuario podría llevar un
   /// timestamp unos segundos detrás del momento en que yo borré. Se resta
@@ -103,6 +105,15 @@ class ChatRepositorio {
   final Set<String> _refrescandoPerfiles = {};
 
   ChatRepositorio(this._db, [this._sync]);
+
+  /// Sincronización manual (pull-to-refresh): sube pendientes y descarga
+  /// mensajes/matches remotos. Sin red o sin sync, no hace nada.
+  Future<void> sincronizarAhora() async {
+    try {
+      await _sync?.sincronizarMensajesPendientes();
+      await _sync?.sincronizarMatchesPendientes();
+    } catch (_) {}
+  }
 
   Stream<List<ResumenConversacion>> observarConversaciones(String miId) {
     late final StreamController<List<ResumenConversacion>> ctrl;
