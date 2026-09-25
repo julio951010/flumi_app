@@ -9,6 +9,7 @@ import '../../../core/utilidades/temp_cache_native.dart'
 import '../../auth/auth_service.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import 'administrar_suscripcion_pantalla.dart';
+import 'ayuda_soporte_pantalla.dart';
 import 'cuenta_pantalla.dart';
 import 'informacion_basica_pantalla.dart';
 import 'modo_invisible_pantalla.dart';
@@ -115,7 +116,18 @@ class ConfiguracionPantalla extends StatelessWidget {
                       )),
             ],
             const Divider(height: 1),
-            _item(context, Icons.help_outline, 'Ayuda y soporte'),
+            _item(context, Icons.help_outline, 'Ayuda y soporte',
+                onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AyudaSoportePantalla(
+                          db: db,
+                          syncService: syncService,
+                          suscripcionServicio: suscripcionServicio,
+                          authService: authService,
+                        ),
+                      ),
+                    )),
             const Divider(height: 1),
             _item(context, Icons.info_outline, 'Sobre nosotros',
                 onTap: () => Navigator.push(
