@@ -340,16 +340,15 @@ create policy "participantes_borran_mensajes"
   on public.messages for delete
   using (auth.uid() = emisor_id or auth.uid() = receptor_id);
 
--- Conversaciones oficiales (Administrador / Flumi): los usuarios solo reciben
--- mensajes, no pueden escribir ni responder. El admin las envía como el bot
--- (emisor = bot), lo cual sigue permitido.
+-- Conversación oficial Flumi: solo lectura (el admin escribe como el bot).
+-- Conversación con Administrador: abierta en ambos sentidos, es el canal de
+-- soporte (Ayuda y soporte > Contactar con soporte).
 create or replace function public.bloquear_respuesta_bots()
 returns trigger
 language plpgsql
 as $$
 begin
-  if (new.receptor_id = '00000000-0000-0000-0000-00000000000a'
-   or new.receptor_id = '00000000-0000-0000-0000-00000000000f')
+  if new.receptor_id = '00000000-0000-0000-0000-00000000000f'
      and new.emisor_id <> new.receptor_id then
     raise exception 'No puedes enviar mensajes a esta conversacion oficial';
   end if;
