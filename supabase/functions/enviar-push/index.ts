@@ -115,7 +115,10 @@ Deno.serve(async (req) => {
               priority: "HIGH",
               notification: {
                 channel_id: "flumi",
-                priority: "HIGH",
+                // FCM HTTP v1 no tiene campo "priority" aquí: es
+                // notification_priority con valores PRIORITY_*. Un nombre
+                // desconocido hace que FCM rechace el mensaje (400).
+                notification_priority: "PRIORITY_HIGH",
                 visibility: "PRIVATE",
               },
             },

@@ -1543,17 +1543,19 @@ begin
     return jsonb_build_object('ok', false, 'error', 'rate_limit');
   end if;
 
-  -- Auto-verificación por SMS: si el Nro del SMS coincide con el que el
-  -- usuario escribió, el remitente es el esperado (PAGOxMOVIL/ENZONA) y el
-  -- monto coincide (si el SMS lo trae), se aprueba automáticamente.
+  -- Auto-verificación por SMS: FAIL-CLOSED. Cada chequeo debe pasar con datos
+  -- presentes y coincidentes; la ausencia de cualquier dato cae al flujo
+  -- manual (pendiente) en vez de auto-aprobar.
   if p_sms_nro is not null and p_sms_remitente is not null then
     v_sms_nro_norm := upper(regexp_replace(trim(p_sms_nro), '[^A-Za-z0-9]', '', 'g'));
     v_sms_rem_norm := upper(trim(p_sms_remitente));
     if v_sms_nro_norm = p_nro then
       if (p_metodo = 'transfermovil' and v_sms_rem_norm = 'PAGOXMOVIL') or
          (p_metodo = 'enzona' and v_sms_rem_norm = 'ENZONA') then
-        if p_sms_monto is null or abs(p_sms_monto - v_monto) < 0.01 then
-          -- Beneficiario: 4 primeros y 4 últimos deben coincidir con tarjeta configurada
+        -- Monto obligatorio y exacto (no se anula por ausencia)
+        if p_sms_monto is not null and abs(p_sms_monto - v_monto) < 0.01 then
+          -- Beneficiario obligatorio: 4 primeros y 4 últimos deben coincidir
+          -- con la tarjeta configurada (ambos con 8+ dígitos)
           declare
             v_ben_norm text;
             v_tar_norm text;
@@ -1561,31 +1563,30 @@ begin
             v_ben_last4 text;
             v_tar_first4 text;
             v_tar_last4 text;
-            v_ben_ok boolean := true;
-            v_fecha_ok boolean := true;
+            v_ben_ok boolean := false;
+            v_fecha_ok boolean := false;
           begin
-            if p_sms_beneficiario is not null and length(regexp_replace(p_sms_beneficiario, '[^0-9]', '', 'g')) >= 8 then
-              v_ben_norm := regexp_replace(p_sms_beneficiario, '[^0-9]', '', 'g');
-              v_tar_norm := regexp_replace(coalesce(v_tarjeta,''), '[^0-9]', '', 'g');
-              if length(v_tar_norm) >= 8 then
-                v_ben_first4 := substring(v_ben_norm from 1 for 4);
-                v_ben_last4 := substring(v_ben_norm from length(v_ben_norm)-3 for 4);
-                v_tar_first4 := substring(v_tar_norm from 1 for 4);
-                v_tar_last4 := substring(v_tar_norm from length(v_tar_norm)-3 for 4);
-                if v_ben_first4 <> v_tar_first4 or v_ben_last4 <> v_tar_last4 then
-                  v_ben_ok := false;
-                end if;
+            v_ben_norm := regexp_replace(coalesce(p_sms_beneficiario,''), '[^0-9]', '', 'g');
+            v_tar_norm := regexp_replace(coalesce(v_tarjeta,''), '[^0-9]', '', 'g');
+            if length(v_ben_norm) >= 8 and length(v_tar_norm) >= 8 then
+              v_ben_first4 := substring(v_ben_norm from 1 for 4);
+              v_ben_last4 := substring(v_ben_norm from length(v_ben_norm)-3 for 4);
+              v_tar_first4 := substring(v_tar_norm from 1 for 4);
+              v_tar_last4 := substring(v_tar_norm from length(v_tar_norm)-3 for 4);
+              if v_ben_first4 = v_tar_first4 and v_ben_last4 = v_tar_last4 then
+                v_ben_ok := true;
               end if;
             end if;
-            -- Fecha: debe ser hoy (fecha del pago en app) con tolerancia 1 día
+            -- Fecha obligatoria: debe ser hoy (tolerancia 1 día). Si no se
+            -- puede parsear, no auto-aprueba (cae a manual).
             if p_sms_fecha is not null and p_sms_fecha <> '' then
               begin
                 -- p_sms_fecha viene como 'YYYY-MM-DD' desde el cliente
-                if abs(extract(epoch from (current_date - p_sms_fecha::date))/86400) > 1 then
-                  v_fecha_ok := false;
+                if abs(extract(epoch from (current_date - p_sms_fecha::date))/86400) <= 1 then
+                  v_fecha_ok := true;
                 end if;
               exception when others then
-                v_fecha_ok := true; -- si no se puede parsear, no bloquea
+                v_fecha_ok := false;
               end;
             end if;
             if v_ben_ok and v_fecha_ok then
