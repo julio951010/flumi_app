@@ -48,6 +48,8 @@ Future<void> notificarNavegador(String titulo, String cuerpo) async {
 }
 
 /// No aplica en web: el navegador gestiona sus propias notificaciones.
+Future<void> inicializarPushCritico() async {}
+
 Future<void> inicializarPush() async {}
 
 Future<void> registrarTokenPush() async {}

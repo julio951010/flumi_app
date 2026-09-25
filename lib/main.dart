@@ -90,8 +90,12 @@ void main() async {
 
   await ConnectivityService.instancia.iniciar();
   EstadoServidorServicio.instancia.iniciarSondeo();
-  // Push móvil (FCM): no bloquea el arranque y no lanza si Firebase aún no
-  // está configurado.
+  // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
+  // de runApp(). Sin este registro, los push con la app cerrada no despiertan.
+  // Nunca lanza (si falta google-services.json, el push queda deshabilitado).
+  await inicializarPushCritico();
+  // Resto del push (permisos, canal, listeners, token): en paralelo sin
+  // bloquear el arranque.
   unawaited(inicializarPush());
   // Foreground vs background: necesario para que notificarInteligente y los
   // canales locales sepan si la app está en 2do plano.

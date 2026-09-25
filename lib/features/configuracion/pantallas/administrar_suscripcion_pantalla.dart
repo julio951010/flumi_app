@@ -1,51 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../config/env.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
+import 'historial_pagos_pantalla.dart';
 
 class AdministrarSuscripcionPantalla extends StatefulWidget {
-  const AdministrarSuscripcionPantalla({super.key});
+  final SuscripcionServicio suscripcionServicio;
+
+  const AdministrarSuscripcionPantalla({
+    super.key,
+    required this.suscripcionServicio,
+  });
 
   @override
   State<AdministrarSuscripcionPantalla> createState() =>
       _AdministrarSuscripcionPantallaState();
 }
 
-class _SuscripcionPlan {
-  final String duracion;
-  final String precio;
-  final String? ahorro;
-
-  const _SuscripcionPlan({
-    required this.duracion,
-    required this.precio,
-    this.ahorro,
-  });
-}
-
 class _AdministrarSuscripcionPantallaState
     extends State<AdministrarSuscripcionPantalla> {
-  static const _planes = [
-    _SuscripcionPlan(duracion: '1 mes', precio: '\$9.99'),
-    _SuscripcionPlan(duracion: '6 meses', precio: '\$49.99', ahorro: '-17%'),
-    _SuscripcionPlan(duracion: '12 meses', precio: '\$89.99', ahorro: '-25%'),
-  ];
+  bool _cancelando = false;
+  bool _tienePagoPendiente = false;
 
-  static const _beneficios = [
-    'Me Gustas ilimitados',
-    '10 Superlikes por d\u00eda',
-    '1 Boost al mes',
-    '100 perfiles en Cerca de ti',
-    'Ver qui\u00e9n te gusta y qui\u00e9n te visit\u00f3',
-    'Deshacer el \u00faltimo swipe',
-    'Ocultar tu edad',
-    'Filtros extra de b\u00fasqueda',
-  ];
+  SuscripcionServicio get _sub => widget.suscripcionServicio;
 
-  int _planSeleccionado = 0;
+  @override
+  void initState() {
+    super.initState();
+    _cargarEstadoPendiente();
+  }
+
+  /// ¿Hay un pago en verificación? Define el badge "Inactivo".
+  Future<void> _cargarEstadoPendiente() async {
+    try {
+      if (kUsarServidorLocal) return;
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      final res = await Supabase.instance.client
+          .from('pagos')
+          .select('id')
+          .eq('usuario_id', uid)
+          .eq('estado', 'pendiente')
+          .limit(1)
+          .timeout(const Duration(seconds: 8));
+      if (!mounted) return;
+      setState(() => _tienePagoPendiente = (res as List).isNotEmpty);
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final primario = Theme.of(context).colorScheme.primary;
+    final plan = _sub.planActual;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -61,89 +70,201 @@ class _AdministrarSuscripcionPantallaState
       ),
       body: SafeArea(
         top: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            _tarjetaPlanActual(primario),
-            const SizedBox(height: 24),
-            _tituloSeccion('Beneficios de tu plan'),
-            const SizedBox(height: 4),
-            ..._beneficios.map(
-              (b) => ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.check_circle, color: primario, size: 22),
-                title: Text(
-                  b,
-                  style: const TextStyle(fontSize: 14, color: Colors.black87),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            _tituloSeccion('Cambiar de plan'),
-            const SizedBox(height: 4),
-            ...List.generate(_planes.length, (i) {
-              final plan = _planes[i];
-              final seleccionado = i == _planSeleccionado;
-              return _opcionPlan(
-                primario,
-                plan,
-                seleccionado,
-                esPlanActual: i == 0,
-                onTap: () => setState(() => _planSeleccionado = i),
-              );
-            }),
-            const SizedBox(height: 24),
-            _tituloSeccion('Método de pago'),
-            const SizedBox(height: 4),
-            ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              leading: Icon(Icons.credit_card_outlined,
-                  color: primario.withValues(alpha: 0.7)),
-              title: const Text(
-                'Visa •••• 4242',
-                style: TextStyle(fontSize: 15, color: Colors.black87),
-              ),
-              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-              onTap: () => NotificacionServicio.advertencia(
-                context,
-                'Editar método de pago próximamente.',
-              ),
-            ),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            _tituloSeccion('Historial de facturación'),
-            const SizedBox(height: 4),
-            _cobro(primario, 'Flumi Plus · 1 mes', '04/07/2026', '\$9.99'),
-            _cobro(primario, 'Flumi Plus · 1 mes', '04/06/2026', '\$9.99'),
-            _cobro(primario, 'Flumi Plus · 1 mes', '04/05/2026', '\$9.99'),
-            const SizedBox(height: 28),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _confirmarCancelar(context),
-                icon: const Icon(Icons.cancel_outlined, size: 20),
-                label: const Text(
-                  'Cancelar suscripción',
-                  style: TextStyle(color: Colors.red, fontSize: 16),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red[400],
-                  side: BorderSide(color: Colors.red[400]!),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+        child: ListenableBuilder(
+          listenable: _sub,
+          builder: (context, _) => ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              _tarjetaPlanActual(primario, plan),
+              const SizedBox(height: 24),
+              _tituloSeccion('Beneficios de tu plan'),
+              const SizedBox(height: 4),
+              ..._beneficios(plan).map(
+                (b) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.check_circle, color: primario, size: 22),
+                  title: Text(
+                    b,
+                    style: const TextStyle(fontSize: 14, color: Colors.black87),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              _tituloSeccion('Cambiar de plan'),
+              const SizedBox(height: 4),
+              if (plan != PlanTipo.plus)
+                _opcionPlan(
+                  primario,
+                  nombre: 'Flumi Plus',
+                  detalle: 'Desde 100 CUP · 7 días',
+                  onTap: () => _verPlan(
+                    nombre: 'Flumi Plus',
+                    periodo: 'mensual',
+                    precio: '250 cup',
+                    icono: Icons.auto_awesome,
+                    detalle: 'Funciones extra',
+                    destacado: true,
+                  ),
+                ),
+              if (plan != PlanTipo.premium)
+                _opcionPlan(
+                  primario,
+                  nombre: 'Flumi Premium',
+                  detalle: 'Desde 200 CUP · 7 días',
+                  onTap: () => _verPlan(
+                    nombre: 'Flumi Premium',
+                    periodo: 'mensual',
+                    precio: '500 cup',
+                    icono: Icons.workspace_premium,
+                    detalle: 'Acceso total',
+                    destacado: false,
+                  ),
+                ),
+              const SizedBox(height: 24),
+              _tituloSeccion('Pagos'),
+              const SizedBox(height: 4),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: Icon(Icons.receipt_long_outlined,
+                    color: primario.withValues(alpha: 0.7)),
+                title: const Text(
+                  'Historial de pagos',
+                  style: TextStyle(fontSize: 15, color: Colors.black87),
+                ),
+                trailing:
+                    Icon(Icons.chevron_right, color: Colors.grey[400]),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const HistorialPagosPantalla(),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              const SizedBox(height: 28),
+              if (plan == PlanTipo.plus || plan == PlanTipo.premium)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed:
+                        _cancelando ? null : () => _confirmarCancelar(context),
+                    icon: _cancelando
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.cancel_outlined, size: 20),
+                    label: const Text(
+                      'Cancelar suscripción',
+                      style: TextStyle(color: Colors.red, fontSize: 16),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red[400],
+                      side: BorderSide(color: Colors.red[400]!),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _tarjetaPlanActual(Color primario) {
+  void _verPlan({
+    required String nombre,
+    required String periodo,
+    required String precio,
+    required IconData icono,
+    required String detalle,
+    required bool destacado,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DetallePlanPantalla(
+          nombre: nombre,
+          periodo: periodo,
+          precio: precio,
+          icono: icono,
+          detalle: detalle,
+          destacado: destacado,
+        ),
+      ),
+    );
+  }
+
+  List<String> _beneficios(PlanTipo plan) {
+    switch (plan) {
+      case PlanTipo.premium:
+        return const [
+          'Todo lo de Flumi Plus',
+          'Perfiles ilimitados en Cerca de ti',
+          'Superlikes ilimitados',
+          'Chatea sin necesidad de match',
+          'Modo invisible y filtros avanzados',
+        ];
+      case PlanTipo.plus:
+        return const [
+          'Me Gustas ilimitados',
+          'Deshacer ilimitado',
+          '10 Superlikes por día',
+          '100 perfiles en Cerca de ti',
+          'Ver quién te dio Me Gusta y te visitó',
+        ];
+      case PlanTipo.gratis:
+        return const [
+          '15 Me Gustas al día',
+          '10 perfiles en Cerca de ti',
+          '1 Deshacer al día',
+          'Chats con tus matches',
+        ];
+    }
+  }
+
+  Widget _tarjetaPlanActual(Color primario, PlanTipo plan) {
+    final sub = _sub.suscripcionActual;
+    final nombre = switch (plan) {
+      PlanTipo.premium => 'Flumi Premium',
+      PlanTipo.plus => 'Flumi Plus',
+      PlanTipo.gratis => 'Flumi Gratis',
+    };
+    final esGratis = plan == PlanTipo.gratis;
+    final vence = sub?.vence;
+    final tieneSubActiva = (sub?.activa ?? false) &&
+        (vence == null || vence.isAfter(DateTime.now()));
+    // Prioridad: si el plan está activo para el usuario, manda Activo aunque
+    // haya otro pago nuevo en verificación. Inactivo solo cuando NO hay plan
+    // activo pero sí un pago pendiente. Sin fila (admin/kill-switch con plan
+    // efectivo) también es Activo; con fila vencida/inactiva es Vencido.
+    final String badgeTexto;
+    final Color badgeColor;
+    if (esGratis) {
+      badgeTexto = 'Gratis';
+      badgeColor = Colors.grey;
+    } else if (tieneSubActiva) {
+      badgeTexto = 'Activo';
+      badgeColor = const Color(0xFF2E7D32);
+    } else if (_tienePagoPendiente) {
+      badgeTexto = 'Inactivo';
+      badgeColor = const Color(0xFFEF6C00);
+    } else if (sub == null) {
+      badgeTexto = 'Activo';
+      badgeColor = const Color(0xFF2E7D32);
+    } else {
+      badgeTexto = 'Vencido';
+      badgeColor = Colors.red;
+    }
+    final tiempoRestante = esGratis
+        ? 'Sin suscripción activa'
+        : (vence == null
+            ? 'Sin fecha de vencimiento'
+            : _textoRestante(vence));
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -157,16 +278,26 @@ class _AdministrarSuscripcionPantallaState
         children: [
           Row(
             children: [
+              Expanded(
+                child: Text(
+                  nombre,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: primario,
+                  color: badgeColor,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
-                  'Plan actual',
-                  style: TextStyle(
+                child: Text(
+                  badgeTexto,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -175,28 +306,84 @@ class _AdministrarSuscripcionPantallaState
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          const Text(
-            'Flumi Plus',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  tiempoRestante,
+                  style:
+                      TextStyle(fontSize: 14, color: Colors.grey[700]),
+                ),
+              ),
+            ],
+          ),
+          if (!esGratis) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _extenderPlan(plan),
+                icon: const Icon(Icons.add_circle_outline, size: 20),
+                label: const Text(
+                  'Extender plan',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: primario,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '\$9.99 / mes',
-            style: TextStyle(fontSize: 16, color: primario),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Renovación el 04/09/2026',
-            style: TextStyle(fontSize: 13, color: Colors.black54),
-          ),
+          ],
         ],
       ),
     );
+  }
+
+  String _textoRestante(DateTime vence) {
+    final ahora = DateTime.now();
+    if (!vence.isAfter(ahora)) {
+      final dias = ahora.difference(vence).inDays;
+      if (dias <= 0) return 'Vence hoy';
+      return dias == 1 ? 'Vencido hace 1 día' : 'Vencido hace $dias días';
+    }
+    final diff = vence.difference(ahora);
+    if (diff.inDays >= 1) {
+      return diff.inDays == 1 ? 'Queda 1 día' : 'Quedan ${diff.inDays} días';
+    }
+    if (diff.inHours >= 1) {
+      return diff.inHours == 1 ? 'Queda 1 hora' : 'Quedan ${diff.inHours} horas';
+    }
+    return 'Vence hoy';
+  }
+
+  void _extenderPlan(PlanTipo plan) {
+    if (plan == PlanTipo.premium) {
+      _verPlan(
+        nombre: 'Flumi Premium',
+        periodo: 'mensual',
+        precio: '500 cup',
+        icono: Icons.workspace_premium,
+        detalle: 'Acceso total',
+        destacado: false,
+      );
+    } else {
+      _verPlan(
+        nombre: 'Flumi Plus',
+        periodo: 'mensual',
+        precio: '250 cup',
+        icono: Icons.auto_awesome,
+        detalle: 'Funciones extra',
+        destacado: true,
+      );
+    }
   }
 
   Widget _tituloSeccion(String titulo) {
@@ -211,10 +398,9 @@ class _AdministrarSuscripcionPantallaState
   }
 
   Widget _opcionPlan(
-    Color primario,
-    _SuscripcionPlan plan,
-    bool seleccionado, {
-    required bool esPlanActual,
+    Color primario, {
+    required String nombre,
+    required String detalle,
     required VoidCallback onTap,
   }) {
     return InkWell(
@@ -225,73 +411,31 @@ class _AdministrarSuscripcionPantallaState
         child: Row(
           children: [
             Icon(
-              seleccionado ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: seleccionado ? primario : Colors.grey[400],
+              Icons.circle_outlined,
+              color: Colors.grey[400],
               size: 22,
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    plan.duracion,
+                    nombre,
                     style: const TextStyle(
                         fontSize: 15, color: Colors.black87),
                   ),
-                  if (esPlanActual)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: Text(
-                        'Plan actual',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: primario,
-                        ),
-                      ),
-                    ),
+                  Text(
+                    detalle,
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
                 ],
               ),
             ),
-            Text(
-              plan.precio,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 6),
-            if (plan.ahorro != null)
-              Text(
-                plan.ahorro!,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green[700],
-                ),
-              ),
+            Icon(Icons.chevron_right, color: Colors.grey[400]),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _cobro(Color primario, String concepto, String fecha, String monto) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-      leading: Icon(Icons.receipt_long_outlined,
-          color: primario.withValues(alpha: 0.7)),
-      title: Text(
-        concepto,
-        style: const TextStyle(fontSize: 14, color: Colors.black87),
-      ),
-      subtitle: Text(
-        fecha,
-        style: const TextStyle(fontSize: 12, color: Colors.black54),
-      ),
-      trailing: Text(
-        monto,
-        style: const TextStyle(
-            fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87),
       ),
     );
   }
@@ -302,7 +446,7 @@ class _AdministrarSuscripcionPantallaState
       builder: (ctx) => AlertDialog(
         title: const Text('Cancelar suscripción'),
         content: const Text(
-          'Perderás el acceso a los beneficios de Flumi Plus al finalizar el periodo actual. ¿Quieres continuar?',
+          'Volverás al plan Gratis. Podrás suscribirte de nuevo cuando quieras. ¿Quieres continuar?',
         ),
         actions: [
           TextButton(
@@ -320,7 +464,29 @@ class _AdministrarSuscripcionPantallaState
       ),
     );
     if (confirmado != true || !context.mounted) return;
-    NotificacionServicio.exito(
-        context, 'Suscripción cancelada. Se mantiene hasta el 04/09/2026.');
+    setState(() => _cancelando = true);
+    try {
+      if (!kUsarServidorLocal) {
+        final uid = Supabase.instance.client.auth.currentUser?.id;
+        if (uid != null) {
+          await Supabase.instance.client
+              .from('suscripciones')
+              .update({'activa': false}).eq('usuario_id', uid).timeout(
+                  const Duration(seconds: 8));
+        }
+      }
+      await _sub.cargarSuscripcion();
+      if (context.mounted) {
+        NotificacionServicio.exito(
+            context, 'Suscripción cancelada. Ahora usas Flumi Gratis.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        NotificacionServicio.alerta(
+            context, 'No se pudo cancelar. Intenta de nuevo.');
+      }
+    } finally {
+      if (mounted) setState(() => _cancelando = false);
+    }
   }
 }

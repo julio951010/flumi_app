@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/sms_verificacion_servicio.dart';
 import '../modelos/pago_datos.dart';
+import '../servicios/pagos_config_servicio.dart';
 import 'pago_advertencias_pantalla.dart';
 
 class PagoMetodoPantalla extends StatefulWidget {
@@ -14,12 +15,29 @@ class PagoMetodoPantalla extends StatefulWidget {
 
 class _PagoMetodoPantallaState extends State<PagoMetodoPantalla> {
   MetodoPago? _seleccion;
+  bool _transfermovilActivo = true;
+  bool _enzonaActivo = true;
+  bool _cargandoMetodos = true;
 
   @override
   void initState() {
     super.initState();
     // Desde el paso 1 ya escucha SMS de PAGOxMOVIL/ENZONA en 2do plano
     SmsVerificacionServicio.instancia.iniciar();
+    _cargarMetodos();
+  }
+
+  /// Solo muestra los métodos activos en Supabase (admin_flumi → Pagos).
+  /// Sin red se muestran ambos (fallback local).
+  Future<void> _cargarMetodos() async {
+    final tm = await PagosConfigServicio.estaActivo(MetodoPago.transfermovil);
+    final ez = await PagosConfigServicio.estaActivo(MetodoPago.enzona);
+    if (!mounted) return;
+    setState(() {
+      _transfermovilActivo = tm;
+      _enzonaActivo = ez;
+      _cargandoMetodos = false;
+    });
   }
 
   @override
@@ -69,13 +87,53 @@ class _PagoMetodoPantallaState extends State<PagoMetodoPantalla> {
                 const SizedBox(height: 20),
                 const Text('Elige cómo quieres pagar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(child: _opcion(MetodoPago.transfermovil, 'assets/images/Transfermovil.png', const Color(0xFF00A859))),
-                    const SizedBox(width: 12),
-                    Expanded(child: _opcion(MetodoPago.enzona, 'assets/images/EnZona.png', const Color(0xFF0B4DA2))),
-                  ],
-                ),
+                if (_cargandoMetodos)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (!_transfermovilActivo && !_enzonaActivo)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.pause_circle_outline,
+                            color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Pagos en mantenimiento. Intenta más tarde.',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Row(
+                    children: [
+                      if (_transfermovilActivo)
+                        Expanded(
+                            child: _opcion(
+                                MetodoPago.transfermovil,
+                                'assets/images/Transfermovil.png',
+                                const Color(0xFF00A859))),
+                      if (_transfermovilActivo && _enzonaActivo)
+                        const SizedBox(width: 12),
+                      if (_enzonaActivo)
+                        Expanded(
+                            child: _opcion(
+                                MetodoPago.enzona,
+                                'assets/images/EnZona.png',
+                                const Color(0xFF0B4DA2))),
+                    ],
+                  ),
                 const SizedBox(height: 18),
                 Container(
                   padding: const EdgeInsets.all(12),

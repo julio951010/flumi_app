@@ -37,17 +37,33 @@ class _PushMovil {
   String? _token;
   bool _mostrarLocales = false;
 
+  /// Fase crítica: Firebase + registro del handler de background. Se espera
+  /// con `await` antes de `runApp()`: sin este registro, los push que llegan
+  /// con la app cerrada no despiertan a la app. Nunca lanza.
+  Future<void> inicializarCritico() async {
+    try {
+      await Firebase.initializeApp();
+      _fcm = FirebaseMessaging.instance;
+      // Background: handler top-level (data messages cuando app cerrada).
+      FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
+    } catch (_) {}
+  }
+
   /// Inicializa Firebase y los handlers de FCM. Nunca lanza: si Firebase no
   /// está configurado (falta google-services.json / GoogleService-Info.plist)
   /// la app sigue funcionando sin push.
   Future<void> inicializar() async {
+    await inicializarCritico();
+    final fcm = _fcm;
+    if (fcm == null) {
+      _disponible = false;
+      return;
+    }
     try {
-      await Firebase.initializeApp();
-      _fcm = FirebaseMessaging.instance;
 
       // Canal Android 8+ (obligatorio para background). Sin esto, los push en
       // segundo plano no suenan / no aparecen en algunos OEMs.
-      const androidInit = AndroidInitializationSettings('ic_launcher');
+      const androidInit = AndroidInitializationSettings('ic_notif');
       const init = InitializationSettings(android: androidInit);
       await _locales.initialize(
         init,
@@ -72,12 +88,12 @@ class _PushMovil {
             ?.createNotificationChannel(canal);
       } catch (_) {}
 
-      await _fcm!.requestPermission(
+      await fcm.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-      _fcm!.setForegroundNotificationPresentationOptions(
+      fcm.setForegroundNotificationPresentationOptions(
         alert: true,
         badge: true,
         sound: true,
@@ -85,17 +101,15 @@ class _PushMovil {
 
       // Foreground: mostrar local.
       FirebaseMessaging.onMessage.listen(_mostrarMensajeFcm);
-      // Background: handler top-level (data messages cuando app cerrada).
-      FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
       // Tap en notificación del sistema (background / terminada).
       FirebaseMessaging.onMessageOpenedApp.listen(_handleTap);
       // App abierta desde notificación estando terminada.
       try {
-        final inicial = await _fcm!.getInitialMessage();
+        final inicial = await fcm.getInitialMessage();
         if (inicial != null) _handleTap(inicial);
       } catch (_) {}
       // Refresh token: Android lo rota periódicamente.
-      _fcm!.onTokenRefresh.listen((nuevo) {
+      fcm.onTokenRefresh.listen((nuevo) {
         _token = nuevo;
         registrarToken();
       });
@@ -196,7 +210,7 @@ class _PushMovil {
         channelDescription: 'Mensajes, Me Gustas, visitas y matches',
         importance: Importance.high,
         priority: Priority.high,
-        icon: 'ic_launcher',
+        icon: 'ic_notif',
       );
       await _locales.show(
         DateTime.now().millisecondsSinceEpoch % 100000,
@@ -211,7 +225,7 @@ class _PushMovil {
                   channelDescription: 'Mensajes, Me Gustas, visitas y matches',
                   importance: Importance.high,
                   priority: Priority.high,
-                  icon: 'ic_launcher',
+                  icon: 'ic_notif',
                   styleInformation: BigPictureStyleInformation(logo,
                       contentTitle: titulo, summaryText: cuerpo),
                 ),
@@ -229,6 +243,10 @@ Future<bool> solicitarPermisoNotificaciones() => _push.solicitarPermiso();
 /// Muestra una notificación local con el logo de la app.
 Future<void> notificarNavegador(String titulo, String cuerpo) =>
     _push.mostrarLocal(titulo, cuerpo);
+
+/// Fase crítica de push (Firebase + handler de background). Llamar con
+/// `await` antes de `runApp()`.
+Future<void> inicializarPushCritico() => _push.inicializarCritico();
 
 /// Inicializa Firebase y los handlers de FCM (una sola vez al arrancar).
 Future<void> inicializarPush() => _push.inicializar();

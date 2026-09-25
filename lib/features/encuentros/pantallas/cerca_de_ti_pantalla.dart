@@ -286,6 +286,16 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     return lista;
   }
 
+  /// Distancia en km desde mi posición hasta [u]. Sin coordenadas → infinito
+  /// (queda al final de la grilla).
+  double _distanciaA(Usuario u) {
+    if ((_miLat == 0 && _miLon == 0) ||
+        (u.ubicacionLat == 0 && u.ubicacionLon == 0)) {
+      return double.infinity;
+    }
+    return distanciaKmEntre(_miLat, _miLon, u.ubicacionLat, u.ubicacionLon);
+  }
+
   void _aplicarFiltros() {
     var lista = _filtrar(_usuarios, conAmpliacion: _amplitudAplicada);
 
@@ -302,12 +312,15 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       }
     }
 
-    // El orden por distancia ya lo aplica el servidor (orden='distancia').
-    // Regla de reciclaje de Nopes: nuevos primero; si quedan menos de 5 se
-    // agregan al final los rechazos reciclables (más antiguos primero). Los
-    // reciclados ya pasaron el filtro de distancia de _filtrar.
+    // Orden final por cercanía en cliente: el servidor ya viene con
+    // orden='distancia', pero componerDeck (reciclaje de Nopes) y los lotes
+    // paginados rompen ese orden. Se reordena por distancia real aquí.
+    var deck = widget.votosServicio.componerDeck(lista);
+    if (_miLat != 0 || _miLon != 0) {
+      deck.sort((a, b) => _distanciaA(a).compareTo(_distanciaA(b)));
+    }
 
-    if (mounted) setState(() => _filtrados = widget.votosServicio.componerDeck(lista));
+    if (mounted) setState(() => _filtrados = deck);
   }
 
   void _ampliarBusqueda() {

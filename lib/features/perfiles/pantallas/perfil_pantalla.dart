@@ -552,7 +552,9 @@ class _PerfilFlumiState extends State<_PerfilFlumi> {
       subtitulo: detalle,
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => const AdministrarSuscripcionPantalla(),
+          builder: (_) => AdministrarSuscripcionPantalla(
+            suscripcionServicio: widget.suscripcionServicio,
+          ),
         ),
       ),
     );

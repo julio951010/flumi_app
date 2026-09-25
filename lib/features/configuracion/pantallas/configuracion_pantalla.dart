@@ -108,7 +108,9 @@ class ConfiguracionPantalla extends StatelessWidget {
                   onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const AdministrarSuscripcionPantalla(),
+                          builder: (_) => AdministrarSuscripcionPantalla(
+                            suscripcionServicio: suscripcionServicio,
+                          ),
                         ),
                       )),
             ],

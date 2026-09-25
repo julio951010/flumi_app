@@ -1150,10 +1150,15 @@ begin
   );
   begin
     -- Prioridad: supabase_functions (interno, no necesita egress) > net (requiere egress)
+    -- NOTA: net.http_post VA CON NOTACIÓN NOMBRADA. Su firma es
+    -- (url, body, params, headers, timeout): la llamada posicional anterior
+    -- (v_url, v_headers, v_body) mandaba los headers como body y el body como
+    -- params, por lo que x-flumi-secret nunca llegaba y la Edge Function
+    -- respondía 401 en silencio.
     if to_regnamespace('supabase_functions') is not null then
       perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
     elsif to_regnamespace('net') is not null then
-      perform net.http_post(v_url, v_headers, v_body);
+      perform net.http_post(url := v_url, body := v_body, headers := v_headers);
     end if;
   exception when others then
     -- Un fallo de push nunca debe romper el insert original.
@@ -1328,6 +1333,11 @@ end $$;
 -- Solicitar pago: valida en servidor (monto, formato, anti-replay, rate-limit)
 -- Si se adjunta prueba SMS (p_sms_nro/monto/remitente) y coincide con lo que
 -- el usuario escribió + remitente esperado + monto, se auto-aprueba sin admin.
+-- Limpieza de firmas viejas PRIMERO: REVOKE/GRANT fallan con 42883 si la firma
+-- no existe, y CREATE OR REPLACE no puede cambiar la lista de argumentos.
+drop function if exists public.solicitar_pago(text,text,int,text);
+drop function if exists public.solicitar_pago(text,text,int,text,text,numeric,text);
+drop function if exists public.solicitar_pago(text,text,int,text,text,numeric,text,text,text);
 create or replace function public.solicitar_pago(
   p_metodo text,
   p_plan text,
@@ -1480,11 +1490,6 @@ begin
 end;
 $$;
 
-revoke all on function public.solicitar_pago(text,text,int,text) from public;
-revoke all on function public.solicitar_pago(text,text,int,text,text,numeric,text) from public;
-revoke all on function public.solicitar_pago(text,text,int,text,text,numeric,text,text,text) from public;
-grant execute on function public.solicitar_pago(text,text,int,text) to authenticated;
-grant execute on function public.solicitar_pago(text,text,int,text,text,numeric,text) to authenticated;
 grant execute on function public.solicitar_pago(text,text,int,text,text,numeric,text,text,text) to authenticated;
 
 -- Verificar pago (solo admin): aprueba/rechaza y activa suscripción

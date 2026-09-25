@@ -31,6 +31,26 @@ class PagosConfig {
 /// Servicio que lee `pagos_config` desde Supabase (gestionado desde flumi_admin).
 /// Si no hay fila o falla la red, devuelve null y la UI usa fallback local.
 class PagosConfigServicio {
+  /// ¿El método está activo en Supabase? Sin red o sin fila se asume activo
+  /// (fallback local) para no bloquear el pago offline.
+  static Future<bool> estaActivo(MetodoPago metodo) async {
+    if (kUsarServidorLocal) return true;
+    final key = metodo == MetodoPago.transfermovil ? 'transfermovil' : 'enzona';
+    try {
+      final row = await Supabase.instance.client
+          .from('pagos_config')
+          .select('activo')
+          .eq('metodo', key)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 5));
+      if (row == null) return true;
+      return (row['activo'] as bool?) ?? true;
+    } catch (e) {
+      debugPrint('[PagosConfig] error activo $key: $e');
+      return true;
+    }
+  }
+
   static Future<PagosConfig?> obtener(MetodoPago metodo) async {
     if (kUsarServidorLocal) return null;
     final key = metodo == MetodoPago.transfermovil ? 'transfermovil' : 'enzona';

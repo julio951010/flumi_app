@@ -64,7 +64,18 @@ class _PagoDatosTransferenciaPantallaState extends State<PagoDatosTransferenciaP
                   decoration: BoxDecoration(color: const Color(0xFFF3E5F5), borderRadius: BorderRadius.circular(14)),
                   child: Row(
                     children: [
-                      Icon(datos.metodo == MetodoPago.transfermovil ? Icons.phone_android : Icons.qr_code_2, color: const Color(0xFF6A1B9A)),
+                      Container(
+                        width: 40,
+                        height: 40,
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
+                        child: Image.asset(
+                          datos.metodo == MetodoPago.transfermovil
+                              ? 'assets/images/Transfermovil.png'
+                              : 'assets/images/EnZona.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(child: Text('Paga en ${datos.metodo?.nombre ?? ''} con estos datos exactos',
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
