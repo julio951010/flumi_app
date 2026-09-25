@@ -190,8 +190,18 @@ create table if not exists public.suscripciones (
   plan        text default 'gratis' check (plan in ('gratis','plus','premium')),
   inicio      timestamptz default now(),
   vence       timestamptz,
-  activa      boolean default true
+  activa      boolean default true,
+  -- Pila de planes (profundidad 1): al cambiar de plan con vigencia restante,
+  -- el plan anterior espera aquí y se reactiva al vencer el nuevo.
+  plan_reserva text check (plan_reserva in ('gratis','plus','premium')),
+  vence_reserva timestamptz
 );
+
+alter table public.suscripciones add column if not exists plan_reserva text check (plan_reserva in ('gratis','plus','premium'));
+alter table public.suscripciones add column if not exists vence_reserva timestamptz;
+-- Momento del cambio de plan: permite pausar la reserva (tiempo restante =
+-- vence_reserva - inicio_reserva) en vez de congelar su fecha de vencimiento.
+alter table public.suscripciones add column if not exists inicio_reserva timestamptz;
 
 -- ------------------------------------------------------------
 -- USOS DIARIOS (límites por plan)
@@ -265,6 +275,39 @@ drop policy if exists "usuario_edita_su_propio_perfil" on public.profiles;
 create policy "usuario_edita_su_propio_perfil"
   on public.profiles for update
   using (auth.uid() = id);
+
+-- Blindaje is_admin: ningún usuario puede auto-otorgarse admin. Solo
+-- service_role/postgres o un admin existente pueden cambiar esa columna.
+-- (Sin esto, UPDATE propio + is_admin=true daba premium + poderes de admin.)
+create or replace function public.proteger_is_admin()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_admin boolean := false;
+begin
+  if current_user in ('service_role', 'postgres', 'supabase_admin') then
+    return new;
+  end if;
+  select coalesce(is_admin, false) into v_admin
+    from public.profiles where id = auth.uid();
+  if v_admin then
+    return new;
+  end if;
+  if TG_OP = 'INSERT' then
+    new.is_admin := false;
+  else
+    new.is_admin := old.is_admin;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists proteger_is_admin_trg on public.profiles;
+create trigger proteger_is_admin_trg
+  before insert or update on public.profiles
+  for each row execute function public.proteger_is_admin();
 
 drop policy if exists "usuario_crea_su_propio_perfil" on public.profiles;
 create policy "usuario_crea_su_propio_perfil"
@@ -345,19 +388,22 @@ create policy "usuario_gestiona_sus_bloqueos"
   using (auth.uid() = bloqueador_id)
   with check (auth.uid() = bloqueador_id);
 
--- SUSCRIPCIONES
+-- SUSCRIPCIONES: el usuario SOLO lee. Toda escritura (activar, extender,
+-- cancelar, promover reserva) pasa por RPCs security definer que validan la
+-- compra. El upsert ciego cliente->servidor permitía auto-escalado a premium.
 drop policy if exists "usuario_gestiona_su_suscripcion" on public.suscripciones;
-create policy "usuario_gestiona_su_suscripcion"
-  on public.suscripciones for all
-  using (auth.uid() = usuario_id)
-  with check (auth.uid() = usuario_id);
+drop policy if exists "usuario_lee_su_suscripcion" on public.suscripciones;
+create policy "usuario_lee_su_suscripcion"
+  on public.suscripciones for select
+  using (auth.uid() = usuario_id);
 
--- USOS DIARIOS
+-- USOS DIARIOS: el usuario SOLO lee (el sync ya es solo-descarga y los RPCs
+-- escriben como security definer). Con UPDATE propio se reseteaban los cupos.
 drop policy if exists "usuario_gestiona_sus_usos_diarios" on public.usos_diarios;
-create policy "usuario_gestiona_sus_usos_diarios"
-  on public.usos_diarios for all
-  using (auth.uid() = usuario_id)
-  with check (auth.uid() = usuario_id);
+drop policy if exists "usuario_lee_sus_usos_diarios" on public.usos_diarios;
+create policy "usuario_lee_sus_usos_diarios"
+  on public.usos_diarios for select
+  using (auth.uid() = usuario_id);
 
 -- VISITAS
 drop policy if exists "usuario_ve_sus_visitas" on public.visitas;
@@ -541,7 +587,22 @@ begin
      and coalesce(activa, true) = true
      and (vence is null or vence > now());
   if v is null then
-    return 'gratis';
+    -- Pila de planes: si el plan actual venció pero hay reserva con tiempo
+    -- restante, la reserva es el plan efectivo. La reserva está PAUSADA:
+    -- restante = vence_reserva - inicio_reserva (no se erosiona con el tiempo).
+    -- Filas legacy sin inicio_reserva usan el criterio viejo (vence futuro).
+    select plan_reserva into v
+      from public.suscripciones
+     where usuario_id = p_uid
+       and plan_reserva is not null
+       and ((inicio_reserva is not null
+             and vence_reserva is not null
+             and vence_reserva > inicio_reserva)
+            or (inicio_reserva is null
+             and (vence_reserva is null or vence_reserva > now())));
+    if v is null then
+      return 'gratis';
+    end if;
   end if;
   return v;
 end;
@@ -1305,11 +1366,14 @@ create index if not exists pagos_nro_idx on public.pagos (nro_transaccion);
 
 alter table public.pagos enable row level security;
 
+-- PAGOS: el usuario SOLO lee sus pagos. La creación pasa por solicitar_pago
+-- (valida formato, monto, anti-replay y rate-limit). Con UPDATE propio se
+-- falsificaba "aprobado" y con DELETE se borraba evidencia y rate-limit.
 drop policy if exists "pagos_usuario_gestiona" on public.pagos;
-create policy "pagos_usuario_gestiona"
-  on public.pagos for all
-  using (auth.uid() = usuario_id)
-  with check (auth.uid() = usuario_id);
+drop policy if exists "pagos_usuario_lee" on public.pagos;
+create policy "pagos_usuario_lee"
+  on public.pagos for select
+  using (auth.uid() = usuario_id);
 
 drop policy if exists "pagos_admin_ve_todo" on public.pagos;
 create policy "pagos_admin_ve_todo"
@@ -1361,6 +1425,13 @@ declare
   v_existe int;
   v_pendientes int;
   v_auto boolean := false;
+  v_vence_actual timestamptz;
+  v_plan_actual text;
+  v_plan_nuevo text;
+  v_reserva_plan text;
+  v_reserva_vence timestamptz;
+  v_reserva_inicio timestamptz;
+  v_base timestamptz;
   v_sms_nro_norm text;
   v_sms_rem_norm text;
 begin
@@ -1476,15 +1547,38 @@ begin
   if v_auto then
     insert into public.pagos (usuario_id, metodo, plan, dias, monto, tarjeta_destino, movil_confirmar, qr_url, nro_transaccion, estado, verificado_en, verificado_por)
     values (yo, p_metodo, p_plan, p_dias, v_monto, coalesce(v_tarjeta,''), coalesce(v_movil,''), coalesce(v_qr,''), p_nro, 'aprobado', now(), yo);
-    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa)
-    values (yo, case when p_plan = 'Flumi Premium' then 'premium' else 'plus' end, now(), now() + (p_dias || ' days')::interval, true)
-    on conflict (usuario_id) do update set plan = excluded.plan, inicio = excluded.inicio, vence = excluded.vence, activa = true;
+    -- Extender: los días se suman a la vigencia restante (no se pierde lo pagado).
+    -- Cambiar de plan con vigencia restante: el anterior queda en reserva
+    -- PAUSADO (inicio_reserva = ahora; restante = vence - ahora) y se reanuda
+    -- al vencer el nuevo (pila de profundidad 1).
+    select plan, vence into v_plan_actual, v_vence_actual from public.suscripciones where usuario_id = yo;
+    v_plan_nuevo := case when p_plan = 'Flumi Premium' then 'premium' else 'plus' end;
+    if v_plan_actual is not null and v_plan_actual <> v_plan_nuevo
+       and v_vence_actual is not null and v_vence_actual > now() then
+      v_reserva_plan := v_plan_actual;
+      v_reserva_vence := v_vence_actual;
+      v_reserva_inicio := now();
+      v_base := now();
+    else
+      v_reserva_plan := null;
+      v_reserva_vence := null;
+      v_reserva_inicio := null;
+      v_base := greatest(coalesce(v_vence_actual, now()), now());
+    end if;
+    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa, plan_reserva, vence_reserva, inicio_reserva)
+    values (yo, v_plan_nuevo, now(), v_base + (p_dias || ' days')::interval, true, v_reserva_plan, v_reserva_vence, v_reserva_inicio)
+    on conflict (usuario_id) do update set plan = excluded.plan, inicio = excluded.inicio, vence = excluded.vence, activa = true, plan_reserva = excluded.plan_reserva, vence_reserva = excluded.vence_reserva, inicio_reserva = excluded.inicio_reserva;
     perform public.enviar_push_pg(yo, 'Pago verificado', 'Tu suscripción ' || p_plan || ' (' || p_dias || ' días) está activa', 'regalos');
     return jsonb_build_object('ok', true, 'monto', v_monto, 'auto_aprobado', true);
   end if;
 
-  insert into public.pagos (usuario_id, metodo, plan, dias, monto, tarjeta_destino, movil_confirmar, qr_url, nro_transaccion)
-  values (yo, p_metodo, p_plan, p_dias, v_monto, coalesce(v_tarjeta,''), coalesce(v_movil,''), coalesce(v_qr,''), p_nro);
+  -- El count previo es fast-path; la carrera concurrente la atrapa el unique.
+  begin
+    insert into public.pagos (usuario_id, metodo, plan, dias, monto, tarjeta_destino, movil_confirmar, qr_url, nro_transaccion)
+    values (yo, p_metodo, p_plan, p_dias, v_monto, coalesce(v_tarjeta,''), coalesce(v_movil,''), coalesce(v_qr,''), p_nro);
+  exception when unique_violation then
+    return jsonb_build_object('ok', false, 'error', 'nro_duplicado');
+  end;
 
   return jsonb_build_object('ok', true, 'monto', v_monto, 'auto_aprobado', false);
 end;
@@ -1505,6 +1599,13 @@ declare
   yo uuid := auth.uid();
   es_admin boolean := false;
   r public.pagos%rowtype;
+  v_vence_actual timestamptz;
+  v_plan_actual text;
+  v_plan_nuevo text;
+  v_reserva_plan text;
+  v_reserva_vence timestamptz;
+  v_reserva_inicio timestamptz;
+  v_base timestamptz;
 begin
   if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
   select coalesce(is_admin,false) into es_admin from public.profiles where id = yo;
@@ -1524,20 +1625,43 @@ begin
     where id = p_pago_id;
 
   if p_estado = 'aprobado' then
-    -- Activa suscripción (plan en minúsculas para la tabla suscripciones)
-    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa)
+    -- Activa/extiende suscripción (plan en minúsculas para la tabla
+    -- suscripciones). Mismo plan: los días se suman a la vigencia restante.
+    -- Cambio de plan con vigencia: el anterior queda en reserva PAUSADO
+    -- (inicio_reserva = ahora) y se reanuda al vencer el nuevo.
+    select plan, vence into v_plan_actual, v_vence_actual from public.suscripciones where usuario_id = r.usuario_id;
+    v_plan_nuevo := case when r.plan = 'Flumi Premium' then 'premium' else 'plus' end;
+    if v_plan_actual is not null and v_plan_actual <> v_plan_nuevo
+       and v_vence_actual is not null and v_vence_actual > now() then
+      v_reserva_plan := v_plan_actual;
+      v_reserva_vence := v_vence_actual;
+      v_reserva_inicio := now();
+      v_base := now();
+    else
+      v_reserva_plan := null;
+      v_reserva_vence := null;
+      v_reserva_inicio := null;
+      v_base := greatest(coalesce(v_vence_actual, now()), now());
+    end if;
+    insert into public.suscripciones (usuario_id, plan, inicio, vence, activa, plan_reserva, vence_reserva, inicio_reserva)
     values (
       r.usuario_id,
-      case when r.plan = 'Flumi Premium' then 'premium' else 'plus' end,
+      v_plan_nuevo,
       now(),
-      now() + (r.dias || ' days')::interval,
-      true
+      v_base + (r.dias || ' days')::interval,
+      true,
+      v_reserva_plan,
+      v_reserva_vence,
+      v_reserva_inicio
     )
     on conflict (usuario_id) do update set
       plan = excluded.plan,
       inicio = excluded.inicio,
       vence = excluded.vence,
-      activa = true;
+      activa = true,
+      plan_reserva = excluded.plan_reserva,
+      vence_reserva = excluded.vence_reserva,
+      inicio_reserva = excluded.inicio_reserva;
     -- Notifica al usuario
     perform public.enviar_push_pg(r.usuario_id, 'Pago aprobado', 'Tu suscripción ' || r.plan || ' (' || r.dias || ' días) está activa', 'regalos');
   else
@@ -1550,6 +1674,79 @@ $$;
 
 revoke all on function public.verificar_pago(uuid,text,text) from public;
 grant execute on function public.verificar_pago(uuid,text,text) to authenticated;
+
+-- ============================================================
+-- Cancelar suscripción (propia): desactiva el plan y limpia la reserva.
+-- El usuario ya no puede escribir suscripciones directo (SELECT-only).
+-- ============================================================
+create or replace function public.cancelar_suscripcion()
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+begin
+  if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
+  update public.suscripciones
+    set activa = false,
+        plan_reserva = null,
+        vence_reserva = null,
+        inicio_reserva = null
+    where usuario_id = yo;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function public.cancelar_suscripcion() from public;
+grant execute on function public.cancelar_suscripcion() to authenticated;
+
+-- ============================================================
+-- Promover reserva (propia): si el plan actual venció y hay reserva con
+-- tiempo restante (pausado), la activa. La app lo llama al detectar
+-- vencimiento con reserva vigente.
+-- ============================================================
+create or replace function public.promover_reserva()
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  r public.suscripciones%rowtype;
+  v_restante interval;
+begin
+  if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
+  select * into r from public.suscripciones where usuario_id = yo;
+  if not found then return jsonb_build_object('ok', false, 'error', 'sin_suscripcion'); end if;
+  if r.plan_reserva is null then return jsonb_build_object('ok', false, 'error', 'sin_reserva'); end if;
+  -- Solo promueve si el plan actual ya no está vigente
+  if coalesce(r.activa, true) = true and (r.vence is null or r.vence > now()) then
+    return jsonb_build_object('ok', false, 'error', 'plan_vigente');
+  end if;
+  -- Tiempo restante pausado; legacy sin inicio_reserva usa vence absoluto
+  if r.inicio_reserva is not null and r.vence_reserva is not null and r.vence_reserva > r.inicio_reserva then
+    v_restante := r.vence_reserva - r.inicio_reserva;
+  elsif r.vence_reserva is not null and r.vence_reserva > now() then
+    v_restante := r.vence_reserva - now();
+  else
+    return jsonb_build_object('ok', false, 'error', 'reserva_vencida');
+  end if;
+  update public.suscripciones
+    set plan = r.plan_reserva,
+        inicio = now(),
+        vence = now() + v_restante,
+        activa = true,
+        plan_reserva = null,
+        vence_reserva = null,
+        inicio_reserva = null
+    where usuario_id = yo;
+  return jsonb_build_object('ok', true, 'plan', r.plan_reserva);
+end;
+$$;
+
+revoke all on function public.promover_reserva() from public;
+grant execute on function public.promover_reserva() to authenticated;
 
 -- Herramienta admin: limpiar interacciones de pruebas (solo admin)
 create or replace function public.limpiar_interacciones_pruebas()

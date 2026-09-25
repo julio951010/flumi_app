@@ -320,6 +320,23 @@ class _AdministrarSuscripcionPantallaState
               ),
             ],
           ),
+          if (_sub.tieneReservaVigente) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.layers_outlined,
+                    size: 16, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _textoReserva(),
+                    style: TextStyle(
+                        fontSize: 13, color: Colors.grey[700]),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (!esGratis) ...[
             const SizedBox(height: 16),
             SizedBox(
@@ -345,6 +362,13 @@ class _AdministrarSuscripcionPantallaState
         ],
       ),
     );
+  }
+
+  String _textoReserva() {
+    final nombre = _sub.planReserva == 'premium' ? 'Flumi Premium' : 'Flumi Plus';
+    final dias = _sub.diasReservaRestantes;
+    if (dias == null) return 'Al vencer, continúa $nombre';
+    return 'Al vencer, continúa $nombre ($dias ${dias == 1 ? 'día' : 'días'})';
   }
 
   String _textoRestante(DateTime vence) {
@@ -467,13 +491,10 @@ class _AdministrarSuscripcionPantallaState
     setState(() => _cancelando = true);
     try {
       if (!kUsarServidorLocal) {
-        final uid = Supabase.instance.client.auth.currentUser?.id;
-        if (uid != null) {
-          await Supabase.instance.client
-              .from('suscripciones')
-              .update({'activa': false}).eq('usuario_id', uid).timeout(
-                  const Duration(seconds: 8));
-        }
+        final res = await Supabase.instance.client
+            .rpc('cancelar_suscripcion')
+            .timeout(const Duration(seconds: 8));
+        if (res is Map && res['ok'] != true) throw res['error'] ?? 'Error';
       }
       await _sub.cargarSuscripcion();
       if (context.mounted) {

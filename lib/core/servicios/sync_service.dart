@@ -553,13 +553,9 @@ class SyncService {
         return;
       }
 
-      if (local != null) {
-        await sb.Supabase.instance.client
-            .from('suscripciones')
-            .upsert(_suscripcionARemoto(local));
-      }
-
-      // Descargar la suscripciÃ³n remota para mantener coherencia local
+      // El servidor es la fuente de verdad (RLS SELECT-only para el usuario;
+      // toda escritura pasa por RPCs). Nunca se sube lo local: un espejo
+      // rancio revertiría cancelaciones y aprobaciones del servidor.
       final remoto = await sb.Supabase.instance.client
           .from('suscripciones')
           .select()
@@ -569,6 +565,11 @@ class SyncService {
         await _db.into(_db.suscripciones).insertOnConflictUpdate(
               _suscripcionDesdeRemoto(remoto),
             );
+      } else if (local != null) {
+        // Sin fila remota (cuenta nueva o limpieza): no hay suscripción.
+        await (_db.delete(_db.suscripciones)
+              ..where((s) => s.usuarioId.equals(userIdFinal)))
+            .go();
       }
     } catch (_) {}
   }
@@ -1124,6 +1125,9 @@ class SyncService {
         'inicio': s.inicio.toIso8601String(),
         'vence': s.vence?.toIso8601String(),
         'activa': s.activa,
+        'plan_reserva': s.planReserva,
+        'vence_reserva': s.venceReserva?.toIso8601String(),
+        'inicio_reserva': s.inicioReserva?.toIso8601String(),
       };
 
   SuscripcionesCompanion _suscripcionDesdeRemoto(Map<String, dynamic> r) =>
@@ -1133,6 +1137,9 @@ class SyncService {
         inicio: Value(PerfilMapeo.parsearFecha(r['inicio']) ?? DateTime.now()),
         vence: Value(PerfilMapeo.parsearFecha(r['vence'])),
         activa: Value(PerfilMapeo.aBool(r['activa'], true)),
+        planReserva: Value(r['plan_reserva'] as String?),
+        venceReserva: Value(PerfilMapeo.parsearFecha(r['vence_reserva'])),
+        inicioReserva: Value(PerfilMapeo.parsearFecha(r['inicio_reserva'])),
       );
 
   Map<String, dynamic> _usosDiariosARemoto(UsosDiario u) => {

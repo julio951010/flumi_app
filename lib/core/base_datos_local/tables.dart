@@ -187,6 +187,12 @@ class Suscripciones extends Table {
   DateTimeColumn get inicio => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get vence => dateTime().nullable()();
   BoolColumn get activa => boolean().withDefault(const Constant(true))();
+  // Pila de planes (profundidad 1): plan anterior en espera mientras el nuevo
+  // está vigente; se promueve al vencer (ver plan_efectivo en Supabase).
+  // La reserva está PAUSADA: restante = venceReserva - inicioReserva.
+  TextColumn get planReserva => text().nullable()();
+  DateTimeColumn get venceReserva => dateTime().nullable()();
+  DateTimeColumn get inicioReserva => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {usuarioId};

@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../config/env.dart';
 import '../base_datos_local/database.dart';
 import 'config_remota_servicio.dart';
 import 'connectivity_service.dart';
@@ -215,14 +217,65 @@ class SuscripcionServicio with ChangeNotifier {
     await _cargarDesdeLocal(userId);
   }
 
+  /// Plan en reserva (pila de profundidad 1) y su vencimiento, si existen.
+  String? get planReserva => _suscripcionActual?.planReserva;
+  DateTime? get venceReserva => _suscripcionActual?.venceReserva;
+
+  /// Momento en que se aparcó la reserva: restante = venceReserva - inicioReserva.
+  DateTime? get inicioReserva => _suscripcionActual?.inicioReserva;
+
+  /// Días restantes pausados en la reserva (null si no hay reserva válida).
+  int? get diasReservaRestantes {
+    final sub = _suscripcionActual;
+    final inicio = sub?.inicioReserva;
+    final vence = sub?.venceReserva;
+    if (sub?.planReserva == null || inicio == null || vence == null) return null;
+    final dias = vence.difference(inicio).inDays;
+    return dias > 0 ? dias : 0;
+  }
+
+  /// true si hay reserva con tiempo restante esperando a activarse.
+  /// La reserva está pausada: restante = venceReserva - inicioReserva.
+  bool get tieneReservaVigente =>
+      _reservaVigente(_suscripcionActual, DateTime.now());
+
+  static bool _reservaVigente(Suscripcione? sub, DateTime ahora) {
+    if (sub?.planReserva == null) return false;
+    final inicio = sub!.inicioReserva;
+    final vence = sub.venceReserva;
+    // Pausada: el restante se fijó al cambiar de plan, no se erosiona.
+    if (inicio != null && vence != null) return vence.isAfter(inicio);
+    // Legacy sin inicio_reserva: criterio viejo (vence futuro).
+    if (vence != null) return vence.isAfter(ahora);
+    return true;
+  }
+
+  Future<dynamic> _supabaseRpc(String fn, Map<String, dynamic> params) =>
+      Supabase.instance.client.rpc(fn, params: params);
+
   Future<void> _cargarDesdeLocal(String id) async {
     final perfil = await (_db.select(_db.usuarios)..where((u) => u.uuid.equals(id))).getSingleOrNull();
     _esAdmin = perfil?.isAdmin ?? false;
-    final sub = await (_db.select(_db.suscripciones)..where((s) => s.usuarioId.equals(id))).getSingleOrNull();
+    var sub = await (_db.select(_db.suscripciones)..where((s) => s.usuarioId.equals(id))).getSingleOrNull();
+    // Pila de planes: si el plan actual venció pero hay reserva con tiempo
+    // restante, se promueve vía RPC (el usuario no puede escribir
+    // suscripciones directo) y se recarga desde el servidor.
+    final ahora = DateTime.now();
+    final vigente = sub != null && sub.activa && (sub.vence == null || sub.vence!.isAfter(ahora));
+    if (!vigente && _reservaVigente(sub, ahora)) {
+      try {
+        if (ConnectivityService.instancia.hayConexion && !kUsarServidorLocal) {
+          await _supabaseRpc('promover_reserva', {});
+          await _sync.sincronizarSuscripciones(id);
+          sub = await (_db.select(_db.suscripciones)..where((s) => s.usuarioId.equals(id))).getSingleOrNull();
+        }
+      } catch (_) {}
+    }
     _suscripcionActual = sub;
-    if (sub != null && sub.activa && (sub.vence == null || sub.vence!.isAfter(DateTime.now()))) {
+    final actual = sub;
+    if (actual != null && actual.activa && (actual.vence == null || actual.vence!.isAfter(DateTime.now()))) {
       _planActual = PlanTipo.values.firstWhere(
-        (p) => p.name == sub.plan,
+        (p) => p.name == actual.plan,
         orElse: () => PlanTipo.gratis,
       );
     } else {

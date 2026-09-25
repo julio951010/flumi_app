@@ -183,7 +183,8 @@ class PerfilMapeo {
       'edad': perfil.edad,
       'verificado_status': perfil.verificadoStatus,
       'score_popularidad': perfil.scorePopularidad,
-      'is_admin': perfil.isAdmin,
+      // is_admin NUNCA se sube desde el cliente (lo gestiona el servidor;
+      // el trigger proteger_is_admin lo bloquearía de todos modos).
     };
   }
 
@@ -249,7 +250,7 @@ class PerfilMapeo {
       'verificado_status': o(c.verificadoStatus, base?.verificadoStatus ?? false),
       'score_popularidad':
           o(c.scorePopularidad, base?.scorePopularidad ?? 0),
-      'is_admin': o(c.isAdmin, base?.isAdmin ?? false),
+      // is_admin NUNCA se sube desde el cliente (ver arriba).
     };
   }
 

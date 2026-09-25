@@ -1584,6 +1584,16 @@ class SuscripcionServicioMock with ChangeNotifier implements SuscripcionServicio
   @override
   Suscripcione? get suscripcionActual => null;
   @override
+  String? get planReserva => null;
+  @override
+  DateTime? get venceReserva => null;
+  @override
+  DateTime? get inicioReserva => null;
+  @override
+  int? get diasReservaRestantes => null;
+  @override
+  bool get tieneReservaVigente => false;
+  @override
   UsosDiario? get usosHoy => null;
   @override
   bool get esGratis => false;

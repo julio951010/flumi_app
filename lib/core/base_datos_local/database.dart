@@ -10,7 +10,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 19;
+  int get schemaVersion => 21;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -143,6 +143,13 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 19) {
         await m.addColumn(usuarios, usuarios.isAdmin);
+      }
+      if (from < 20) {
+        await m.addColumn(suscripciones, suscripciones.planReserva);
+        await m.addColumn(suscripciones, suscripciones.venceReserva);
+      }
+      if (from < 21) {
+        await m.addColumn(suscripciones, suscripciones.inicioReserva);
       }
     },
   );
