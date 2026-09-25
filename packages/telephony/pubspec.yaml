@@ -1,0 +1,24 @@
+name: telephony
+description: A Flutter plugin to use telephony features such as fetch network
+  info, start phone calls, send and receive SMS, and listen for incoming SMS.
+version: 0.2.0-flumi.1
+homepage: https://telephony.shounakmulay.dev
+repository: https://github.com/shounakmulay/Telephony
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  platform: ^3.1.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.shounakmulay.telephony
+        pluginClass: TelephonyPlugin
+      ios:
+        pluginClass: TelephonyPlugin

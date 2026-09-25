@@ -591,7 +591,7 @@ enum _AuthPage {
 class _AuthWrapper extends StatefulWidget {
   final VoidCallback? onLoginExitoso;
 
-  const _AuthWrapper({super.key, this.onLoginExitoso});
+  const _AuthWrapper({this.onLoginExitoso});
 
   @override
   State<_AuthWrapper> createState() => _AuthWrapperState();

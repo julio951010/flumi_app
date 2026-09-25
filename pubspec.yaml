@@ -50,11 +50,11 @@ dependencies:
   # --- Cámara / galería ---
   image_picker: ^1.1.2
   # --- Cámara frontal embebida (verificación en vivo) ---
-  camera: ^0.11.1
+  camera: ^0.12.1
   permission_handler: ^11.4.0
 
   # --- Verificación de perfil (reconocimiento facial on-device, FaceNet) ---
-  face_verification: ^0.3.8
+  face_verification: ^0.3.9
 
   # --- Reconocimiento de gesto (prueba de vida on-device, MediaPipe/LiteRT) ---
   hand_detection: ^4.1.0
@@ -68,7 +68,10 @@ dependencies:
   geolocator: ^13.0.1
 
   # --- SMS (verificación automática de pagos) ---
-  telephony: ^0.2.0
+  # Fork local de telephony 0.2.0 (discontinuado): migrado a Built-in Kotlin
+  # para eliminar el warning KGP. API Dart idéntica al original.
+  telephony:
+    path: packages/telephony
 
 dev_dependencies:
   flutter_test:

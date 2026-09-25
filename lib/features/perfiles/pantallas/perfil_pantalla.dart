@@ -327,7 +327,6 @@ class _PerfilFlumi extends StatefulWidget {
   final VoidCallback? onActualizar;
 
   const _PerfilFlumi({
-    super.key,
     required this.perfil,
     required this.authService,
     required this.repositorio,

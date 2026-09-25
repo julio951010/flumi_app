@@ -48,11 +48,8 @@ Future<void> main() async {
       }
     }
 
-    final yumilka = ids['Yumilka'] ?? ids.values.firstWhere(
-        (id) => true, orElse: () => '');
     for (final entry in ids.entries) {
       if (entry.key == 'Yumilka' || entry.key == 'Pedro') {
-        final esYumilka = entry.key == 'Yumilka';
         await consultar('$entry.key -> rechazos (salientes y entrantes)',
             'select * from flumi.rechazos where usuario_id = @id or rechazado_id = @id'.replaceAll(
                 '@id', "'${entry.value}'"));

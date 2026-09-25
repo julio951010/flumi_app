@@ -56,10 +56,8 @@ class _SwipeCardsState extends State<SwipeCards> {
     if (_currentItem != null) {
       _currentItem!.addListener(_onMatchChange);
     }
-    int? currentItemIndex = widget.matchEngine._currentItemIndex;
-    if (currentItemIndex != null) {
-      _frontCard = Key(currentItemIndex.toString());
-    }
+    final currentItemIndex = widget.matchEngine._currentItemIndex;
+    _frontCard = Key(currentItemIndex.toString());
     super.initState();
   }
 
@@ -109,7 +107,7 @@ class _SwipeCardsState extends State<SwipeCards> {
 
   Widget _buildFrontCard() {
     return ProfileCard(
-      child: widget.itemBuilder(context, widget.matchEngine._currentItemIndex!),
+      child: widget.itemBuilder(context, widget.matchEngine._currentItemIndex),
       key: _frontCard,
     );
   }
@@ -119,7 +117,7 @@ class _SwipeCardsState extends State<SwipeCards> {
       transform: Matrix4.identity()..scale(_nextCardScale, _nextCardScale),
       alignment: Alignment.center,
       child: ProfileCard(
-        child: widget.itemBuilder(context, widget.matchEngine._nextItemIndex!),
+        child: widget.itemBuilder(context, widget.matchEngine._nextItemIndex),
       ),
     );
   }
@@ -156,10 +154,12 @@ class _SwipeCardsState extends State<SwipeCards> {
         break;
     }
 
-    if (widget.matchEngine._nextItemIndex! <
-        widget.matchEngine._swipeItems!.length) {
-      widget.itemChanged?.call(
-          widget.matchEngine.nextItem!, widget.matchEngine._nextItemIndex!);
+    if (widget.matchEngine._nextItemIndex <
+        widget.matchEngine._swipeItems.length) {
+      final next = widget.matchEngine.nextItem;
+      if (next != null) {
+        widget.itemChanged?.call(next, widget.matchEngine._nextItemIndex);
+      }
     }
 
     widget.matchEngine.cycleMatch();
@@ -220,40 +220,38 @@ class _SwipeCardsState extends State<SwipeCards> {
 }
 
 class MatchEngine extends ChangeNotifier {
-  final List<SwipeItem>? _swipeItems;
-  int? _currentItemIndex;
-  int? _nextItemIndex;
+  final List<SwipeItem> _swipeItems;
+  int _currentItemIndex = 0;
+  int _nextItemIndex = 1;
 
   MatchEngine({
     List<SwipeItem>? swipeItems,
-  }) : _swipeItems = swipeItems {
-    _currentItemIndex = 0;
-    _nextItemIndex = 1;
-  }
+  }) : _swipeItems = swipeItems ?? [];
 
-  SwipeItem? get currentItem => _currentItemIndex! < _swipeItems!.length
-      ? _swipeItems![_currentItemIndex!]
+  SwipeItem? get currentItem => _currentItemIndex < _swipeItems.length
+      ? _swipeItems[_currentItemIndex]
       : null;
 
-  SwipeItem? get nextItem => _nextItemIndex! < _swipeItems!.length
-      ? _swipeItems![_nextItemIndex!]
+  SwipeItem? get nextItem => _nextItemIndex < _swipeItems.length
+      ? _swipeItems[_nextItemIndex]
       : null;
 
   void cycleMatch() {
-    if (currentItem!.decision != Decision.undecided) {
-      currentItem!.resetMatch();
+    final current = currentItem;
+    if (current != null && current.decision != Decision.undecided) {
+      current.resetMatch();
       _currentItemIndex = _nextItemIndex;
-      _nextItemIndex = _nextItemIndex! + 1;
+      _nextItemIndex = _nextItemIndex + 1;
       notifyListeners();
     }
   }
 
   void rewindMatch() {
     if (_currentItemIndex != 0) {
-      currentItem!.resetMatch();
+      currentItem?.resetMatch();
       _nextItemIndex = _currentItemIndex;
-      _currentItemIndex = _currentItemIndex! - 1;
-      currentItem!.resetMatch();
+      _currentItemIndex = _currentItemIndex - 1;
+      currentItem?.resetMatch();
       notifyListeners();
     }
   }

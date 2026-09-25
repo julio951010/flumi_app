@@ -94,7 +94,7 @@ class _PagoComprobantePantallaState extends State<PagoComprobantePantalla> {
         NotificacionServicio.alerta(context, msg);
         return;
       }
-      final autoAprobado = res is Map && res['auto_aprobado'] == true;
+      final autoAprobado = res is Map<String, dynamic> && res['auto_aprobado'] == true;
       setState(() => _verificando = false);
       widget.datos.idTransaccion = nro;
       widget.datos.autoAprobado = autoAprobado;

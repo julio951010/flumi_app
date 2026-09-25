@@ -1,6 +1,4 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
@@ -127,16 +125,6 @@ class ConfiguracionPantalla extends StatelessWidget {
             const Divider(height: 1),
             _item(context, Icons.cleaning_services_outlined, 'Borrar caché',
                 onTap: () => _confirmarBorrarCache(context)),
-            // Herramienta de desarrollo: se quita para producción.
-            if (kDebugMode) ...[
-              const Divider(height: 1),
-              _item(
-                context,
-                Icons.delete_sweep_outlined,
-                'Limpiar interacciones (pruebas)',
-                onTap: () => _limpiarInteracciones(context),
-              ),
-            ],
             const SizedBox(height: 28),
             SizedBox(
               width: double.infinity,
@@ -265,56 +253,6 @@ class ConfiguracionPantalla extends StatelessWidget {
     if (bytes >= 1048576) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '$bytes B';
-  }
-
-  Future<void> _limpiarInteracciones(BuildContext context) async {
-    final confirmado = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Limpiar interacciones'),
-        content: const Text(
-          'Borra Nopes, Me Gusta, visitas, matches, mensajes, bloqueos, '
-          'reportes y usos diarios de la BD local (conserva perfiles y '
-          'suscripción). ¿Continuar?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Limpiar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmado != true || !context.mounted) return;
-    try {
-      await db.transaction(() async {
-        await (db.delete(db.rechazos)).go();
-        await (db.delete(db.historialLikes)).go();
-        await (db.delete(db.visitas)).go();
-        await (db.delete(db.matches)).go();
-        await (db.delete(db.mensajes)).go();
-        await (db.delete(db.bloqueos)).go();
-        await (db.delete(db.reportes)).go();
-        await (db.delete(db.usosDiarios)).go();
-      });
-    } catch (_) {
-      if (context.mounted) {
-        NotificacionServicio.alerta(
-            context, 'No se pudieron limpiar los datos.');
-      }
-      return;
-    }
-    if (context.mounted) {
-      NotificacionServicio.exito(
-        context,
-        'Interacciones limpiadas. Si usas Supabase ejecuta también '
-        'tool/limpiar_remoto.sql y recarga la app.',
-      );
-    }
   }
 
   Widget _item(BuildContext context, IconData icono, String titulo,

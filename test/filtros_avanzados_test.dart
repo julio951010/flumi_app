@@ -25,6 +25,7 @@ void main() {
       pendienteDeSincronizar: false,
       esPerfilPropio: false,
       perfilCompletado: true,
+      isAdmin: false,
       orientacionSexual: 'bisexual',
       situacionSentimental: 'soltero',
       intereses: const [],

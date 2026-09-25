@@ -283,15 +283,6 @@ class _BandejaNotificacionesPantallaState
 
   int get _noLeidas => _items.where((n) => !_leidas.contains(n.id)).length;
 
-  /// Verifica si una notificación está marcada como leída (local o BD).
-  Future<bool> _estaLeida(String notificacionId) async {
-    if (_leidas.contains(notificacionId)) return true;
-    final query = widget.db.select(widget.db.notificacionesAbiertas)
-      ..where((n) => n.notificacionId.equals(notificacionId));
-    final existe = await query.getSingleOrNull();
-    return existe != null;
-  }
-
   /// Cuenta notificaciones no leídas considerando BD y estado local.
   Future<int> get noLeidasAsync async {
     int count = 0;

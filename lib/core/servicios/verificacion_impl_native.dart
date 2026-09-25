@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:face_verification/face_verification.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';

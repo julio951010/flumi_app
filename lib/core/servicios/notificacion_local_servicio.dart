@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../utilidades/notificacion_navegador.dart';
-import '../../config/env.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Servicio que decide si mostrar notificación local (app en foreground)
 /// o dejar que llegue por push (app en background/cerrada).

@@ -8,23 +8,19 @@ import '../base_datos_local/database.dart';
 import '../utilidades/ubicacion_util.dart';
 import '../../features/perfiles/perfil_repositorio.dart';
 
-/// Actualiza la ubicación GPS real cada vez que abre la app. Solo guarda
-/// `ubicacion_lat` y `ubicacion_lon` para "Cerca de ti" (cálculos de
-/// distancia y RPC `perfiles_cercanos`). `ciudad` NO se toca aquí: solo se
-/// edita desde Onboarding perfil, Editar Perfil y Configuración →
-/// Información básica, tal como pide producto.
+/// Actualiza la ubicación GPS real cada vez que abre la app. Guarda `ciudad`
+/// real vía reverse-geocoding (Nominatim OSM) + `ubicacion_lat/lon` para
+/// "Cerca de ti". Si no hay red, fallback a provincia cubana offline. Si estás
+/// en Miami → Miami, La Habana → La Habana, Moscú → Moscú.
 ///
-/// Es 100% silencioso: no muestra diálogos ni toasts; si el GPS falla o el
-/// permiso está denegado, mantiene la ubicación anterior.
+/// Es 100% silencioso: no muestra diálogos; si el GPS falla o el permiso está
+/// denegado, mantiene la ubicación anterior.
 class UbicacionAutoServicio {
   UbicacionAutoServicio._();
 
-  /// Distancia mínima para considerar que el usuario se movió y vale la pena
-  /// escribir en BD (evita escrituras constantes si está quieto en casa).
   static const _umbralKm = 0.5;
 
-  /// Actualiza lat/lon si el GPS da una posición distinta a la guardada.
-  /// Llamar en `initState` de la pantalla principal y en `didChangeAppLifecycleState(resumed)`.
+  /// Actualiza ciudad + lat/lon si el GPS da una posición distinta.
   static Future<void> actualizarAlAbrirApp({
     required AppDatabase db,
     required PerfilRepositorio repo,
@@ -34,6 +30,24 @@ class UbicacionAutoServicio {
         const Duration(seconds: 12),
         onTimeout: () => throw TimeoutException('gps timeout'),
       );
+
+      // Ciudad real vía Nominatim (online) → fallback offline Cuba
+      String? ciudadReal = await obtenerCiudadReal(pos.lat, pos.lon);
+      if (ciudadReal == null || ciudadReal.trim().isEmpty) {
+        try {
+          final mapa = await cargarMapaProvincias();
+          ciudadReal = await resolverNombreUbicacion(
+                latitud: pos.lat,
+                longitud: pos.lon,
+                provincias: mapa,
+              ) ??
+              provinciaMasCercanaDirecta(pos.lat, pos.lon);
+        } catch (_) {
+          ciudadReal = provinciaMasCercanaDirecta(pos.lat, pos.lon);
+        }
+      }
+      ciudadReal = ciudadReal.trim();
+      if (ciudadReal.isEmpty) return;
 
       final perfil = await repo.obtenerPerfilPropio();
       final actual = perfil ??
@@ -45,21 +59,25 @@ class UbicacionAutoServicio {
 
       final lat0 = actual.ubicacionLat;
       final lon0 = actual.ubicacionLon;
+      final ciudad0 = actual.ciudad.trim();
 
       final distancia = (lat0 == 0 && lon0 == 0)
           ? double.infinity
           : _distanciaKm(lat0, lon0, pos.lat, pos.lon);
+      final ciudadCambio = ciudad0.toLowerCase() != ciudadReal.toLowerCase();
+      final movido = distancia > _umbralKm;
 
-      if (distancia <= _umbralKm) {
-        debugPrint('[UbicacionAuto] sin cambio lat/lon @ ${pos.lat},${pos.lon} (dist ${distancia.toStringAsFixed(2)}km) - ciudad intacta: ${actual.ciudad}');
+      if (!ciudadCambio && !movido) {
+        debugPrint('[UbicacionAuto] sin cambio: $ciudadReal @ ${pos.lat},${pos.lon}');
         return;
       }
 
-      debugPrint('[UbicacionAuto] actualizando lat/lon @ ${pos.lat},${pos.lon} (dist ${distancia.toStringAsFixed(2)}km) - ciudad intacta: ${actual.ciudad}');
+      debugPrint('[UbicacionAuto] actualizando $ciudad0 -> $ciudadReal @ ${pos.lat},${pos.lon} (dist ${distancia.toStringAsFixed(2)}km)');
 
       await repo.guardarOCambiarPerfil(
         UsuariosCompanion(
           uuid: Value(actual.uuid),
+          ciudad: Value(ciudadReal),
           ubicacionLat: Value(pos.lat),
           ubicacionLon: Value(pos.lon),
         ),

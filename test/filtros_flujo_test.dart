@@ -74,9 +74,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(futuro, isNotNull);
-    final resultado = await futuro!;
+    final resultado = await futuro;
     expect(resultado, isNotNull);
-    expect(resultado!.avanzado['religion'], isNotNull);
-    expect(resultado!.avanzado['religion']!.join(','), contains('Católica'));
+    expect(resultado?.avanzado['religion'], isNotNull);
+    expect(resultado?.avanzado['religion']?.join(','), contains('Católica'));
   });
 }

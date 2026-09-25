@@ -19,9 +19,10 @@ class ConfigRemotaServicio extends ChangeNotifier {
 
   Future<void> inicializar() async {
     await _cargar();
-    if (_client != null) {
+    final client = _client;
+    if (client != null) {
       try {
-        _channel = _client!.channel('app_config_changes')
+        _channel = client.channel('app_config_changes')
           ..onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
@@ -42,9 +43,10 @@ class ConfigRemotaServicio extends ChangeNotifier {
   }
 
   Future<void> _cargar() async {
-    if (_client == null) return;
+    final client = _client;
+    if (client == null) return;
     try {
-      final res = await _client!
+      final res = await client
           .from('app_config')
           .select('valor')
           .eq('clave', 'suscripciones_habilitadas')
@@ -68,7 +70,9 @@ class ConfigRemotaServicio extends ChangeNotifier {
   @override
   void dispose() {
     try {
-      if (_channel != null && _client != null) _client!.removeChannel(_channel!);
+      final client = _client;
+      final channel = _channel;
+      if (channel != null && client != null) client.removeChannel(channel);
     } catch (_) {}
     _pollTimer?.cancel();
     super.dispose();

@@ -1545,3 +1545,35 @@ $$;
 
 revoke all on function public.verificar_pago(uuid,text,text) from public;
 grant execute on function public.verificar_pago(uuid,text,text) to authenticated;
+
+-- Herramienta admin: limpiar interacciones de pruebas (solo admin)
+create or replace function public.limpiar_interacciones_pruebas()
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  es_admin boolean := false;
+begin
+  if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
+  select coalesce(is_admin,false) into es_admin from public.profiles where id = yo;
+  if not es_admin then return jsonb_build_object('ok', false, 'error', 'no_admin'); end if;
+
+  delete from public.rechazos;
+  delete from public.historial_likes;
+  delete from public.visitas;
+  delete from public.matches;
+  delete from public.messages;
+  delete from public.blocks;
+  delete from public.reports;
+  delete from public.usos_diarios;
+  delete from public.pagos where estado = 'pendiente';
+  delete from public.conversaciones_borradas;
+  -- No borra profiles ni suscripciones ni pagos aprobados/rechazados (auditoría)
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function public.limpiar_interacciones_pruebas() from public;
+grant execute on function public.limpiar_interacciones_pruebas() to authenticated;

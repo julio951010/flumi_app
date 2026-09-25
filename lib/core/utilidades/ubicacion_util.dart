@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
 /// Error de GPS con mensaje listo para mostrar al usuario.
 class UbicacionException implements Exception {
@@ -198,6 +199,31 @@ double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
 }
 
 double _aRadianes(double grados) => grados * pi / 180;
+
+/// Reverse geocoding online (Nominatim OSM) para ciudad real en cualquier
+/// país (Miami, Moscú, La Habana...). Si no hay red o falla, devuelve null
+/// y el caller usa fallback offline (provincias cubanas). No requiere API key.
+Future<String?> obtenerCiudadReal(double lat, double lon) async {
+  try {
+    final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&zoom=10&accept-language=es');
+    final res = await http
+        .get(uri, headers: {'User-Agent': 'Flumi/1.0 (flumi.app)'})
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode != 200) return null;
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final addr = data['address'] as Map<String, dynamic>?;
+    if (addr == null) return null;
+    return (addr['city'] as String?) ??
+        (addr['town'] as String?) ??
+        (addr['village'] as String?) ??
+        (addr['municipality'] as String?) ??
+        (addr['county'] as String?) ??
+        (addr['state'] as String?);
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Carga el mapa provincia -> municipios desde el JSON asset.
 Future<Map<String, List<String>>> cargarMapaProvincias() async {
