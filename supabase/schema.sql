@@ -1209,22 +1209,75 @@ begin
     'cuerpo', p_cuerpo,
     'categoria', coalesce(p_categoria, 'mensajes')
   );
+  -- NOTA: net.http_post VA CON NOTACIÓN NOMBRADA. Su firma es
+  -- (url, body, params, headers, timeout): la llamada posicional anterior
+  -- (v_url, v_headers, v_body) mandaba los headers como body y el body como
+  -- params, por lo que x-flumi-secret nunca llegaba y la Edge Function
+  -- respondía 401 en silencio.
   begin
-    -- Prioridad: supabase_functions (interno, no necesita egress) > net (requiere egress)
-    -- NOTA: net.http_post VA CON NOTACIÓN NOMBRADA. Su firma es
-    -- (url, body, params, headers, timeout): la llamada posicional anterior
-    -- (v_url, v_headers, v_body) mandaba los headers como body y el body como
-    -- params, por lo que x-flumi-secret nunca llegaba y la Edge Function
-    -- respondía 401 en silencio.
-    if to_regnamespace('supabase_functions') is not null then
-      perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
-    elsif to_regnamespace('net') is not null then
-      perform net.http_post(url := v_url, body := v_body, headers := v_headers);
+    -- Prioridad: supabase_functions (interno, no necesita egress) > net.
+    -- Si el primer transporte falla, se intenta con el segundo en vez de
+    -- rendirse: cada intento queda en push_log para diagnóstico.
+    if to_regnamespace('supabase_functions') is not null
+       and to_regprocedure('supabase_functions.http_request(text,text,jsonb,jsonb)') is not null then
+      begin
+        perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
+        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'supabase_functions', true, 'ok');
+        return;
+      exception when others then
+        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'supabase_functions', false, SQLERRM);
+      end;
+    end if;
+    if to_regnamespace('net') is not null then
+      begin
+        perform net.http_post(url := v_url, body := v_body, headers := v_headers);
+        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'net', true, 'ok');
+        return;
+      exception when others then
+        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'net', false, SQLERRM);
+      end;
+    else
+      perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'ninguno', false, 'sin transporte: ni supabase_functions ni pg_net disponibles');
     end if;
   exception when others then
     -- Un fallo de push nunca debe romper el insert original.
-    null;
+    perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'error', false, SQLERRM);
   end;
+end;
+$$;
+
+-- Log de intentos de push (diagnóstico; sin esto los fallos son invisibles).
+-- Solo el servidor escribe; nadie lee por API (se consulta en el dashboard).
+create table if not exists public.push_log (
+  id bigserial primary key,
+  creado_en timestamptz not null default now(),
+  usuario_id uuid,
+  categoria text not null default '',
+  titulo text not null default '',
+  transporte text not null default '',
+  ok boolean not null default false,
+  detalle text not null default ''
+);
+
+alter table public.push_log enable row level security;
+
+create or replace function public.registrar_push_log(
+  p_usuario_id uuid,
+  p_categoria text,
+  p_titulo text,
+  p_transporte text,
+  p_ok boolean,
+  p_detalle text
+) returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.push_log (usuario_id, categoria, titulo, transporte, ok, detalle)
+  values (p_usuario_id, coalesce(p_categoria,''), coalesce(left(p_titulo,120),''), coalesce(p_transporte,''), coalesce(p_ok,false), coalesce(left(p_detalle,500),''));
+  delete from public.push_log where creado_en < now() - interval '7 days';
+exception when others then
+  null;
 end;
 $$;
 
