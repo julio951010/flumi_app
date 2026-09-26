@@ -34,6 +34,9 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Reduce tamaño del APK: elimina código y recursos sin usar.
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
 }

@@ -107,9 +107,5 @@ flutter:
     - assets/data/
     - assets/icons/
     - assets/onboarding/
-    - assets/fotos_prueba/Alice/
-    - assets/fotos_prueba/Bob/
-    - assets/fotos_prueba/Carla/
-    - assets/fotos_prueba/David/
-    - assets/fotos_prueba/Elena/
-    - assets/fotos_prueba/Julio Cesar/
+    # NOTA: assets/fotos_prueba/ NO se empaqueta (10+ MB de fotos de test
+    # sin referencia en código). Quedan en disco para uso manual.
