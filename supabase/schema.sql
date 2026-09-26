@@ -1176,6 +1176,41 @@ values
 on conflict (clave) do nothing;
 
 -- ============================================================
+-- CONTENIDOS LEGALES / SOBRE NOSOTROS (editables desde admin_flumi).
+-- Claves: terminos, privacidad, seguridad_infantil, licencias, contactos,
+-- sobre_flumi. La app los muestra en Configuración > Sobre nosotros.
+-- ============================================================
+create table if not exists public.contenidos_legales (
+  clave text primary key,
+  titulo text not null,
+  cuerpo text not null default '',
+  actualizado_en timestamptz not null default now()
+);
+
+alter table public.contenidos_legales enable row level security;
+
+drop policy if exists "contenidos_lectura" on public.contenidos_legales;
+create policy "contenidos_lectura"
+  on public.contenidos_legales for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "contenidos_admin" on public.contenidos_legales;
+create policy "contenidos_admin"
+  on public.contenidos_legales for all
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+insert into public.contenidos_legales (clave, titulo, cuerpo)
+values
+  ('terminos', 'Términos y condiciones de uso', 'Contenido en redacción.'),
+  ('privacidad', 'Políticas de privacidad', 'Contenido en redacción.'),
+  ('seguridad_infantil', 'Políticas de seguridad infantil', 'Contenido en redacción.'),
+  ('licencias', 'Licencias', 'Contenido en redacción.'),
+  ('contactos', 'Contactos', 'Contenido en redacción.'),
+  ('sobre_flumi', 'Sobre Flumi', 'Contenido en redacción.')
+on conflict (clave) do nothing;
+
+-- ============================================================
 -- PAGOS: configuración de datos de transferencia por método
 -- Gestionado desde flumi_admin. La app lee la fila activa por método
 -- y muestra tarjeta/QR/móvil. Si no hay fila, usa fallback local.

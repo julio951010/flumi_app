@@ -1,9 +1,42 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/servicios/notificacion_servicio.dart';
+import '../../legal/contenido_legal_pantalla.dart';
 
 class SobreNosotrosPantalla extends StatelessWidget {
   const SobreNosotrosPantalla({super.key});
+
+  static const _secciones = [
+    (
+      clave: 'terminos',
+      titulo: 'Términos y condiciones de uso',
+      icono: Icons.description_outlined,
+    ),
+    (
+      clave: 'privacidad',
+      titulo: 'Políticas de privacidad',
+      icono: Icons.privacy_tip_outlined,
+    ),
+    (
+      clave: 'seguridad_infantil',
+      titulo: 'Políticas de seguridad infantil',
+      icono: Icons.child_care_outlined,
+    ),
+    (
+      clave: 'licencias',
+      titulo: 'Licencias',
+      icono: Icons.verified_outlined,
+    ),
+    (
+      clave: 'contactos',
+      titulo: 'Contactos',
+      icono: Icons.contact_support_outlined,
+    ),
+    (
+      clave: 'sobre_flumi',
+      titulo: 'Sobre Flumi',
+      icono: Icons.info_outline,
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -23,41 +56,33 @@ class SobreNosotrosPantalla extends StatelessWidget {
       ),
       body: SafeArea(
         top: false,
-        child: ListView(
+        child: ListView.separated(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: [
-            _item(context, Icons.description_outlined,
-                'Términos y condiciones de uso', secundario),
-            const Divider(height: 1),
-            _item(context, Icons.privacy_tip_outlined, 'Políticas de privacidad',
-                secundario),
-            const Divider(height: 1),
-            _item(context, Icons.child_care_outlined,
-                'Políticas de seguridad infantil', secundario),
-            const Divider(height: 1),
-            _item(context, Icons.verified_outlined, 'Licencias', secundario),
-            const Divider(height: 1),
-            _item(context, Icons.contact_support_outlined, 'Contactos',
-                secundario),
-            const Divider(height: 1),
-            _item(context, Icons.info_outline, 'Sobre Flumi', secundario),
-          ],
+          itemCount: _secciones.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, i) {
+            final s = _secciones[i];
+            return ListTile(
+              leading: Icon(s.icono, color: secundario),
+              title: Text(
+                s.titulo,
+                style:
+                    const TextStyle(color: Colors.black87, fontSize: 15),
+              ),
+              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ContenidoLegalPantalla(
+                    clave: s.clave,
+                    titulo: s.titulo,
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
-    );
-  }
-
-  Widget _item(BuildContext context, IconData icono, String titulo,
-      Color secundario) {
-    return ListTile(
-      leading: Icon(icono, color: secundario),
-      title: Text(
-        titulo,
-        style: const TextStyle(color: Colors.black87, fontSize: 15),
-      ),
-      trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-      onTap: () => NotificacionServicio.advertencia(
-          context, 'Esta sección estará disponible próximamente.'),
     );
   }
 }
