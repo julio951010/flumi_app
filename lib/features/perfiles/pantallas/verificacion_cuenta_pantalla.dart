@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:camera/camera.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
@@ -12,13 +10,14 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/perfil_foto_servicio.dart';
-import '../../../core/servicios/reconocimiento_gesto_servicio.dart';
-import '../../../core/servicios/verificacion_servicio.dart';
 import '../../../core/utilidades/verificacion_cuenta_io_native.dart'
     if (dart.library.html) '../../../core/utilidades/verificacion_cuenta_io_web.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
 import '../perfil_repositorio.dart';
 
+/// Verificación de cuenta por revisión manual: la selfie se sube al servidor
+/// y un administrador la compara con las fotos del perfil desde admin_flumi.
+/// Sin ML on-device (sin FaceNet ni gestos): la app pesa mucho menos.
 class VerificacionCuentaPantalla extends StatefulWidget {
   final Usuario perfil;
   final PerfilRepositorio repositorio;
@@ -37,25 +36,6 @@ class VerificacionCuentaPantalla extends StatefulWidget {
 class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     with WidgetsBindingObserver {
   final _picker = ImagePicker();
-  final _random = Random();
-  final List<String> _gestos = [
-    'assets/images/gestos/gesto1.png',
-    'assets/images/gestos/gesto2.png',
-    'assets/images/gestos/gesto3.png',
-    'assets/images/gestos/gesto4.png',
-  ];
-
-  /// Gesto esperado (determinista) para cada imagen de referencia, según lo
-  /// que muestra cada ilustración. Evita depender de que el modelo clasifique
-  /// la ilustración, que suele fallar, y obliga a que la selfie contenga
-  /// exactamente este gesto. Los nombres coinciden con `GestureType` de
-  /// `hand_detection`.
-  static const Map<String, String> _gestoEsperado = {
-    'assets/images/gestos/gesto1.png': 'thumbUp',
-    'assets/images/gestos/gesto2.png': 'victory',
-    'assets/images/gestos/gesto3.png': 'openPalm',
-    'assets/images/gestos/gesto4.png': 'pointingUp',
-  };
 
   static const int _maxIntentos = 3;
   static const Duration _ventanaIntentos = Duration(hours: 24);
@@ -88,7 +68,6 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     } catch (_) {}
   }
 
-  late final String _gestoRuta;
   String? _rutaFoto;
   bool _enviando = false;
   late bool _pendiente;
@@ -104,7 +83,6 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _cargarIntentos();
-    _gestoRuta = _gestos[_random.nextInt(_gestos.length)];
     _verificado = widget.perfil.verificadoStatus;
     _pendiente = widget.perfil.fotoVerificacion.isNotEmpty &&
         !widget.perfil.verificadoStatus;
@@ -178,9 +156,8 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     setState(() => _capturando = true);
     try {
       final foto = await controller.takePicture();
-      // Espejamos la selfie horizontalmente (como un espejo) para que el
-      // gesto coincida con lo que el usuario ve en el preview y con la
-      // referencia. También horneamos la orientación EXIF si la hubiera.
+      // Espejamos la selfie horizontalmente (como un espejo) para que quede
+      // como un selfie normal.
       final reflejo = await espejarSelfie(foto.path);
       String rutaFinal = reflejo.$1;
       var espejada = reflejo.$2;
@@ -198,12 +175,13 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         _capturando = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _capturando = false);
-      NotificacionServicio.alerta(
-        context,
-        'No se pudo capturar la foto. Intenta de nuevo.',
-      );
+      if (mounted) {
+        setState(() => _capturando = false);
+        NotificacionServicio.alerta(
+          context,
+          'No se pudo capturar la foto. Intenta de nuevo.',
+        );
+      }
     }
   }
 
@@ -231,92 +209,42 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     }
   }
 
+  /// Envía la selfie a revisión manual: se sube al servidor y queda pendiente
+  /// hasta que un administrador la apruebe o rechace desde admin_flumi.
   Future<void> _enviarVerificacion() async {
     final ruta = _rutaFoto;
     if (ruta == null || ruta.isEmpty) return;
     if (_intentos >= _maxIntentos) return;
     setState(() => _enviando = true);
-    String? urlSubida;
     try {
-      // 1) Prueba de vida: el gesto de la selfie debe coincidir con el de la
-      //    imagen mostrada.
-      if (!kIsWeb) {
-        final gesto = await ReconocimientoGestoServicio.verificarGesto(
-          selfieRuta: ruta,
-          referenciaRuta: _gestoRuta,
-          esperadoGesto: _gestoEsperado[_gestoRuta],
-        );
+      final urlSubida = await PerfilFotoServicio.subirFotoVerificacion(
+        usuarioId: widget.perfil.uuid,
+        archivoRuta: ruta,
+      );
+      if (urlSubida == null) {
         if (!mounted) return;
-        if (!gesto.exito) {
-          NotificacionServicio.alerta(context, gesto.mensaje);
-          return;
-        }
-      }
-
-      // En web la selfie se sube (el rostro se compara en el servidor) y se
-      // borra del Storage al terminar. En móvil no se sube: todo es local.
-      if (kIsWeb) {
-        urlSubida = await PerfilFotoServicio.subirFotoPerfil(
-          usuarioId: widget.perfil.uuid,
-          archivo: XFile(ruta),
-        );
-        if (urlSubida == null) {
-          NotificacionServicio.alerta(
-            context,
-            'No se pudo subir la foto. Intenta de nuevo.',
-          );
-          return;
-        }
-      }
-      final resultado = kIsWeb
-          ? await VerificacionServicio.verificarPerfilWeb(
-              perfil: widget.perfil,
-              selfieUrl: urlSubida!,
-            )
-          : await VerificacionServicio.verificarPerfil(
-              perfil: widget.perfil,
-              rutaSelfie: ruta,
-            );
-      if (!mounted) return;
-      if (resultado == VerificarResultado.sinFotos) {
         NotificacionServicio.alerta(
           context,
-          'Necesitas fotos en tu perfil para verificarte.',
+          'No se pudo subir la foto. Intenta de nuevo.',
         );
         return;
       }
-      if (resultado == VerificarResultado.error) {
-        NotificacionServicio.alerta(
-          context,
-          'No se pudo verificar la foto. Intenta de nuevo.',
-        );
-        return;
-      }
-      final coincide = resultado == VerificarResultado.coincide;
       await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
         uuid: Value(widget.perfil.uuid),
-        // No se persiste la selfie: se borra de todos lados al final.
-        fotoVerificacion: const Value(''),
-        verificadoStatus: Value(coincide),
+        fotoVerificacion: Value(urlSubida),
+        verificadoStatus: const Value(false),
       ));
       if (!mounted) return;
-      // El éxito no consume cupo: solo los fallos cuentan para los 3/24h.
-      if (!coincide) {
-        _intentos++;
-        _registrarIntento();
-      }
+      _intentos++;
+      _registrarIntento();
       setState(() {
-        _verificado = coincide;
-        _pendiente = false;
+        _verificado = false;
+        _pendiente = true;
       });
-      if (coincide) {
-        NotificacionServicio.exito(context, '¡Perfil verificado!');
-      } else {
-        NotificacionServicio.alerta(
-          context,
-          'La selfie no coincide con tus fotos. Inténtalo de nuevo.',
-        );
-      }
+      NotificacionServicio.exito(
+        context,
+        'Foto enviada. Te avisaremos cuando termine la revisión.',
+      );
     } catch (_) {
       if (!mounted) return;
       NotificacionServicio.alerta(
@@ -324,24 +252,12 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         'No se pudo enviar la verificación. Intenta de nuevo.',
       );
     } finally {
-      // Borra la selfie de todos lados: del servidor (web) y del dispositivo.
-      if (kIsWeb && urlSubida != null) {
-        await PerfilFotoServicio.eliminarFotoPerfil(
-          usuarioId: widget.perfil.uuid,
-          urlOFoto: urlSubida,
-        );
-      }
       await _borrarFotoLocal(ruta);
       if (mounted) {
         setState(() {
           _enviando = false;
           _rutaFoto = null;
         });
-        // Tras un intento (fallido o pendiente), si seguimos en captura,
-        // volvemos a abrir la cámara frontal para una nueva selfie.
-        if (!_verificado && !_pendiente) {
-          _inicializarCamara();
-        }
       }
     }
   }
@@ -385,9 +301,6 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       return Stack(
         fit: StackFit.expand,
         children: [
-          // El plugin de cámara ya muestra el preview de la frontal espejado
-          // (como la cámara nativa). La foto se espeja al guardar (flipHorizontal)
-          // para que preview y captura coincidan y queden como un selfie normal.
           CameraPreview(controller),
           // Tocar cualquier parte del preview captura la foto.
           Positioned.fill(
@@ -468,21 +381,20 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
           color: FlumiTema.colorPrimario.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
+        child: const Column(
           children: [
-            Icon(Icons.verified,
-                size: 48, color: FlumiTema.colorPrimario),
+            Icon(Icons.verified, size: 48, color: FlumiTema.colorPrimario),
             SizedBox(height: 12),
             Text(
-              'Verifica tu cuenta con un gesto',
+              'Verifica tu cuenta con una selfie',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 8),
             Text(
-              'Imita el gesto que te mostramos y asegúrate de que tu mano se '
-              'vea clara dentro del encuadre al tomar la foto de frente. '
-              'Flumi revisará que el gesto coincida.',
+              'Tómate una foto de frente con buena luz. Nuestro equipo la '
+              'comparará con tus fotos de perfil y te avisará cuando termine '
+              'la revisión.',
               style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
               textAlign: TextAlign.center,
             ),
@@ -490,20 +402,28 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         ),
       ),
       const SizedBox(height: 20),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _tarjetaLateral(
-            'Gesto a imitar',
-            Image.asset(_gestoRuta, fit: BoxFit.cover),
-          ),
-          const SizedBox(width: 12),
-          _tarjetaLateral(
-            'Tu foto',
-            _contenidoTuFoto(),
-            onTap: kIsWeb && _rutaFoto == null ? _tomarFoto : null,
-          ),
-        ],
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey[300]!, width: 1.5),
+        ),
+        child: Column(
+          children: [
+            const Text('Tu foto',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 280,
+                width: double.infinity,
+                child: _contenidoTuFoto(),
+              ),
+            ),
+          ],
+        ),
       ),
       if (_rutaFoto != null)
         Padding(
@@ -556,45 +476,13 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         const Padding(
           padding: EdgeInsets.only(top: 8),
           child: Text(
-            'Has alcanzado el máximo de 3 intentos en 24 horas. '
-            'Vuelve mañana con buena luz de frente y el gesto bien visible.',
+            'Has alcanzado el máximo de 3 envíos en 24 horas. '
+            'Vuelve mañana con buena luz de frente.',
             style: TextStyle(fontSize: 13, color: Colors.black54),
             textAlign: TextAlign.center,
           ),
         ),
     ];
-  }
-
-  Widget _tarjetaLateral(String titulo, Widget imagen, {VoidCallback? onTap}) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey[300]!, width: 1.5),
-          ),
-          child: Column(
-            children: [
-              Text(titulo,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  height: 200,
-                  width: double.infinity,
-                  child: imagen,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   List<Widget> _seccionPendiente(Color primario) {
@@ -627,21 +515,30 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         ),
       ),
       const SizedBox(height: 20),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _tarjetaLateral(
-            'Gesto solicitado',
-            Image.asset(_gestoRuta, fit: BoxFit.cover),
+      if (rutaFoto.isNotEmpty)
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey[300]!, width: 1.5),
           ),
-          const SizedBox(width: 12),
-          if (rutaFoto.isNotEmpty)
-            _tarjetaLateral(
-              'Tu foto enviada',
-              imagenOrigen(rutaFoto, fit: BoxFit.cover),
-            ),
-        ],
-      ),
+          child: Column(
+            children: [
+              const Text('Tu foto enviada',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: 280,
+                  width: double.infinity,
+                  child: imagenOrigen(rutaFoto, fit: BoxFit.cover),
+                ),
+              ),
+            ],
+          ),
+        ),
       const SizedBox(height: 24),
       if (_intentos < _maxIntentos)
         SizedBox(

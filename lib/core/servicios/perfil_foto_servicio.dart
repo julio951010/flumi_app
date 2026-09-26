@@ -1,10 +1,22 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
+
+/// Lee los bytes de una ruta local o blob (multiplataforma vía XFile).
+/// Devuelve null si no se puede leer (URLs remotas, assets empaquetados).
+Future<Uint8List?> bytesDeRuta(String ruta) async {
+  try {
+    if (ruta.startsWith('http') || ruta.startsWith('assets/')) return null;
+    return await XFile(ruta).readAsBytes();
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Sube fotos de perfil al backend.
 ///
@@ -54,6 +66,30 @@ class PerfilFotoServicio {
       final datos = await archivo.readAsBytes();
       final nombre =
           '${usuarioId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await sb.Supabase.instance.client.storage
+          .from('profile-photos')
+          .uploadBinary(nombre, datos);
+      return sb.Supabase.instance.client.storage
+          .from('profile-photos')
+          .getPublicUrl(nombre);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sube la selfie de verificación a `profile-photos/verificacion/` para
+  /// revisión manual en admin_flumi. Devuelve la URL pública o `null`.
+  /// Acepta ruta local (nativo) en vez de XFile para no pedir file_picker.
+  static Future<String?> subirFotoVerificacion({
+    required String usuarioId,
+    required String archivoRuta,
+  }) async {
+    if (kUsarServidorLocal) return null;
+    try {
+      final datos = await bytesDeRuta(archivoRuta);
+      if (datos == null) return null;
+      final nombre =
+          'verificacion/${usuarioId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await sb.Supabase.instance.client.storage
           .from('profile-photos')
           .uploadBinary(nombre, datos);

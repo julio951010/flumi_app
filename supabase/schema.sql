@@ -314,6 +314,15 @@ create policy "usuario_crea_su_propio_perfil"
   on public.profiles for insert
   with check (auth.uid() = id);
 
+-- Admin (verificación manual de cuentas, moderación): puede actualizar
+-- cualquier perfil. El trigger proteger_is_admin sigue permitiendo el cambio
+-- de is_admin/verificado_status solo a admins y service_role.
+drop policy if exists "admin_actualiza_perfiles" on public.profiles;
+create policy "admin_actualiza_perfiles"
+  on public.profiles for update
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
 -- MESSAGES
 drop policy if exists "mensajes_visibles_solo_para_participantes" on public.messages;
 create policy "mensajes_visibles_solo_para_participantes"
