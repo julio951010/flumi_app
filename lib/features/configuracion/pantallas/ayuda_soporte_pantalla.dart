@@ -1,29 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/base_datos_local/database.dart';
-import '../../../core/constantes/constantes.dart';
 import '../../../core/estilos/tema.dart';
-import '../../../core/servicios/suscripcion_servicio.dart';
-import '../../../core/servicios/sync_service.dart';
-import '../../auth/auth_service.dart';
-import '../../chat/chat_repositorio.dart';
-import '../../chat/pantallas/chat_pantalla.dart';
+import 'contactar_soporte_pantalla.dart';
 
 class AyudaSoportePantalla extends StatelessWidget {
-  final AppDatabase db;
-  final SyncService syncService;
-  final SuscripcionServicio suscripcionServicio;
-  final AuthService authService;
-
-  const AyudaSoportePantalla({
-    super.key,
-    required this.db,
-    required this.syncService,
-    required this.suscripcionServicio,
-    required this.authService,
-  });
-
-  static const _idAdmin = '00000000-0000-0000-0000-00000000000a';
+  const AyudaSoportePantalla({super.key});
 
   static const _faqs = <({String pregunta, String respuesta})>[
     (
@@ -64,18 +45,10 @@ class AyudaSoportePantalla extends StatelessWidget {
   ];
 
   void _contactarSoporte(BuildContext context) {
-    final miId = authService.usuarioActual?['id'] as String?;
-    if (miId == null || miId.isEmpty) return;
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ChatPantalla(
-          repositorio: ChatRepositorio(db, syncService),
-          otroUsuarioId: _idAdmin,
-          miId: miId,
-          nombreOtro: cuentasOficialesFlumi[_idAdmin] ?? 'Administrador',
-          suscripcionServicio: suscripcionServicio,
-        ),
+        builder: (_) => const ContactarSoportePantalla(),
       ),
     );
   }

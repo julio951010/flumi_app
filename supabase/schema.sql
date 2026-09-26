@@ -340,15 +340,17 @@ create policy "participantes_borran_mensajes"
   on public.messages for delete
   using (auth.uid() = emisor_id or auth.uid() = receptor_id);
 
--- Conversación oficial Flumi: solo lectura (el admin escribe como el bot).
--- Conversación con Administrador: abierta en ambos sentidos, es el canal de
--- soporte (Ayuda y soporte > Contactar con soporte).
+-- Conversaciones oficiales (Administrador / Flumi): los usuarios solo reciben
+-- mensajes, no pueden escribir ni responder. El soporte funciona con tickets
+-- (tabla soporte_mensajes), no con chat directo. El admin escribe como el bot
+-- (emisor = bot), lo cual sigue permitido.
 create or replace function public.bloquear_respuesta_bots()
 returns trigger
 language plpgsql
 as $$
 begin
-  if new.receptor_id = '00000000-0000-0000-0000-00000000000f'
+  if (new.receptor_id = '00000000-0000-0000-0000-00000000000a'
+   or new.receptor_id = '00000000-0000-0000-0000-00000000000f')
      and new.emisor_id <> new.receptor_id then
     raise exception 'No puedes enviar mensajes a esta conversacion oficial';
   end if;
@@ -995,7 +997,54 @@ begin
   ) then
     alter publication supabase_realtime add table public.messages;
   end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'soporte_mensajes'
+  ) then
+    alter publication supabase_realtime add table public.soporte_mensajes;
+  end if;
 end $$;
+
+-- ============================================================
+-- SOPORTE: tickets de ayuda (Ayuda y soporte > Contactar con soporte).
+-- El usuario escribe mensajes que se leen y responden desde admin_flumi.
+-- No es un chat directo con el Administrador.
+-- ============================================================
+create table if not exists public.soporte_mensajes (
+  id uuid primary key default uuid_generate_v4(),
+  usuario_id uuid not null references public.profiles(id) on delete cascade,
+  mensaje text not null,
+  respuesta text not null default '',
+  respondido boolean not null default false,
+  creado_en timestamptz not null default now(),
+  respondido_en timestamptz
+);
+
+create index if not exists soporte_usuario_idx on public.soporte_mensajes (usuario_id);
+create index if not exists soporte_pendientes_idx on public.soporte_mensajes (respondido, creado_en);
+
+alter table public.soporte_mensajes enable row level security;
+
+-- Usuario: crea sus tickets y lee sus tickets + respuestas.
+drop policy if exists "usuario_crea_soporte" on public.soporte_mensajes;
+create policy "usuario_crea_soporte"
+  on public.soporte_mensajes for insert
+  with check (auth.uid() = usuario_id);
+
+drop policy if exists "usuario_lee_soporte" on public.soporte_mensajes;
+create policy "usuario_lee_soporte"
+  on public.soporte_mensajes for select
+  using (auth.uid() = usuario_id);
+
+-- Admin: lectura y respuesta de todos los tickets.
+drop policy if exists "admin_gestiona_soporte" on public.soporte_mensajes;
+create policy "admin_gestiona_soporte"
+  on public.soporte_mensajes for all
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
 
 -- ============================================================
 -- PUSH MÓVIL: tokens FCM + envío a la Edge Function

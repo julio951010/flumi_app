@@ -120,12 +120,7 @@ class ConfiguracionPantalla extends StatelessWidget {
                 onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => AyudaSoportePantalla(
-                          db: db,
-                          syncService: syncService,
-                          suscripcionServicio: suscripcionServicio,
-                          authService: authService,
-                        ),
+                        builder: (_) => const AyudaSoportePantalla(),
                       ),
                     )),
             const Divider(height: 1),
