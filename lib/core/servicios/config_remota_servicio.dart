@@ -1,15 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Lee los feature flags de `public.app_config` en Supabase:
 /// suscripciones, modo mantenimiento y versión mínima obligatoria.
 /// El mantenimiento y la actualización se activan en vivo (realtime + poll).
 class ConfigRemotaServicio extends ChangeNotifier {
-  /// Build actual de esta compilación (igual al `+N` de pubspec version).
-  /// Subir en cada release que deba exigirse desde admin_flumi.
-  static const int kBuildActual = 1;
+  /// Build real de esta compilación (el `+N` de pubspec version, leído con
+  /// package_info_plus). Única fuente de verdad: no hay que sincronizar nada
+  /// a mano en cada release.
+  int _buildActual = 1;
+  int get buildActual => _buildActual;
 
   final SupabaseClient? _client;
   bool _suscripcionesHabilitadas = true;
@@ -30,11 +33,15 @@ class ConfigRemotaServicio extends ChangeNotifier {
   bool get cargado => _cargado;
 
   /// true si esta compilación quedó por debajo del mínimo exigido.
-  bool get necesitaActualizar => kBuildActual < _versionMinimaBuild;
+  bool get necesitaActualizar => _buildActual < _versionMinimaBuild;
 
   ConfigRemotaServicio(SupabaseClient? client) : _client = client;
 
   Future<void> inicializar() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _buildActual = int.tryParse(info.buildNumber) ?? 1;
+    } catch (_) {}
     await _cargar();
     final client = _client;
     if (client != null) {
