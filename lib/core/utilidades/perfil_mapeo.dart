@@ -66,6 +66,7 @@ class PerfilMapeo {
       tatuajes: Value((p['tatuajes'] as String?) ?? ''),
       preguntasPerfil: Value(aPreguntas(p['preguntas_perfil'])),
       fotoVerificacion: Value((p['foto_verificacion'] as String?) ?? ''),
+      gestoVerificacion: Value((p['gesto_verificacion'] as String?) ?? ''),
       fotosUrls: Value(aListaString(p['fotos_urls'])),
       creadoEn: Value(parsearFecha(p['creado_en']) ?? DateTime.now()),
       esPerfilPropio: Value(esPropio),
@@ -132,6 +133,7 @@ class PerfilMapeo {
       tatuajes: (p['tatuajes'] as String?) ?? '',
       preguntasPerfil: aPreguntas(p['preguntas_perfil']),
       fotoVerificacion: (p['foto_verificacion'] as String?) ?? '',
+      gestoVerificacion: (p['gesto_verificacion'] as String?) ?? '',
       creadoEn: parsearFecha(p['creado_en']) ?? DateTime.now(),
     );
   }
@@ -179,6 +181,7 @@ class PerfilMapeo {
       'preguntas_perfil':
           perfil.preguntasPerfil.map((e) => e.toJson()).toList(),
       'foto_verificacion': perfil.fotoVerificacion,
+      'gesto_verificacion': perfil.gestoVerificacion,
       'fotos_urls': perfil.fotosUrls,
       'edad': perfil.edad,
       'verificado_status': perfil.verificadoStatus,
@@ -245,6 +248,7 @@ class PerfilMapeo {
         base?.preguntasPerfil ?? const <PreguntaRespuesta>[],
       ).map((e) => e.toJson()).toList(),
       'foto_verificacion': o(c.fotoVerificacion, base?.fotoVerificacion ?? ''),
+      'gesto_verificacion': o(c.gestoVerificacion, base?.gestoVerificacion ?? ''),
       'fotos_urls': o(c.fotosUrls, base?.fotosUrls ?? const <String>[]),
       'edad': o(c.edad, base?.edad ?? 18),
       'verificado_status': o(c.verificadoStatus, base?.verificadoStatus ?? false),

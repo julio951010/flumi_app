@@ -115,6 +115,7 @@ class Usuarios extends Table {
       .map(const ListaPreguntasConverter())
       .withDefault(const Constant('[]'))();
   TextColumn get fotoVerificacion => text().withDefault(const Constant(''))();
+  TextColumn get gestoVerificacion => text().withDefault(const Constant(''))();
 
   DateTimeColumn get creadoEn => dateTime().withDefault(currentDateAndTime)();
 

@@ -45,6 +45,7 @@ void main() {
       tatuajes: 'no_tengo',
       preguntasPerfil: const [],
       fotoVerificacion: '',
+      gestoVerificacion: '',
       ultimaConexion: null,
       ocultarEnLinea: false,
       ocultarEdad: false,

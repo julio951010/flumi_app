@@ -53,6 +53,9 @@ alter table public.profiles add column if not exists idiomas               text 
 alter table public.profiles add column if not exists tatuajes              text default '';
 alter table public.profiles add column if not exists preguntas_perfil      jsonb default '[]';
 alter table public.profiles add column if not exists foto_verificacion     text default '';
+-- Gesto solicitado en la verificación (asset de referencia, p. ej.
+-- assets/images/gestos/gesto2.png). El admin lo compara con la selfie.
+alter table public.profiles add column if not exists gesto_verificacion    text default '';
 alter table public.profiles add column if not exists ultima_conexion       timestamptz default now();
 alter table public.profiles add column if not exists creado_en             timestamptz default now();
 alter table public.profiles add column if not exists ocultar_perfil        boolean default false;
@@ -1272,6 +1275,15 @@ create policy "pagos_qr_escritura_admin"
   on storage.objects for all
   using (bucket_id = 'pagos_qr' and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
   with check (bucket_id = 'pagos_qr' and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+-- Admin: puede borrar las selfies de verificación tras revisarlas
+-- (solo prefijo verificacion/ del bucket profile-photos).
+drop policy if exists "verificacion_admin_borra" on storage.objects;
+create policy "verificacion_admin_borra"
+  on storage.objects for delete
+  using (bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] = 'verificacion'
+    and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
 
 -- Envía un push sin bloquear la transacción que lo dispara.
 -- Respeta public.notif_prefs del destinatario (sin fila = todo ON).

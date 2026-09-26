@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:camera/camera.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
@@ -36,6 +38,16 @@ class VerificacionCuentaPantalla extends StatefulWidget {
 class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     with WidgetsBindingObserver {
   final _picker = ImagePicker();
+  final _random = Random();
+
+  /// Gesto que el usuario debe imitar en la selfie. El admin lo compara con
+  /// la foto enviada y las fotos del perfil (revisión manual, sin ML).
+  final List<String> _gestos = [
+    'assets/images/gestos/gesto1.png',
+    'assets/images/gestos/gesto2.png',
+    'assets/images/gestos/gesto3.png',
+    'assets/images/gestos/gesto4.png',
+  ];
 
   static const int _maxIntentos = 3;
   static const Duration _ventanaIntentos = Duration(hours: 24);
@@ -68,6 +80,7 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     } catch (_) {}
   }
 
+  late final String _gestoRuta;
   String? _rutaFoto;
   bool _enviando = false;
   late bool _pendiente;
@@ -83,6 +96,7 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _cargarIntentos();
+    _gestoRuta = _gestos[_random.nextInt(_gestos.length)];
     _verificado = widget.perfil.verificadoStatus;
     _pendiente = widget.perfil.fotoVerificacion.isNotEmpty &&
         !widget.perfil.verificadoStatus;
@@ -232,6 +246,7 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
       await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
         uuid: Value(widget.perfil.uuid),
         fotoVerificacion: Value(urlSubida),
+        gestoVerificacion: Value(_gestoRuta),
         verificadoStatus: const Value(false),
       ));
       if (!mounted) return;
@@ -386,15 +401,15 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
             Icon(Icons.verified, size: 48, color: FlumiTema.colorPrimario),
             SizedBox(height: 12),
             Text(
-              'Verifica tu cuenta con una selfie',
+              'Verifica tu cuenta con un gesto',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 8),
             Text(
-              'Tómate una foto de frente con buena luz. Nuestro equipo la '
-              'comparará con tus fotos de perfil y te avisará cuando termine '
-              'la revisión.',
+              'Imita el gesto que te mostramos y asegúrate de que tu mano se '
+              'vea clara dentro del encuadre al tomar la foto de frente. '
+              'Nuestro equipo la revisará.',
               style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
               textAlign: TextAlign.center,
             ),
@@ -402,28 +417,19 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         ),
       ),
       const SizedBox(height: 20),
-      Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey[300]!, width: 1.5),
-        ),
-        child: Column(
-          children: [
-            const Text('Tu foto',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                height: 280,
-                width: double.infinity,
-                child: _contenidoTuFoto(),
-              ),
-            ),
-          ],
-        ),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _tarjetaLateral(
+            'Gesto a imitar',
+            Image.asset(_gestoRuta, fit: BoxFit.cover),
+          ),
+          const SizedBox(width: 12),
+          _tarjetaLateral(
+            'Tu foto',
+            _contenidoTuFoto(),
+          ),
+        ],
       ),
       if (_rutaFoto != null)
         Padding(
@@ -485,8 +491,40 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     ];
   }
 
+  Widget _tarjetaLateral(String titulo, Widget imagen) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey[300]!, width: 1.5),
+        ),
+        child: Column(
+          children: [
+            Text(titulo,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 200,
+                width: double.infinity,
+                child: imagen,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<Widget> _seccionPendiente(Color primario) {
     final rutaFoto = _rutaFoto ?? widget.perfil.fotoVerificacion;
+    final gesto = widget.perfil.gestoVerificacion.isNotEmpty
+        ? widget.perfil.gestoVerificacion
+        : _gestoRuta;
     return [
       Container(
         padding: const EdgeInsets.all(20),
@@ -515,30 +553,21 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
         ),
       ),
       const SizedBox(height: 20),
-      if (rutaFoto.isNotEmpty)
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey[300]!, width: 1.5),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _tarjetaLateral(
+            'Gesto solicitado',
+            Image.asset(gesto, fit: BoxFit.cover),
           ),
-          child: Column(
-            children: [
-              const Text('Tu foto enviada',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  height: 280,
-                  width: double.infinity,
-                  child: imagenOrigen(rutaFoto, fit: BoxFit.cover),
-                ),
-              ),
-            ],
-          ),
-        ),
+          const SizedBox(width: 12),
+          if (rutaFoto.isNotEmpty)
+            _tarjetaLateral(
+              'Tu foto enviada',
+              imagenOrigen(rutaFoto, fit: BoxFit.cover),
+            ),
+        ],
+      ),
       const SizedBox(height: 24),
       if (_intentos < _maxIntentos)
         SizedBox(
