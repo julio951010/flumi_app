@@ -78,6 +78,11 @@ subprojects {
             androidExtension.compileSdk == 33) {
             androidExtension.compileSdk = 36
         }
+        // El lint vital de release falla al resolver artefactos transitivos
+        // (p.ej. datastore-jvm de shared_preferences_android) en redes con
+        // proxy limitado. No es un problema del código: se desactiva solo el
+        // chequeo de release, el lint normal sigue activo.
+        androidExtension.lint.checkReleaseBuilds = false
     }
 }
 

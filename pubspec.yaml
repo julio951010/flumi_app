@@ -44,7 +44,7 @@ dependencies:
   shared_preferences: ^2.2.3
 
   # --- Versión/build real del paquete (actualización obligatoria) ---
-  package_info_plus: ^8.1.0
+  package_info_plus: ^10.2.1
 
   # --- UI ---
   cupertino_icons: ^1.0.6
