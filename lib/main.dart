@@ -748,6 +748,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   StreamSubscription? _convSub;
   StreamSubscription? _likesRealtimeSub;
   StreamSubscription? _visitasRealtimeSub;
+  StreamSubscription? _matchesRealtimeSub;
   StreamSubscription? _likesWatchSub;
   StreamSubscription? _visitasWatchSub;
   StreamSubscription? _matchesSub;
@@ -1014,6 +1015,38 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     }
     _visitasRealtimeSub?.cancel();
     _visitasRealtimeSub = visitasSub;
+
+    // Matches en vivo: sin esto, un match nuevo solo llegaba por sync y la
+    // campana no contaba hasta el próximo arranque/sync.
+    final matchesSub = client
+        .from('matches')
+        .stream(primaryKey: ['id'])
+        .or('usuario_a_id.eq.$miId,usuario_b_id.eq.$miId')
+        .listen((eventos) async {
+      for (final fila in eventos) {
+        final id = fila['id'] as String?;
+        if (id == null) continue;
+        try {
+          await database.into(database.matches).insertOnConflictUpdate(
+                MatchesCompanion.insert(
+                  uuid: id,
+                  usuarioAId: fila['usuario_a_id'] as String,
+                  usuarioBId: fila['usuario_b_id'] as String,
+                  timestampMatch: DateTime.tryParse(
+                          fila['timestamp_match'] as String? ?? '') ??
+                      DateTime.now(),
+                  pendienteDeSincronizar: const Value(false),
+                ),
+              );
+        } catch (_) {}
+      }
+    }, onError: (Object _) => _reconectarRealtime(miId, gen));
+    if (gen != _genRealtime) {
+      matchesSub.cancel();
+      return;
+    }
+    _matchesRealtimeSub?.cancel();
+    _matchesRealtimeSub = matchesSub;
   }
 
   void _reconectarRealtime(String miId, int gen) {
@@ -1115,6 +1148,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _likesRealtimeSub = null;
     _visitasRealtimeSub?.cancel();
     _visitasRealtimeSub = null;
+    _matchesRealtimeSub?.cancel();
+    _matchesRealtimeSub = null;
     _likesWatchSub?.cancel();
     _likesWatchSub = null;
     _visitasWatchSub?.cancel();
@@ -1196,6 +1231,26 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // notificaciones se limpian al abrirlos.
     _contadorMeGusta.marcarTodasVistas();
     _meGustaNoLeidas.value = 0;
+  }
+
+  /// Campana de notificaciones con contador (bandeja social). Se muestra en
+  /// Actividad y en Chats para que el contador siempre esté visible.
+  Widget _botonCampana(Color primario) {
+    return ValueListenableBuilder<int>(
+      valueListenable: _notificacionesPendientes,
+      builder: (context, total, _) => IconButton(
+        icon: Badge(
+          isLabelVisible: total > 0,
+          label: Text(
+            '$total',
+            style: const TextStyle(fontSize: 10),
+          ),
+          child: Icon(Icons.notifications_none, color: primario, size: 24),
+        ),
+        onPressed: _abrirBandejaNotificaciones,
+        tooltip: 'Notificaciones',
+      ),
+    );
   }
 
   void _manejarOpcionNotificaciones(String opcion) {
@@ -1398,59 +1453,42 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                         ],
                       )
                     : _indice == 2
-                        ? ValueListenableBuilder<int>(
-                            valueListenable: _meGustaNoLeidas,
-                            builder: (context, total, _) => Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                PopupMenuButton<String>(
-                                  icon: Icon(Icons.more_vert,
-                                      color: primario, size: 24),
-                                  tooltip: 'Opciones',
-                                  onSelected: _manejarOpcionNotificaciones,
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'marcar_vistos',
-                                      child: Text('Marcar todos como vistos'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _botonCampana(primario),
+                              PopupMenuButton<String>(
+                                icon: Icon(Icons.more_vert,
+                                    color: primario, size: 24),
+                                tooltip: 'Opciones',
+                                onSelected: _manejarOpcionNotificaciones,
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'marcar_vistos',
+                                    child: Text('Marcar todos como vistos'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           )
                         : _indice == 3
-                        ? ValueListenableBuilder<int>(
-                            valueListenable: _notificacionesPendientes,
-                            builder: (context, total, _) => Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Badge(
-                                    isLabelVisible: total > 0,
-                                    label: Text(
-                                      '$total',
-                                      style: const TextStyle(fontSize: 10),
-                                    ),
-                                    child: Icon(Icons.notifications_none,
-                                        color: primario, size: 24),
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _botonCampana(primario),
+                              PopupMenuButton<String>(
+                                icon: Icon(Icons.more_vert,
+                                    color: primario, size: 24),
+                                tooltip: 'Opciones',
+                                onSelected: _manejarOpcionNotificaciones,
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'marcar_leidos',
+                                    child: Text('Marcar todos como leídos'),
                                   ),
-                                  onPressed: _abrirBandejaNotificaciones,
-                                  tooltip: 'Notificaciones',
-                                ),
-                                PopupMenuButton<String>(
-                                  icon: Icon(Icons.more_vert,
-                                      color: primario, size: 24),
-                                  tooltip: 'Opciones',
-                                  onSelected: _manejarOpcionNotificaciones,
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'marcar_leidos',
-                                      child: Text('Marcar todos como leídos'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
+                            ],
                           )
                         : _indice == 4
                             ? Row(
