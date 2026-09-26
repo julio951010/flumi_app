@@ -998,14 +998,6 @@ begin
     alter publication supabase_realtime add table public.messages;
   end if;
 
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'soporte_mensajes'
-  ) then
-    alter publication supabase_realtime add table public.soporte_mensajes;
-  end if;
 end $$;
 
 -- ============================================================
@@ -1045,6 +1037,21 @@ create policy "admin_gestiona_soporte"
   on public.soporte_mensajes for all
   using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
   with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+-- Realtime para el panel admin (después del CREATE TABLE, si no ALTER falla
+-- con 42P01 aunque el IF de publicación pase).
+do $$
+begin
+  if to_regclass('public.soporte_mensajes') is not null
+     and not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'soporte_mensajes'
+  ) then
+    alter publication supabase_realtime add table public.soporte_mensajes;
+  end if;
+end $$;
 
 -- ============================================================
 -- PUSH MÓVIL: tokens FCM + envío a la Edge Function
