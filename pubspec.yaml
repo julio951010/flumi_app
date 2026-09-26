@@ -30,6 +30,9 @@ dependencies:
   # --- HTTP para servidor local ---
   http: ^1.2.0
 
+  # --- Abrir URL de descarga (actualización obligatoria) ---
+  url_launcher: ^6.3.1
+
   # --- Identificadores únicos generados en cliente ---
   uuid: ^4.4.0
 

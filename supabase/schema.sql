@@ -1143,20 +1143,36 @@ create policy "app_config_solo_service"
   on public.app_config for select
   using (auth.role() = 'service_role');
 
--- La app (authenticated) solo puede leer el kill-switch de suscripciones,
--- nunca los secretos push. El RPC plan_efectivo (security definer) lee
--- todo sin RLS, así app y servidor comparten la misma fuente.
+-- La app (authenticated) solo puede leer flags públicos (kill-switch de
+-- suscripciones, mantenimiento y versión mínima), nunca los secretos push.
+-- El RPC plan_efectivo (security definer) lee todo sin RLS, así app y
+-- servidor comparten la misma fuente.
 drop policy if exists "app_config_flag_publica" on public.app_config;
 create policy "app_config_flag_publica"
   on public.app_config for select
   to authenticated
-  using (clave = 'suscripciones_habilitadas');
+  using (clave in ('suscripciones_habilitadas', 'mantenimiento',
+    'mantenimiento_mensaje', 'version_minima_build', 'actualizar_url',
+    'actualizar_mensaje'));
+
+-- El panel admin (usuarios is_admin) gestiona flags y datos de pago.
+-- Sin esto, los upsert de admin_flumi fallan por RLS en silencio.
+drop policy if exists "app_config_admin" on public.app_config;
+create policy "app_config_admin"
+  on public.app_config for all
+  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
 
 insert into public.app_config (clave, valor, tipo)
 values
   ('push_url', 'https://gzozmebdrsdcupgvxuiv.supabase.co/functions/v1/enviar-push', 'push'),
   ('push_secret', 'HdSAjqJCMFko7DvLUblIigVBmx1eGNX8', 'push'),
-  ('suscripciones_habilitadas', 'true', 'feature')
+  ('suscripciones_habilitadas', 'true', 'feature'),
+  ('mantenimiento', 'false', 'feature'),
+  ('mantenimiento_mensaje', 'Estamos mejorando Flumi para ti. Vuelve en unos minutos.', 'feature'),
+  ('version_minima_build', '1', 'feature'),
+  ('actualizar_url', '', 'feature'),
+  ('actualizar_mensaje', 'Hay una nueva versión de Flumi con mejoras importantes. Actualiza para seguir usándola.', 'feature')
 on conflict (clave) do nothing;
 
 -- ============================================================

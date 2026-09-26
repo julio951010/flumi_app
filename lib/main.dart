@@ -51,6 +51,8 @@ import 'core/servicios/votos_servicio.dart';
 import 'widgets_comunes/indicador_conexion.dart';
 import 'widgets_comunes/logo_flotante.dart';
 import 'widgets_comunes/encabezado_pagina.dart';
+import 'features/sistema/mantenimiento_pantalla.dart';
+import 'features/sistema/actualizar_app_pantalla.dart';
 
 late final AppDatabase database;
 late final SyncService syncService;
@@ -533,6 +535,29 @@ bool _esperandoSincronizacion = false;
   }
 
   Widget _buildPaginaAuth() {
+    // Gates remotos (admin_flumi): mantenimiento bloquea todo; versión
+    // mínima exige actualizar. Se activan/desactivan en vivo.
+    return ListenableBuilder(
+      listenable: configRemota,
+      builder: (context, _) {
+        if (configRemota.enMantenimiento) {
+          return MantenimientoPantalla(
+            mensaje: configRemota.mensajeMantenimiento,
+            onReintentar: () => configRemota.recargar(),
+          );
+        }
+        if (configRemota.necesitaActualizar) {
+          return ActualizarAppPantalla(
+            mensaje: configRemota.mensajeActualizar,
+            urlDescarga: configRemota.actualizarUrl,
+          );
+        }
+        return _contenidoAuth();
+      },
+    );
+  }
+
+  Widget _contenidoAuth() {
     if (_autenticado == null ||
         (_autenticado! && authService.usuarioActual == null)) {
       return const Scaffold(
