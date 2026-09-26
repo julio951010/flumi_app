@@ -748,7 +748,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   StreamSubscription? _convSub;
   StreamSubscription? _likesRealtimeSub;
   StreamSubscription? _visitasRealtimeSub;
-  StreamSubscription? _matchesRealtimeSub;
+  List<StreamSubscription> _matchesRealtimeSubs = [];
   StreamSubscription? _likesWatchSub;
   StreamSubscription? _visitasWatchSub;
   StreamSubscription? _matchesSub;
@@ -1017,36 +1017,53 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _visitasRealtimeSub = visitasSub;
 
     // Matches en vivo: sin esto, un match nuevo solo llegaba por sync y la
-    // campana no contaba hasta el próximo arranque/sync.
-    final matchesSub = client
+    // campana no contaba hasta el próximo arranque/sync. (El stream no
+    // soporta .or(), así que se escucha cada columna por separado.)
+    Future<void> guardarMatch(Map<String, dynamic> fila) async {
+      final id = fila['id'] as String?;
+      if (id == null) return;
+      try {
+        await database.into(database.matches).insertOnConflictUpdate(
+              MatchesCompanion.insert(
+                uuid: id,
+                usuarioAId: fila['usuario_a_id'] as String,
+                usuarioBId: fila['usuario_b_id'] as String,
+                timestampMatch: DateTime.tryParse(
+                        fila['timestamp_match'] as String? ?? '') ??
+                    DateTime.now(),
+                pendienteDeSincronizar: const Value(false),
+              ),
+            );
+      } catch (_) {}
+    }
+
+    final matchesSubA = client
         .from('matches')
         .stream(primaryKey: ['id'])
-        .or('usuario_a_id.eq.$miId,usuario_b_id.eq.$miId')
+        .eq('usuario_a_id', miId)
         .listen((eventos) async {
       for (final fila in eventos) {
-        final id = fila['id'] as String?;
-        if (id == null) continue;
-        try {
-          await database.into(database.matches).insertOnConflictUpdate(
-                MatchesCompanion.insert(
-                  uuid: id,
-                  usuarioAId: fila['usuario_a_id'] as String,
-                  usuarioBId: fila['usuario_b_id'] as String,
-                  timestampMatch: DateTime.tryParse(
-                          fila['timestamp_match'] as String? ?? '') ??
-                      DateTime.now(),
-                  pendienteDeSincronizar: const Value(false),
-                ),
-              );
-        } catch (_) {}
+        await guardarMatch(fila);
+      }
+    }, onError: (Object _) => _reconectarRealtime(miId, gen));
+    final matchesSubB = client
+        .from('matches')
+        .stream(primaryKey: ['id'])
+        .eq('usuario_b_id', miId)
+        .listen((eventos) async {
+      for (final fila in eventos) {
+        await guardarMatch(fila);
       }
     }, onError: (Object _) => _reconectarRealtime(miId, gen));
     if (gen != _genRealtime) {
-      matchesSub.cancel();
+      matchesSubA.cancel();
+      matchesSubB.cancel();
       return;
     }
-    _matchesRealtimeSub?.cancel();
-    _matchesRealtimeSub = matchesSub;
+    for (final s in _matchesRealtimeSubs) {
+      s.cancel();
+    }
+    _matchesRealtimeSubs = [matchesSubA, matchesSubB];
   }
 
   void _reconectarRealtime(String miId, int gen) {
@@ -1148,8 +1165,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _likesRealtimeSub = null;
     _visitasRealtimeSub?.cancel();
     _visitasRealtimeSub = null;
-    _matchesRealtimeSub?.cancel();
-    _matchesRealtimeSub = null;
+    for (final s in _matchesRealtimeSubs) {
+      s.cancel();
+    }
+    _matchesRealtimeSubs = [];
     _likesWatchSub?.cancel();
     _likesWatchSub = null;
     _visitasWatchSub?.cancel();
@@ -1233,8 +1252,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _meGustaNoLeidas.value = 0;
   }
 
-  /// Campana de notificaciones con contador (bandeja social). Se muestra en
-  /// Actividad y en Chats para que el contador siempre esté visible.
+  /// Campana de notificaciones con contador (bandeja social). Vive en el
+  /// encabezado de Perfil.
   Widget _botonCampana(Color primario) {
     return ValueListenableBuilder<int>(
       valueListenable: _notificacionesPendientes,
@@ -1456,7 +1475,6 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                         ? Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _botonCampana(primario),
                               PopupMenuButton<String>(
                                 icon: Icon(Icons.more_vert,
                                     color: primario, size: 24),
@@ -1475,7 +1493,6 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                         ? Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _botonCampana(primario),
                               PopupMenuButton<String>(
                                 icon: Icon(Icons.more_vert,
                                     color: primario, size: 24),
@@ -1494,6 +1511,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                             ? Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  _botonCampana(primario),
                                   IconButton(
                                     icon: Icon(Icons.settings_outlined,
                                         color: primario, size: 24),
@@ -1508,7 +1526,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                                   ),
                                 ],
                               )
-                        : null,
+                            : null,
               ),
               // Feedback de fallos de conexión/timeout con el servidor:
               // aviso transitorio (notificación flotante) cuando Supabase no
