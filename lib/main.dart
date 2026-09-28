@@ -1201,6 +1201,17 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
           ? _contadorMeGusta.matchesNoLeidos
           : 0,
     );
+    // El punto del nav (corazón) también debe reflejar lo pendiente al
+    // arrancar: antes solo contaba eventos en vivo post-arranque y tras un
+    // reinicio quedaba en 0 aunque hubiera registros sin ver. Máximo para no
+    // pisar incrementos en vivo llegados durante los awaits de arriba. Los
+    // "Me gustan" enviados no cuentan (son acción propia, no novedad).
+    final semillaActividad = _contadorMeGusta.likesNoLeidos +
+        _contadorMeGusta.visitasNoLeidas +
+        _contadorMeGusta.matchesNoLeidos;
+    if (semillaActividad > _meGustaNoLeidas.value) {
+      _meGustaNoLeidas.value = semillaActividad;
+    }
   }
 
   @override
