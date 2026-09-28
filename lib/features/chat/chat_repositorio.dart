@@ -562,6 +562,7 @@ class ChatRepositorio {
     required String contenido,
   }) async {
     final uuid = const Uuid().v4();
+    debugPrint('[ChatRepo] enviarMensaje: uuid=$uuid emisor=$emisorId receptor=$receptorId');
     await _db.into(_db.mensajes).insert(MensajesCompanion.insert(
       uuid: uuid,
       emisorId: emisorId,
@@ -569,6 +570,7 @@ class ChatRepositorio {
       contenido: contenido,
       timestamp: DateTime.now(),
     ));
+    debugPrint('[ChatRepo] mensaje insertado localmente');
     // Escribir yo reactiva la conversación si la había borrado solo para mí.
     await _reactivarConversacion(receptorId, emisorId);
     // Write-through: intenta subir el mensaje a Supabase de inmediato;
@@ -894,6 +896,7 @@ class ChatRepositorio {
 
   Future<void> _aplicarMensajeRemoto(Map<String, dynamic> cambio) async {
     final dbId = cambio['id'] as String?;
+    debugPrint('[ChatRepo] _aplicarMensajeRemoto: id=$dbId cambio=$cambio');
     if (dbId == null) return;
     final emisorId = cambio['emisor_id'] as String?;
     final receptorId = cambio['receptor_id'] as String?;

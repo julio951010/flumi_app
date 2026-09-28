@@ -295,9 +295,11 @@ class SyncService {
           ..where((m) => m.pendienteDeSincronizar.equals(true))
           ..orderBy([(m) => OrderingTerm.asc(m.timestamp)]))
         .get();
+    debugPrint('[Sync] _subirMensajesPendientes: ${pendientes.length} pendientes');
 
     for (final mensaje in pendientes) {
       try {
+        debugPrint('[Sync] subiendo mensaje: uuid=${mensaje.uuid}');
         await _subirMensaje(mensaje);
         await (_db.update(_db.mensajes)
               ..where((m) => m.uuid.equals(mensaje.uuid)))
@@ -1305,6 +1307,7 @@ class SyncService {
       'timestamp': mensaje.timestamp.toUtc().toIso8601String(),
       'estado_envio': 'enviado',
     };
+    debugPrint('[Sync] _subirMensaje upsert: ${jsonEncode(body)}');
 
     if (kUsarServidorLocal) {
       final token = await LocalTokenStore.obtenerToken();
