@@ -9,7 +9,6 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../config/env.dart';
 import '../../../core/constantes/constantes.dart';
 import '../../../core/servicios/connectivity_service.dart';
-import '../../../core/servicios/notificacion_local_servicio.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/sync_service.dart';
@@ -914,13 +913,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       _abrirMatch(usuario);
     }
 
-    // Notificación inteligente: local si foreground, push si background
-    unawaited(NotificacionLocalServicio.instancia.notificarInteligente(
-      titulo: '¡Nuevo Me Gusta!',
-      cuerpo: 'Le gustaste a ${usuario.nombre}',
-      usuarioIdDestino: usuario.uuid,
-      categoria: 'lesGusto',
-    ));
+    
   }
 
   bool _estaEnLinea(Usuario usuario) {
