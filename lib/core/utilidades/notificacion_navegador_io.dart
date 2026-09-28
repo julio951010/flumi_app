@@ -41,6 +41,11 @@ class _PushMovil {
   FirebaseMessaging? _fcm;
   bool _disponible = false;
   String? _token;
+  /// Usuario para el que quedó registrado [_token] en device_tokens. El token
+  /// FCM es por dispositivo (igual para todas las cuentas que lo usen): si
+  /// cambia de cuenta sin reiniciar hay que re-registrar aunque el token
+  /// sea el mismo, o los push del otro seguirán llegando aquí.
+  String? _tokenUsuarioId;
   bool _mostrarLocales = false;
   bool _criticoOk = false;
   bool _completoOk = false;
@@ -175,7 +180,9 @@ class _PushMovil {
   }
 
   /// Registra el token FCM del dispositivo en Supabase (RPC
-  /// registrar_device_token). Sin conexión o sin Firebase: no hace nada.
+  /// registrar_device_token, upsert por token: reclama el token para el
+  /// usuario actual). Sin conexión o sin Firebase: no hace nada (y NO marca
+  /// como registrado, para reintentar en la próxima llamada).
   Future<void> registrarToken() async {
     if (kUsarServidorLocal) return;
     final token = await _obtenerToken();
@@ -183,9 +190,11 @@ class _PushMovil {
       debugPrint('[Push] sin token FCM: no se registra nada');
       return;
     }
-    // Evita spam si es el mismo, pero siempre re-registra tras refresh.
-    if (token == _token) return;
-    _token = token;
+    final miId = sb.Supabase.instance.client.auth.currentUser?.id;
+    // Evita spam si ya quedó registrado este token PARA ESTE usuario.
+    // Si cambió la cuenta (mismo dispositivo, otra sesión) hay que
+    // re-registrar aunque el token sea idéntico.
+    if (token == _token && miId != null && miId == _tokenUsuarioId) return;
     try {
       await sb.Supabase.instance.client.rpc(
         'registrar_device_token',
@@ -194,6 +203,8 @@ class _PushMovil {
           'p_plataforma': Platform.isIOS ? 'ios' : 'android',
         },
       );
+      _token = token;
+      _tokenUsuarioId = miId;
       debugPrint('[Push] token registrado en device_tokens');
     } catch (e) {
       debugPrint('[Push] registrar_device_token falló: $e');
@@ -203,22 +214,27 @@ class _PushMovil {
   /// Fuerza re-registro (tras login).
   Future<void> forzarRegistro() async {
     _token = null;
+    _tokenUsuarioId = null;
     await registrarToken();
   }
 
-  /// Elimina el token de Supabase al cerrar sesión.
+  /// Elimina el token de Supabase al cerrar sesión. Debe llamarse ANTES de
+  /// cerrar la sesión (con el JWT aún válido): el RPC solo borra la fila del
+  /// usuario autenticado y sin sesión no borra nada.
   Future<void> eliminarToken() async {
-    final token = _token;
+    final token = _token ?? await _obtenerToken();
     if (token == null || kUsarServidorLocal) return;
     try {
       await sb.Supabase.instance.client.rpc(
         'eliminar_device_token',
         params: {'p_token': token},
       );
+      debugPrint('[Push] token eliminado de device_tokens');
     } catch (e) {
       debugPrint('[Push] eliminar_device_token falló: $e');
     }
     _token = null;
+    _tokenUsuarioId = null;
   }
 
   /// Notificación local inmediata con el logo de la app (primer plano).

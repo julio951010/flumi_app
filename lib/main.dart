@@ -1425,6 +1425,12 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   }
 
   Future<void> _cerrarSesion() async {
+    // El token push se libera ANTES de firmar la salida (con JWT válido):
+    // si no, este dispositivo seguiría recibiendo los push de esta cuenta
+    // cuando entre otra sesión en él.
+    try {
+      await eliminarTokenPush().timeout(const Duration(seconds: 5));
+    } catch (_) {}
     try {
       await authService.cerrarSesion();
     } catch (_) {
