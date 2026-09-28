@@ -149,7 +149,13 @@ class Matches extends Table {
 
   TextColumn get ultimoMensajePreview => text().nullable()();
   DateTimeColumn get ultimoMensajeTimestamp => dateTime().nullable()();
+  /// MI marcador de lectura (hasta qué mensaje leí yo). Fuente del badge de
+  /// no leídos. Nunca se mezcla con el del otro: el remoto guarda
+  /// leido_hasta_a/b por participante.
   DateTimeColumn get leidoHasta => dateTime().nullable()();
+  /// Marcador de lectura del OTRO participante (para los ticks ✓✓ de mis
+  /// mensajes enviados). No alimenta ningún badge.
+  DateTimeColumn get leidoHastaOtro => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {uuid};
@@ -232,9 +238,10 @@ class HistorialLikes extends Table {
 
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
 
-  /// Hasta qué mensaje el receptor ha leído la conversación sin match
-  /// (like-only). Espejo de matches.leido_hasta para que el badge de no
-  /// leídos funcione también sin match.
+  /// MI marcador de lectura de la conversación sin match (like-only).
+  /// Espejo local de matches.leidoHasta para que el badge de no leídos
+  /// funcione también sin match. Nunca se mezcla con el marcador del otro
+  /// (ver sincronizarHistorialLikes: las filas ajenas no se fusionan).
   DateTimeColumn get leidoHasta => dateTime().nullable()();
 
   /// true si este like fue un Superlike (emitido o recibido).

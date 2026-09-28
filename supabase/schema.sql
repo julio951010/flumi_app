@@ -115,6 +115,42 @@ create table if not exists public.matches (
 alter table public.matches add column if not exists ultimo_mensaje_preview    text;
 alter table public.matches add column if not exists ultimo_mensaje_timestamp  timestamptz;
 alter table public.matches add column if not exists leido_hasta               timestamptz;
+-- Marcadores de lectura POR PARTICIPANTE. La columna histórica `leido_hasta`
+-- era compartida: cuando el otro la escribía al leer, el sync (máximo) la
+-- tomaba como propia y al dueño se le apagaba el badge de no leídos aunque
+-- no hubiera leído nada. Cada lado escribe solo la suya:
+--   A escribe leido_hasta_a, B escribe leido_hasta_b.
+alter table public.matches add column if not exists leido_hasta_a             timestamptz;
+alter table public.matches add column if not exists leido_hasta_b             timestamptz;
+-- Backfill único: parte del valor histórico compartido; a partir de aquí
+-- cada lado diverge solo con sus propias lecturas.
+update public.matches
+   set leido_hasta_a = coalesce(leido_hasta_a, leido_hasta),
+       leido_hasta_b = coalesce(leido_hasta_b, leido_hasta)
+ where (leido_hasta_a is null or leido_hasta_b is null)
+   and leido_hasta is not null;
+
+-- Nadie puede pisar el marcador ajeno (cada UPDATE conserva la columna del
+-- otro lado). service_role (admin) no pasa por auth.uid(): conserva ambas.
+create or replace function public.no_pisar_leido_ajeno()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if auth.uid() = NEW.usuario_a_id then
+    NEW.leido_hasta_b := OLD.leido_hasta_b;
+  elsif auth.uid() = NEW.usuario_b_id then
+    NEW.leido_hasta_a := OLD.leido_hasta_a;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_no_pisar_leido_ajeno on public.matches;
+create trigger trg_no_pisar_leido_ajeno
+  before update of leido_hasta_a, leido_hasta_b on public.matches
+  for each row execute function public.no_pisar_leido_ajeno();
 
 create index if not exists matches_usuario_a_idx on public.matches (usuario_a_id);
 create index if not exists matches_usuario_b_idx on public.matches (usuario_b_id);

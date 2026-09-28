@@ -10,7 +10,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -153,6 +153,11 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 22) {
         await m.addColumn(usuarios, usuarios.gestoVerificacion);
+      }
+      if (from < 23) {
+        // Marcador del OTRO participante (ticks ✓✓). leidoHasta sigue
+        // siendo MI marcador (badge de no leídos).
+        await m.addColumn(matches, matches.leidoHastaOtro);
       }
     },
   );

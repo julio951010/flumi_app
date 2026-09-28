@@ -428,12 +428,27 @@ class ChatRepositorio {
             otroUsuarioId: Value(otroUsuarioId), leidoHasta: Value(ahora)));
     if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
       try {
-        await Supabase.instance.client
-            .from(tablaMatches)
-            .update({'leido_hasta': ahora.toUtc().toIso8601String()})
-            .or(
-                '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
-            .timeout(const Duration(seconds: 5));
+        // Solo MI columna (leido_hasta_a/b según mi lado): escribir la del
+        // otro borraría SUS no leídos, y el trigger remoto lo impediría.
+        // Sin fila de match (like-only, oficiales) no hay nada que subir.
+        final filaMatch = await (_db.select(_db.matches)
+              ..where((m) =>
+                  (m.usuarioAId.equals(miId) &
+                      m.usuarioBId.equals(otroUsuarioId)) |
+                  (m.usuarioAId.equals(otroUsuarioId) &
+                      m.usuarioBId.equals(miId)))
+              ..limit(1))
+            .getSingleOrNull();
+        if (filaMatch != null) {
+          final columnaMia =
+              filaMatch.usuarioAId == miId ? 'leido_hasta_a' : 'leido_hasta_b';
+          await Supabase.instance.client
+              .from(tablaMatches)
+              .update({columnaMia: ahora.toUtc().toIso8601String()})
+              .or(
+                  '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
+              .timeout(const Duration(seconds: 5));
+        }
         // El like propio también guarda leído (like-only). RLS solo permite
         // tocar el like propio (usuario_gestiona_sus_likes).
         await Supabase.instance.client
@@ -664,7 +679,9 @@ class ChatRepositorio {
     } catch (_) {}
   }
 
-  /// Hasta qué mensaje (timestamp) el otro usuario ha leído la conversación.
+  /// Hasta qué mensaje (timestamp) el otro usuario ha leído la conversación
+  /// (ticks ✓✓ de mis enviados). Lee SU marcador (leidoHastaOtro), con
+  /// fallback a la columna histórica compartida en servidores sin migrar.
   /// Cambia en vivo por Realtime cuando el otro marca leído.
   Stream<DateTime?> observarLeidoHasta(String otroUsuarioId, String miId) {
     return (_db.select(_db.matches)
@@ -672,7 +689,8 @@ class ChatRepositorio {
               (m.usuarioAId.equals(miId) & m.usuarioBId.equals(otroUsuarioId)) |
               (m.usuarioAId.equals(otroUsuarioId) & m.usuarioBId.equals(miId))))
         .watch()
-        .map((filas) => filas.isEmpty ? null : filas.first.leidoHasta);
+        .map((filas) =>
+            filas.isEmpty ? null : filas.first.leidoHastaOtro ?? filas.first.leidoHasta);
   }
 
   Future<void> editarMensaje({
@@ -1012,7 +1030,25 @@ class ChatRepositorio {
     final preview = cambio['ultimo_mensaje_preview'] as String?;
     final ultimoTs =
         cambio['ultimo_mensaje_timestamp'] as String?;
-    final leido = cambio['leido_hasta'] as String?;
+    // Marcadores por lado (con fallback a la columna histórica compartida
+    // para servidores aún sin migrar). Solo mi columna alimenta mi
+    // leidoHasta (badge); la suya va a leidoHastaOtro (ticks ✓✓).
+    DateTime? parsearOMitir(Object? v) {
+      if (v == null) return null;
+      try {
+        return DateTime.parse(v as String);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final soyA = _userId != null && a == _userId;
+    final miRemoto =
+        parsearOMitir(soyA ? cambio['leido_hasta_a'] : cambio['leido_hasta_b']) ??
+            parsearOMitir(cambio['leido_hasta']);
+    final suRemoto =
+        parsearOMitir(soyA ? cambio['leido_hasta_b'] : cambio['leido_hasta_a']) ??
+            parsearOMitir(cambio['leido_hasta']);
     final previo = await (_db.select(_db.matches)
           ..where((m) => m.uuid.equals(dbId))
           ..limit(1))
@@ -1028,10 +1064,10 @@ class ChatRepositorio {
         ultimoMensajePreview: Value(preview),
         ultimoMensajeTimestamp:
             Value(ultimoTs != null ? DateTime.parse(ultimoTs) : null),
-        leidoHasta: Value(SyncService.leidoHastaMasReciente(
-          previo?.leidoHasta,
-          leido != null ? DateTime.parse(leido) : null,
-        )),
+        leidoHasta:
+            Value(SyncService.leidoHastaMasReciente(previo?.leidoHasta, miRemoto)),
+        leidoHastaOtro: Value(SyncService.leidoHastaMasReciente(
+            previo?.leidoHastaOtro, suRemoto)),
       ),
     );
   }

@@ -794,9 +794,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   final GlobalKey _undoBotonKey = GlobalKey();
   final LayerLink _undoLink = LayerLink();
   final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
-  /// Notificaciones NUEVAS (solo sociales: likes, visitas y matches): alimenta
-  /// el chip de la campana dentro de la página de Chats. Los mensajes de
-  /// las conversaciones NO cuentan aquí.
+  /// Notificaciones NUEVAS sin leer (sociales + mensajes): alimenta la
+  /// campana del encabezado de Perfil y su indicador en el nav inferior.
   final ValueNotifier<int> _notificacionesPendientes = ValueNotifier<int>(0);
   final ValueNotifier<int> _socialesNoLeidas = ValueNotifier<int>(0);
   int _chatsNoLeidos = 0;
@@ -889,14 +888,15 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     }
   }
 
-  /// Campana de Notificaciones = solo notificaciones nuevas (likes, visitas
-  /// y matches) sin revisar en la bandeja. Los mensajes de las conversaciones
-  /// NO cuentan aquí. El indicador del nav inferior de Chats sí suma ambos.
+  /// Campana de Notificaciones = todo lo sin leer de la bandeja: sociales
+  /// (likes, visitas y matches) + mensajes de conversaciones no leídos. El
+  /// indicador del nav inferior de Chats suma ambos igualmente.
   void _actualizarBadgeNotificaciones() {
-    _notificacionesPendientes.value = _socialesNoLeidas.value;
+    _notificacionesPendientes.value =
+        _socialesNoLeidas.value + _chatsNoLeidos;
     final total = _chatsNoLeidos + _socialesNoLeidas.value;
     // Mientras se está viendo la pestaña Chats el indicador del nav queda
-    // apagado; el chip de la campana (solo sociales) se mantiene.
+    // apagado; el chip de la campana (bandeja completa) se mantiene.
     _notificacionesNoLeidas.value = _indice == 3 ? 0 : total;
   }
 
@@ -1631,8 +1631,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                     },
                     meGustaNoLeidas: meGustaCount,
                     chatsNoLeidos: chatsCount,
-                    // Igual que Chats: el punto de Perfil avisa de sociales
-                    // nuevas y se apaga al abrir la bandeja (o la pestaña).
+                    // Igual que Chats: el punto de Perfil avisa de bandeja
+                    // sin leer (sociales + mensajes) y se apaga al abrir
+                    // la bandeja (o la pestaña).
                     perfilNoLeidas:
                         _indice == 4 ? 0 : socialesCount,
                   );

@@ -452,17 +452,28 @@ class SyncService {
           .from('matches')
           .select()
           .or('usuario_a_id.eq.$userIdResuelto,usuario_b_id.eq.$userIdResuelto');
-      // El "visto" (leido_hasta) lo escribe el OTRO usuario al leer; si la
-      // descarga lo ignorara, los ticks ✓✓ se perderían en cada sesión nueva
-      // hasta que el Realtime los recuperase. Se fusiona con máximo, igual
-      // que en historial_likes (nunca retrocede).
+      // Marcadores por participante (leido_hasta_a/b): cada uno solo escribe
+      // el suyo (el trigger no_pisar_leido_ajeno lo garantiza en remoto).
+      // - leidoHasta (local) = MI marcador → badge de no leídos. Solo se
+      //   fusiona con mi propia columna remota: el marcador del otro YA NO
+      //   puede borrar mis no leídos (antes, con una sola columna compartida
+      //   + máximo, cuando el otro leía se me apagaba el badge).
+      // - leidoHastaOtro (local) = SU marcador → ticks ✓✓ de mis enviados.
       final leidosLocales = {
         for (final m
             in await (_db.select(_db.matches)).get())
-          m.uuid: m.leidoHasta
+          m.uuid: m
       };
       final filas = (remoto as List).map((fila) {
         final f = fila as Map<String, dynamic>;
+        final soyA = f['usuario_a_id'] == userIdResuelto;
+        final miRemoto = PerfilMapeo.parsearFecha(
+                soyA ? f['leido_hasta_a'] : f['leido_hasta_b']) ??
+            PerfilMapeo.parsearFecha(f['leido_hasta']);
+        final suRemoto = PerfilMapeo.parsearFecha(
+                soyA ? f['leido_hasta_b'] : f['leido_hasta_a']) ??
+            PerfilMapeo.parsearFecha(f['leido_hasta']);
+        final local = leidosLocales[f['id']];
         return MatchesCompanion.insert(
           uuid: f['id'] as String,
           usuarioAId: f['usuario_a_id'] as String,
@@ -471,9 +482,10 @@ class SyncService {
               PerfilMapeo.parsearFecha(f['timestamp_match']) ?? DateTime.now(),
           ultimoMensajePreview: const Value.absent(),
           ultimoMensajeTimestamp: const Value.absent(),
-          leidoHasta: Value(leidoHastaMasReciente(
-              leidosLocales[f['id']],
-              PerfilMapeo.parsearFecha(f['leido_hasta']))),
+          leidoHasta:
+              Value(leidoHastaMasReciente(local?.leidoHasta, miRemoto)),
+          leidoHastaOtro:
+              Value(leidoHastaMasReciente(local?.leidoHastaOtro, suRemoto)),
         );
       }).toList();
       if (filas.isNotEmpty) {
@@ -787,15 +799,19 @@ class SyncService {
         };
         final filas = lista.map((fila) {
           final f = fila as Map<String, dynamic>;
+          // Igual que en la rama Supabase: el remoto de filas ajenas es el
+          // marcador del otro y no se fusiona con mi estado local.
+          final esPropia = f['usuario_id'] == userIdResuelto;
           return HistorialLikesCompanion.insert(
             uuid: f['id'] as String,
             usuarioId: f['usuario_id'] as String,
             usuarioLikeadoId: f['usuario_likeado_id'] as String,
             timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
             pendienteDeSincronizar: const Value(false),
-            leidoHasta: Value(leidoHastaMasReciente(
-                leidosLocales[f['id']],
-                PerfilMapeo.parsearFecha(f['leido_hasta']))),
+            leidoHasta: Value(esPropia
+                ? leidoHastaMasReciente(leidosLocales[f['id']],
+                    PerfilMapeo.parsearFecha(f['leido_hasta']))
+                : leidosLocales[f['id']]),
             esSuper: Value((f['es_super'] as bool?) ?? false),
           );
         }).toList();
@@ -818,15 +834,21 @@ class SyncService {
       };
       final filas = (remoto as List).map((fila) {
         final f = fila as Map<String, dynamic>;
+        // El leido_hasta remoto de una fila AJENA es el marcador del otro
+        // (cada uno solo puede actualizar sus propias filas por RLS): NO se
+        // fusiona, o sus lecturas borrarían mis no leídos. Solo las filas
+        // propias mezclan remoto con local.
+        final esPropia = f['usuario_id'] == userIdResuelto;
         return HistorialLikesCompanion.insert(
           uuid: f['id'] as String,
           usuarioId: f['usuario_id'] as String,
           usuarioLikeadoId: f['usuario_likeado_id'] as String,
           timestamp: Value(PerfilMapeo.parsearFecha(f['timestamp']) ?? DateTime.now()),
           pendienteDeSincronizar: const Value(false),
-          leidoHasta: Value(leidoHastaMasReciente(
-              leidosLocales[f['id']],
-              PerfilMapeo.parsearFecha(f['leido_hasta']))),
+          leidoHasta: Value(esPropia
+              ? leidoHastaMasReciente(leidosLocales[f['id']],
+                  PerfilMapeo.parsearFecha(f['leido_hasta']))
+              : leidosLocales[f['id']]),
           esSuper: Value((f['es_super'] as bool?) ?? false),
         );
       }).toList();
