@@ -119,7 +119,8 @@ class SuscripcionServicio with ChangeNotifier {
 
   SuscripcionServicio(this._db, this._sync, {ConfigRemotaServicio? configRemota})
       : _configRemota = configRemota {
-    cargarSuscripcion();
+    // NOTA: sin auto-carga aquí; la única carga inicial la hace main() con
+    // tope de tiempo (antes se cargaba dos veces: aquí + en main).
     // Refleja el rol de administrador en vivo: el perfil propio (con is_admin)
     // se sincroniza después de iniciar sesión, por lo que la carga inicial
     // puede no haberlo visto todavía.

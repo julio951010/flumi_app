@@ -80,22 +80,36 @@ void main() async {
 
   database = AppDatabase();
 
-  if (!kUsarServidorLocal) {
-    await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
-  }
+  // Grupo 1 (paralelo): inicializaciones independientes entre sí. Antes iban
+  // en serie y cada handshake sumaba segundos con pantalla en negro.
+  await Future.wait([
+    if (!kUsarServidorLocal)
+      Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey),
+    ConnectivityService.instancia.iniciar(),
+    // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
+    // de runApp(). Sin este registro, los push con la app cerrada no
+    // despiertan. Nunca lanza (sin google-services.json queda deshabilitado).
+    inicializarPushCritico(),
+  ]);
 
   authService = AuthService();
   AuthService.initDb(database);
-  await authService.inicializar();
-
   syncService = SyncService(database);
 
-  await ConnectivityService.instancia.iniciar();
+  // Grupo 2 (paralelo): dependen de lo anterior pero no entre sí.
+  await Future.wait([
+    authService.inicializar(),
+    () async {
+      if (!kUsarServidorLocal) {
+        configRemota = ConfigRemotaServicio(Supabase.instance.client);
+        await configRemota.inicializar();
+      } else {
+        configRemota = ConfigRemotaServicio(null);
+      }
+    }(),
+  ]);
+
   EstadoServidorServicio.instancia.iniciarSondeo();
-  // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
-  // de runApp(). Sin este registro, los push con la app cerrada no despiertan.
-  // Nunca lanza (si falta google-services.json, el push queda deshabilitado).
-  await inicializarPushCritico();
   // Resto del push (permisos, canal, listeners, token): en paralelo sin
   // bloquear el arranque.
   unawaited(inicializarPush());
@@ -132,7 +146,15 @@ void main() async {
   visitasServicio = VisitasServicio(database, syncService);
   historialLikesServicio = HistorialLikesServicio(database, syncService);
   votosServicio = VotosServicio(database, syncService);
-  await suscripcionServicio.cargarSuscripcion();
+  // Una sola carga (el constructor ya no auto-carga): con tope para no
+  // bloquear el arranque si la red está lenta; al terminar avisa solo.
+  try {
+    await suscripcionServicio.cargarSuscripcion().timeout(
+      const Duration(seconds: 6),
+    );
+  } on TimeoutException {
+    debugPrint('[Arranque] suscripción con tope: sigo con caché local');
+  } catch (_) {}
 
   runApp(const FlumiApp());
 }
@@ -319,13 +341,13 @@ bool _esperandoSincronizacion = false;
           // cuando el sync DE ESTA ruta acaba (nunca antes, para que el
           // logo centrado se vea durante todo el proceso).
           _iniciarEsperaSincronizacion();
-          await syncService.sincronizarTodo(userId: idSesion, alIniciarSesion: true);
+          await _sincronizarArranqueConTope(idSesion);
           await _verificarPerfilCompletado(idSesion);
           unawaited(registrarTokenPush());
           _terminarEsperaSincronizacion();
           return;
         }
-        await syncService.sincronizarTodo(userId: idSesion, alIniciarSesion: true);
+        await _sincronizarArranqueConTope(idSesion);
         await _verificarPerfilCompletado(idSesion);
         unawaited(registrarTokenPush());
       }
@@ -344,10 +366,11 @@ bool _esperandoSincronizacion = false;
     });
 
     // Esperar a que los procesos necesarios terminen,
-    // con un mínimo visual para que el splash se vea.
+    // con un mínimo visual para que el splash se vea (corto: el sync con
+    // tope ya no necesita un mínimo largo).
     Future.wait([
       OnboardingServicio.estaCompletado(),
-      Future.delayed(const Duration(milliseconds: 1500)),
+      Future.delayed(const Duration(milliseconds: 800)),
     ]).then((resultados) async {
       if (!mounted) return;
       _onboardingCompletado = resultados[0] as bool;
@@ -365,9 +388,8 @@ bool _esperandoSincronizacion = false;
             _syncArranqueHecho = true;
             // Visible = agua + logo en centro mientras se sincroniza.
             _iniciarEsperaSincronizacion();
-            await syncService.sincronizarTodo(
-              userId: authService.usuarioActual?['id'] as String?,
-              alIniciarSesion: true,
+            await _sincronizarArranqueConTope(
+              authService.usuarioActual?['id'] as String?,
             );
             await _verificarPerfilCompletado(
                 authService.usuarioActual?['id'] as String?);
@@ -520,11 +542,25 @@ bool _esperandoSincronizacion = false;
     );
   }
 
+  /// Sync inicial con tope: si la red está lenta se entra con caché y el
+  /// sync sigue en fondo (converge solo); sin tope el splash esperaba todo.
+  Future<void> _sincronizarArranqueConTope(String? userId) async {
+    try {
+      await syncService
+          .sincronizarTodo(userId: userId, alIniciarSesion: true)
+          .timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      debugPrint('[Arranque] sync inicial con tope: entro con caché local');
+    } catch (_) {}
+  }
+
   Future<void> _verificarPerfilCompletado([String? userId]) async {
     // App real (Supabase): garantizamos el perfil local y leemos si está
     // completado para decidir si mostrar el onboarding de perfil/cuestionario.
     try {
-      await syncService.asegurarPerfilPropio(userId);
+      await syncService.asegurarPerfilPropio(userId).timeout(
+        const Duration(seconds: 8),
+      );
       final propio = await perfilRepositorio.obtenerPerfilPropio();
       if (mounted) {
         setState(() => _perfilCompletado = propio?.perfilCompletado ?? false);
