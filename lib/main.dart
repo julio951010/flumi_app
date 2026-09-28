@@ -1220,6 +1220,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       // Al volver a primer plano: refresca ubicación real para "cerca de ti".
       unawaited(UbicacionAutoServicio.actualizarAlAbrirApp(
           db: database, repo: perfilRepositorio));
+      // Reclama el token FCM para la cuenta actual (por si cambió de usuario
+      // sin reiniciar o el token quedó registrado para otra sesión).
+      unawaited(forzarRegistroPush());
     }
   }
 
