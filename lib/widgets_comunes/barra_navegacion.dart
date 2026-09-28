@@ -6,6 +6,7 @@ class BarraNavegacion extends StatelessWidget {
   final ValueChanged<int> onCambio;
   final int meGustaNoLeidas;
   final int chatsNoLeidos;
+  final int perfilNoLeidas;
 
   const BarraNavegacion({
     super.key,
@@ -13,6 +14,7 @@ class BarraNavegacion extends StatelessWidget {
     required this.onCambio,
     this.meGustaNoLeidas = 0,
     this.chatsNoLeidos = 0,
+    this.perfilNoLeidas = 0,
   });
 
   static const _nombres = [
@@ -37,6 +39,8 @@ class BarraNavegacion extends StatelessWidget {
         return meGustaNoLeidas;
       case 3: // Chats
         return chatsNoLeidos;
+      case 4: // Perfil (campana de sociales)
+        return perfilNoLeidas;
       default:
         return 0;
     }

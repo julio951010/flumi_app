@@ -1574,28 +1574,37 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
           return ValueListenableBuilder<int>(
             valueListenable: _notificacionesNoLeidas,
             builder: (context, chatsCount, _) {
-              return BarraNavegacion(
-                indiceActual: _indice,
-                onCambio: (i) {
-                  setState(() => _indice = i);
-                  // Al abrir cada página se limpia su indicador del nav:
-                  // Me Gusta → corazón; Chats → mensajes no leídos.
-                  if (i == 2) {
-                    // Desde el nav se vuelve a la sub-pestaña inicial; la
-                    // sub-pestaña exacta solo la eligen las notificaciones.
-                    _indiceMeGusta = 0;
-                    _meGustaNoLeidas.value = 0;
-                  }
-                  if (i == 3) {
-                    // Solo se apaga el indicador del nav: los chats NO se
-                    // marcan leídos (eso ocurre al abrir la conversación).
-                    _notificacionesNoLeidas.value = 0;
-                  } else {
-                    _actualizarBadgeNotificaciones();
-                  }
+              return ValueListenableBuilder<int>(
+                valueListenable: _notificacionesPendientes,
+                builder: (context, socialesCount, _) {
+                  return BarraNavegacion(
+                    indiceActual: _indice,
+                    onCambio: (i) {
+                      setState(() => _indice = i);
+                      // Al abrir cada página se limpia su indicador del nav:
+                      // Me Gusta → corazón; Chats → mensajes no leídos.
+                      if (i == 2) {
+                        // Desde el nav se vuelve a la sub-pestaña inicial; la
+                        // sub-pestaña exacta solo la eligen las notificaciones.
+                        _indiceMeGusta = 0;
+                        _meGustaNoLeidas.value = 0;
+                      }
+                      if (i == 3) {
+                        // Solo se apaga el indicador del nav: los chats NO se
+                        // marcan leídos (eso ocurre al abrir la conversación).
+                        _notificacionesNoLeidas.value = 0;
+                      } else {
+                        _actualizarBadgeNotificaciones();
+                      }
+                    },
+                    meGustaNoLeidas: meGustaCount,
+                    chatsNoLeidos: chatsCount,
+                    // Igual que Chats: el punto de Perfil avisa de sociales
+                    // nuevas y se apaga al abrir la bandeja (o la pestaña).
+                    perfilNoLeidas:
+                        _indice == 4 ? 0 : socialesCount,
+                  );
                 },
-                meGustaNoLeidas: meGustaCount,
-                chatsNoLeidos: chatsCount,
               );
             },
           );

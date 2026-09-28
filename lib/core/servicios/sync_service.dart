@@ -452,6 +452,15 @@ class SyncService {
           .from('matches')
           .select()
           .or('usuario_a_id.eq.$userIdResuelto,usuario_b_id.eq.$userIdResuelto');
+      // El "visto" (leido_hasta) lo escribe el OTRO usuario al leer; si la
+      // descarga lo ignorara, los ticks ✓✓ se perderían en cada sesión nueva
+      // hasta que el Realtime los recuperase. Se fusiona con máximo, igual
+      // que en historial_likes (nunca retrocede).
+      final leidosLocales = {
+        for (final m
+            in await (_db.select(_db.matches)).get())
+          m.uuid: m.leidoHasta
+      };
       final filas = (remoto as List).map((fila) {
         final f = fila as Map<String, dynamic>;
         return MatchesCompanion.insert(
@@ -462,7 +471,9 @@ class SyncService {
               PerfilMapeo.parsearFecha(f['timestamp_match']) ?? DateTime.now(),
           ultimoMensajePreview: const Value.absent(),
           ultimoMensajeTimestamp: const Value.absent(),
-          leidoHasta: const Value.absent(),
+          leidoHasta: Value(leidoHastaMasReciente(
+              leidosLocales[f['id']],
+              PerfilMapeo.parsearFecha(f['leido_hasta']))),
         );
       }).toList();
       if (filas.isNotEmpty) {
