@@ -179,7 +179,10 @@ class _PushMovil {
   Future<void> registrarToken() async {
     if (kUsarServidorLocal) return;
     final token = await _obtenerToken();
-    if (token == null) return;
+    if (token == null) {
+      debugPrint('[Push] sin token FCM: no se registra nada');
+      return;
+    }
     // Evita spam si es el mismo, pero siempre re-registra tras refresh.
     if (token == _token) return;
     _token = token;
@@ -191,7 +194,10 @@ class _PushMovil {
           'p_plataforma': Platform.isIOS ? 'ios' : 'android',
         },
       );
-    } catch (_) {}
+      debugPrint('[Push] token registrado en device_tokens');
+    } catch (e) {
+      debugPrint('[Push] registrar_device_token falló: $e');
+    }
   }
 
   /// Fuerza re-registro (tras login).
@@ -209,7 +215,9 @@ class _PushMovil {
         'eliminar_device_token',
         params: {'p_token': token},
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Push] eliminar_device_token falló: $e');
+    }
     _token = null;
   }
 
