@@ -143,11 +143,14 @@ class SuscripcionServicio with ChangeNotifier {
   bool get cargando => _cargando;
 
   void _alCambiarPerfilPropio(List<Usuario> filas) {
-    final admin = filas.isNotEmpty ? filas.first.isAdmin : false;
+    debugPrint('[Suscripcion] _alCambiarPerfilPropio: ${filas.length} filas');
+    if (filas.isEmpty) return;
+    final admin = filas.first.isAdmin;
     if (admin != _esAdmin) {
       _esAdmin = admin;
       notifyListeners();
     }
+    unawaited(_cargarDesdeLocal(filas.first.uuid));
   }
 
   @override
