@@ -214,6 +214,8 @@ class SuscripcionServicio with ChangeNotifier {
     final id = userList.isNotEmpty ? userList.first.uuid : null;
     if (id == null) {
       debugPrint('[Suscripcion] sin usuario propio');
+      _cargando = false;
+      notifyListeners();
       return;
     }
     debugPrint('[Suscripcion] cargando para usuario: $id');
