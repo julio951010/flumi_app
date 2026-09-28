@@ -203,25 +203,39 @@ class SuscripcionServicio with ChangeNotifier {
       (_usosHoy?.superlikesUsados ?? 0) < limites.superlikesPorDia;
 
   Future<void> cargarSuscripcion() async {
+    debugPrint('[Suscripcion] cargarSuscripcion iniciado');
     final userList = await (_db.select(_db.usuarios)
           ..where((u) => u.esPerfilPropio.equals(true))
           ..limit(1))
         .get();
     final id = userList.isNotEmpty ? userList.first.uuid : null;
-    if (id == null) return;
+    if (id == null) {
+      debugPrint('[Suscripcion] sin usuario propio');
+      return;
+    }
+    debugPrint('[Suscripcion] cargando para usuario: $id');
 
     await _cargarDesdeLocal(id);
+    debugPrint('[Suscripcion] carga local completa, planActual=$_planActual, cargando=$_cargando');
     // Online-first: refresca plan y usos desde Supabase sin bloquear la UI;
     // al terminar vuelve a leer lo local y notifica.
     if (ConnectivityService.instancia.hayConexion) {
-      unawaited(_refrescarDesdeRemoto(id));
+      unawaited(_refrescarDesdeRemoto(id).then((_) {
+        debugPrint('[Suscripcion] refrescar remoto completo');
+      }).catchError((e) {
+        debugPrint('[Suscripcion] refrescar remoto error: $e');
+      }));
     }
   }
 
   Future<void> _refrescarDesdeRemoto(String userId) async {
+    debugPrint('[Suscripcion] _refrescarDesdeRemoto iniciado para $userId');
     await _sync.sincronizarSuscripciones(userId);
+    debugPrint('[Suscripcion] sincronizarSuscripciones completado');
     await _sync.sincronizarUsosDiarios(userId);
+    debugPrint('[Suscripcion] sincronizarUsosDiarios completado');
     await _cargarDesdeLocal(userId);
+    debugPrint('[Suscripcion] _cargarDesdeLocal post-sync completado');
   }
 
   /// Plan en reserva (pila de profundidad 1) y su vencimiento, si existen.
@@ -261,6 +275,7 @@ class SuscripcionServicio with ChangeNotifier {
       Supabase.instance.client.rpc(fn, params: params);
 
   Future<void> _cargarDesdeLocal(String id) async {
+    debugPrint('[Suscripcion] _cargarDesdeLocal iniciado para $id');
     final perfil = await (_db.select(_db.usuarios)..where((u) => u.uuid.equals(id))).getSingleOrNull();
     _esAdmin = perfil?.isAdmin ?? false;
     var sub = await (_db.select(_db.suscripciones)..where((s) => s.usuarioId.equals(id))).getSingleOrNull();
@@ -290,6 +305,7 @@ class SuscripcionServicio with ChangeNotifier {
     }
     await _cargarUsosHoy(id);
     _cargando = false;
+    debugPrint('[Suscripcion] _cargarDesdeLocal completado: planActual=$_planActual, cargando=$_cargando');
     notifyListeners();
   }
 
