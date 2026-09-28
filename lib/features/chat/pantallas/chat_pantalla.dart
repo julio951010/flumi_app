@@ -363,7 +363,17 @@ class _ChatPantallaState extends State<ChatPantalla> {
   }
 
   Future<void> _enviar() async {
-    if (!widget.suscripcionServicio.esGratis) {
+    final suscripcion = widget.suscripcionServicio;
+    if (suscripcion.cargando) {
+      if (mounted) {
+        NotificacionServicio.advertencia(
+          context,
+          'Cargando tu plan... espera un momento.',
+        );
+      }
+      return;
+    }
+    if (!suscripcion.esGratis) {
       final texto = _mensajeCtrl.text.trim();
       if (texto.isEmpty) return;
       _mensajeCtrl.clear();

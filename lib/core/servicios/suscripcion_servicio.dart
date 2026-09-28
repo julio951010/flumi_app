@@ -115,6 +115,7 @@ class SuscripcionServicio with ChangeNotifier {
   Suscripcione? _suscripcionActual;
   UsosDiario? _usosHoy;
   bool _esAdmin = false;
+  bool _cargando = true;
   StreamSubscription<List<Usuario>>? _perfilSub;
 
   SuscripcionServicio(this._db, this._sync, {ConfigRemotaServicio? configRemota})
@@ -135,6 +136,11 @@ class SuscripcionServicio with ChangeNotifier {
 
   bool get _suscripcionesHabilitadas =>
       _configRemota?.suscripcionesHabilitadas ?? true;
+
+  /// true mientras la suscripción no ha terminado de cargar (local + remoto).
+  /// La UI puede usar esto para mostrar un estado de carga en vez de
+  /// bloquear por "plan gratis" antes de saber el plan real.
+  bool get cargando => _cargando;
 
   void _alCambiarPerfilPropio(List<Usuario> filas) {
     final admin = filas.isNotEmpty ? filas.first.isAdmin : false;
@@ -283,6 +289,7 @@ class SuscripcionServicio with ChangeNotifier {
       _planActual = PlanTipo.gratis;
     }
     await _cargarUsosHoy(id);
+    _cargando = false;
     notifyListeners();
   }
 
