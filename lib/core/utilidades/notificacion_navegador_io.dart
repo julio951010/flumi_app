@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
+import '../../firebase_options.dart';
 
 /// Handler de segundo plano (top-level, requerido por FCM en Android).
 /// Se ejecuta en un isolate separado cuando llega un push con la app
@@ -14,8 +16,12 @@ import '../../config/env.dart';
 @pragma('vm:entry-point')
 Future<void> _fcmBackgroundHandler(RemoteMessage mensaje) async {
   try {
-    await Firebase.initializeApp();
-  } catch (_) {}
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('[Push] background Firebase.init falló: $e');
+  }
 }
 
 /// Callback global para taps en notificaciones (foreground/background/cerrada).
@@ -36,24 +42,33 @@ class _PushMovil {
   bool _disponible = false;
   String? _token;
   bool _mostrarLocales = false;
+  bool _criticoOk = false;
+  bool _completoOk = false;
 
   /// Fase crítica: Firebase + registro del handler de background. Se espera
   /// con `await` antes de `runApp()`: sin este registro, los push que llegan
   /// con la app cerrada no despiertan a la app. Nunca lanza.
   Future<void> inicializarCritico() async {
+    if (_criticoOk && _fcm != null) return;
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       _fcm = FirebaseMessaging.instance;
       // Background: handler top-level (data messages cuando app cerrada).
       FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
-    } catch (_) {}
+      _criticoOk = true;
+    } catch (e) {
+      debugPrint('[Push] Firebase.init falló (revisa firebase_options.dart): $e');
+    }
   }
 
   /// Inicializa Firebase y los handlers de FCM. Nunca lanza: si Firebase no
-  /// está configurado (falta google-services.json / GoogleService-Info.plist)
-  /// la app sigue funcionando sin push.
+  /// está configurado la app sigue funcionando sin push. Idempotente: una
+  /// segunda llamada (p. ej. desde solicitarPermiso) no duplica listeners.
   Future<void> inicializar() async {
     await inicializarCritico();
+    if (_completoOk) return;
     final fcm = _fcm;
     if (fcm == null) {
       _disponible = false;
@@ -115,7 +130,9 @@ class _PushMovil {
       });
 
       _disponible = true;
-    } catch (_) {
+      _completoOk = true;
+    } catch (e) {
+      debugPrint('[Push] inicializar falló: $e');
       _disponible = false;
     }
   }
@@ -141,7 +158,8 @@ class _PushMovil {
     try {
       final fcm = _fcm ?? FirebaseMessaging.instance;
       return await fcm.getToken();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Push] getToken falló: $e');
       return null;
     }
   }

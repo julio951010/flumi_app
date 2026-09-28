@@ -136,12 +136,8 @@ void main() async {
 
   perfilRepositorio = PerfilRepositorio(database, syncService);
   chatRepositorio = ChatRepositorio(database, syncService);
-  if (!kUsarServidorLocal) {
-    configRemota = ConfigRemotaServicio(Supabase.instance.client);
-    await configRemota.inicializar();
-  } else {
-    configRemota = ConfigRemotaServicio(null);
-  }
+  // configRemota ya quedó asignado e inicializado en el Grupo 2 de arriba
+  // (reasignar un late final lanzaría LateInitializationError).
   suscripcionServicio = SuscripcionServicio(database, syncService, configRemota: configRemota);
   visitasServicio = VisitasServicio(database, syncService);
   historialLikesServicio = HistorialLikesServicio(database, syncService);

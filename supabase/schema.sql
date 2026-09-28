@@ -6,6 +6,9 @@
 
 create extension if not exists postgis;
 create extension if not exists "uuid-ossp";
+-- Requerida por enviar_push_pg para llamar a la Edge Function. Sin ella no
+-- hay ningún transporte disponible y el push desde Supabase nunca sale.
+create extension if not exists pg_net with schema extensions;
 
 -- ------------------------------------------------------------
 -- PROFILES (se asegura de que la tabla exista y luego añade columnas)
@@ -1336,35 +1339,21 @@ begin
     'cuerpo', p_cuerpo,
     'categoria', coalesce(p_categoria, 'mensajes')
   );
-  -- NOTA: net.http_post VA CON NOTACIÓN NOMBRADA. Su firma es
-  -- (url, body, params, headers, timeout): la llamada posicional anterior
-  -- (v_url, v_headers, v_body) mandaba los headers como body y el body como
-  -- params, por lo que x-flumi-secret nunca llegaba y la Edge Function
-  -- respondía 401 en silencio.
+  -- NOTA: net.http_post usa notación nombrada (url, body, headers, timeout).
+  -- Es ASÍNCRONO: encola la petición y devuelve OK inmediato. El resultado
+  -- real (HTTP status, body) queda en net._http_response para consultar luego.
   begin
-    -- Prioridad: supabase_functions (interno, no necesita egress) > net.
-    -- Si el primer transporte falla, se intenta con el segundo en vez de
-    -- rendirse: cada intento queda en push_log para diagnóstico.
-    if to_regnamespace('supabase_functions') is not null
-       and to_regprocedure('supabase_functions.http_request(text,text,jsonb,jsonb)') is not null then
-      begin
-        perform supabase_functions.http_request(v_url, 'POST', v_headers, v_body);
-        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'supabase_functions', true, 'ok');
-        return;
-      exception when others then
-        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'supabase_functions', false, SQLERRM);
-      end;
-    end if;
     if to_regnamespace('net') is not null then
       begin
         perform net.http_post(url := v_url, body := v_body, headers := v_headers);
-        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'net', true, 'ok');
+        -- "enqueued" = petición encolada; la entrega real se verifica en net._http_response
+        perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'net', true, 'enqueued');
         return;
       exception when others then
         perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'net', false, SQLERRM);
       end;
     else
-      perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'ninguno', false, 'sin transporte: ni supabase_functions ni pg_net disponibles');
+      perform public.registrar_push_log(p_usuario_id, coalesce(p_categoria,'mensajes'), p_titulo, 'ninguno', false, 'pg_net no disponible (falta CREATE EXTENSION)');
     end if;
   exception when others then
     -- Un fallo de push nunca debe romper el insert original.

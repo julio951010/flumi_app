@@ -37,6 +37,11 @@ android {
             // Reduce tamaño del APK: elimina código y recursos sin usar.
             isMinifyEnabled = true
             isShrinkResources = true
+            // Reglas keep para flutter_local_notifications (ic_notif) y FCM.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
