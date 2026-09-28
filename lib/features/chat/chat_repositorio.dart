@@ -7,7 +7,6 @@ import '../../config/env.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/constantes/constantes.dart';
 import '../../core/servicios/connectivity_service.dart';
-import '../../core/servicios/notificacion_local_servicio.dart';
 import '../../core/servicios/sync_service.dart';
 import '../../core/utilidades/notificacion_navegador.dart';
 import '../../core/utilidades/perfil_mapeo.dart';
@@ -576,13 +575,8 @@ class ChatRepositorio {
     // si falla queda pendiente para el siguiente sync.
     unawaited(_sync?.sincronizarMensajesPendientes());
 
-    // Notificación inteligente: local si foreground, push si background
-    unawaited(NotificacionLocalServicio.instancia.notificarInteligente(
-      titulo: 'Nuevo mensaje',
-      cuerpo: contenido,
-      usuarioIdDestino: receptorId,
-      categoria: 'mensajes',
-    ));
+    // NO mostramos notificación local al emisor: ya ve su mensaje en el chat.
+    // El push al destinatario lo dispara el trigger de la BD (schema.sql).
   }
 
   Future<void> borrarConversacion(String otroUsuarioId, String miId) async {
