@@ -19,6 +19,7 @@ Future<void> _fcmBackgroundHandler(RemoteMessage mensaje) async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    debugPrint('[Push] background mensaje recibido: categoria=${mensaje.data['categoria']} titulo=${mensaje.notification?.title ?? mensaje.data['titulo']}');
   } catch (e) {
     debugPrint('[Push] background Firebase.init falló: $e');
   }
@@ -50,9 +51,11 @@ class _PushMovil {
   bool _criticoOk = false;
   bool _completoOk = false;
 
-  /// Fase crítica: Firebase + registro del handler de background. Se espera
+  /// Fase crítica: Firebase + handler background + canal Android. Se espera
   /// con `await` antes de `runApp()`: sin este registro, los push que llegan
-  /// con la app cerrada no despiertan a la app. Nunca lanza.
+  /// con la app cerrada no despiertan a la app. El canal 'flumi' se crea aquí
+  /// para que exista ANTES de que pueda llegar cualquier mensaje FCM en
+  /// foreground (race: runApp → mensaje → inicializar).
   Future<void> inicializarCritico() async {
     if (_criticoOk && _fcm != null) return;
     try {
@@ -62,6 +65,20 @@ class _PushMovil {
       _fcm = FirebaseMessaging.instance;
       // Background: handler top-level (data messages cuando app cerrada).
       FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
+      // Canal Android (id 'flumi') ANTES de runApp: garantiza que la notificación
+      // local en foreground tenga canal válido aunque el mensaje llegue ya.
+      try {
+        const canal = AndroidNotificationChannel(
+          'flumi',
+          'Flumi',
+          description: 'Mensajes, Me Gustas, visitas y matches',
+          importance: Importance.high,
+        );
+        await _locales
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(canal);
+      } catch (_) {}
       _criticoOk = true;
     } catch (e) {
       debugPrint('[Push] Firebase.init falló (revisa firebase_options.dart): $e');
@@ -92,21 +109,6 @@ class _PushMovil {
         },
       );
       _mostrarLocales = true;
-
-      // Crea el canal 'flumi' explícitamente para que los FCM en background
-      // usen el mismo canal con importancia alta.
-      try {
-        const canal = AndroidNotificationChannel(
-          'flumi',
-          'Flumi',
-          description: 'Mensajes, Me Gustas, visitas y matches',
-          importance: Importance.high,
-        );
-        await _locales
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.createNotificationChannel(canal);
-      } catch (_) {}
 
       await fcm.requestPermission(
         alert: true,
@@ -156,6 +158,7 @@ class _PushMovil {
     final cuerpo = mensaje.notification?.body ??
         mensaje.data['cuerpo'] ??
         '';
+    debugPrint('[Push] onMessage foreground: categoria=${mensaje.data['categoria']} titulo=$titulo');
     return notificarNavegador(titulo, cuerpo);
   }
 
