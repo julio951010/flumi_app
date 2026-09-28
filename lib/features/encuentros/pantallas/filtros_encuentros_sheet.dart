@@ -1596,6 +1596,8 @@ class SuscripcionServicioMock with ChangeNotifier implements SuscripcionServicio
   @override
   UsosDiario? get usosHoy => null;
   @override
+  bool get cargando => false;
+  @override
   bool get esGratis => false;
   @override
   bool get esPlus => false;
