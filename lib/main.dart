@@ -144,13 +144,17 @@ void main() async {
   votosServicio = VotosServicio(database, syncService);
   // Una sola carga (el constructor ya no auto-carga): con tope para no
   // bloquear el arranque si la red está lenta; al terminar avisa solo.
+  debugPrint('[Main] Iniciando carga de suscripción...');
   try {
     await suscripcionServicio.cargarSuscripcion().timeout(
       const Duration(seconds: 6),
     );
+    debugPrint('[Main] Suscripción cargada OK, cargando=${suscripcionServicio.cargando}, plan=${suscripcionServicio.planActual}');
   } on TimeoutException {
     debugPrint('[Arranque] suscripción con tope: sigo con caché local');
-  } catch (_) {}
+  } catch (e) {
+    debugPrint('[Main] Error cargando suscripción: $e');
+  }
 
   runApp(const FlumiApp());
 }

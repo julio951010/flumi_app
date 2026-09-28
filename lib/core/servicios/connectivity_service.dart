@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 
 enum EstadoConexion { conectado, desconectado }
 
@@ -18,6 +19,17 @@ class ConnectivityService {
   StreamSubscription<List<ConnectivityResult>>? _suscripcion;
 
   Future<void> iniciar() async {
+    if (kIsWeb) {
+      // En web asumimos conexión salvo que detectemos lo contrario.
+      // connectivity_plus en web puede reportar 'none' inicialmente.
+      _estadoActual = EstadoConexion.conectado;
+      _controlador.add(_estadoActual);
+      _suscripcion = Connectivity()
+          .onConnectivityChanged
+          .listen(_actualizarEstado);
+      debugPrint('[Connectivity] Web: asumimos conexión inicial');
+      return;
+    }
     final resultado = await Connectivity().checkConnectivity();
     _actualizarEstado(resultado);
 
@@ -27,8 +39,9 @@ class ConnectivityService {
   }
 
   void _actualizarEstado(List<ConnectivityResult> resultados) {
-    final hayConexion =
-        resultados.any((r) => r != ConnectivityResult.none);
+    // En web, si todos son 'none' no necesariamente significa sin internet
+    // (puede ser limitación del plugin). Usamos heurística simple.
+    final hayConexion = resultados.any((r) => r != ConnectivityResult.none);
 
     final nuevoEstado =
         hayConexion ? EstadoConexion.conectado : EstadoConexion.desconectado;
@@ -36,6 +49,7 @@ class ConnectivityService {
     if (nuevoEstado != _estadoActual) {
       _estadoActual = nuevoEstado;
       _controlador.add(_estadoActual);
+      debugPrint('[Connectivity] estado cambiado: $nuevoEstado (raw: $resultados)');
     }
   }
 
@@ -44,6 +58,7 @@ class ConnectivityService {
   /// Fuerza una comprobación inmediata del estado de red y actualiza el stream.
   /// Devuelve si hay conexión tras la comprobación.
   Future<bool> comprobarAhora() async {
+    if (kIsWeb) return true; // Web: asumimos conexión
     final resultado = await Connectivity().checkConnectivity();
     _actualizarEstado(resultado);
     return hayConexion;
