@@ -121,6 +121,12 @@ class _ChatPantallaState extends State<ChatPantalla> {
           esMatch: widget.esMatch,
           esMeGusta: widget.esMeGusta,
           onChat: () => _abrirChatDirecto(),
+          onRechazar: widget.esMatch
+              ? () async {
+                  await widget.repositorio.romperMatch(widget.otroUsuarioId, widget.miId);
+                  if (mounted) Navigator.pop(context);
+                }
+              : () => Navigator.pop(context),
         ),
       ),
     );

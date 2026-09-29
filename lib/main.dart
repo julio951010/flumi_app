@@ -843,8 +843,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
         db: database, repo: perfilRepositorio));
     final miId = authService.usuarioActual!['id'] as String;
     _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) {
+      // Cuenta CONVERSACIONES con mensajes sin leer (notificaciones), no
+      // total de mensajes sin leer.
       _chatsNoLeidos =
-          resumenes.fold<int>(0, (acc, r) => acc + r.noLeidos);
+          resumenes.where((r) => r.noLeidos > 0).length;
       _actualizarBadgeNotificaciones();
     });
     // Fase 5: los badges de Me Gusta se derivan de la BD local (dedupe por
@@ -892,15 +894,13 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     }
   }
 
-  /// Campana de Notificaciones = todo lo sin leer de la bandeja: sociales
-  /// (likes, visitas y matches) + mensajes de conversaciones no leídos. El
-  /// indicador del nav inferior de Chats suma ambos igualmente.
+  /// Campana de Notificaciones = solo lo social (likes, visitas, matches).
+  /// Los mensajes NO cuentan aquí; tienen su propio badge en la pestaña Chats.
   void _actualizarBadgeNotificaciones() {
-    _notificacionesPendientes.value =
-        _socialesNoLeidas.value + _chatsNoLeidos;
+    _notificacionesPendientes.value = _socialesNoLeidas.value;
     final total = _chatsNoLeidos + _socialesNoLeidas.value;
     // Mientras se está viendo la pestaña Chats el indicador del nav queda
-    // apagado; el chip de la campana (bandeja completa) se mantiene.
+    // apagado; el chip de la campana (bandeja social) se mantiene.
     _notificacionesNoLeidas.value = _indice == 3 ? 0 : total;
   }
 
@@ -1084,6 +1084,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       final id = fila['id'] as String?;
       if (id == null) return;
       try {
+        final previo = await (database.select(database.matches)
+              ..where((m) => m.uuid.equals(id)))
+            .getSingleOrNull();
         await database.into(database.matches).insertOnConflictUpdate(
               MatchesCompanion.insert(
                 uuid: id,
@@ -1091,7 +1094,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                 usuarioBId: fila['usuario_b_id'] as String,
                 timestampMatch: DateTime.tryParse(
                         fila['timestamp_match'] as String? ?? '') ??
-                    DateTime.now(),
+                    previo?.timestampMatch ?? DateTime.now(),
                 pendienteDeSincronizar: const Value(false),
               ),
             );
@@ -1479,6 +1482,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
         visitasServicio: visitasServicio,
         historialLikesServicio: historialLikesServicio,
         votosServicio: votosServicio,
+        chatRepo: chatRepositorio,
         onAmpliarBusqueda: _ampliarBusqueda,
         onMatchPerdido: _avisarMatchPerdidoEnDeshacer,
       ),

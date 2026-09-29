@@ -224,6 +224,26 @@ alter table public.rechazos drop constraint if exists par_rechazo_unico;
 create index if not exists rechazos_usuario_idx on public.rechazos (usuario_id);
 create index if not exists rechazos_par_idx on public.rechazos (usuario_id, rechazado_id);
 
+-- Trigger: si se inserta un rechazo entre dos usuarios que tienen match,
+-- se rompe el match automáticamente (server-side, cubre sync offline).
+create or replace function public.romper_match_por_rechazo()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  delete from public.matches
+  where (usuario_a_id = NEW.usuario_id and usuario_b_id = NEW.rechazado_id)
+     or (usuario_a_id = NEW.rechazado_id and usuario_b_id = NEW.usuario_id);
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_romper_match_por_rechazo on public.rechazos;
+create trigger trg_romper_match_por_rechazo
+  after insert on public.rechazos
+  for each row execute function public.romper_match_por_rechazo();
+
 -- ------------------------------------------------------------
 -- SUSCRIPCIONES (planes Gratis / Plus / Premium)
 -- ------------------------------------------------------------
@@ -1326,6 +1346,19 @@ create policy "verificacion_admin_borra"
 
 -- Envía un push sin bloquear la transacción que lo dispara.
 -- Respeta public.notif_prefs del destinatario (sin fila = todo ON).
+-- Limpieza de sobrecargas duplicadas: CREATE OR REPLACE no elimina firmas
+-- viejas (p. ej. varchar vs text) y Postgres falla con "function is not
+-- unique" en los triggers (rompía los inserts de messages con HTTP 400).
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure AS sig FROM pg_proc
+    WHERE proname = 'enviar_push_pg' AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION ' || r.sig || ';';
+  END LOOP;
+END $$;
 create or replace function public.enviar_push_pg(
   p_usuario_id uuid,
   p_titulo text,
@@ -1446,12 +1479,18 @@ begin
     return new;
   end if;
   select nombre into v_nombre from public.profiles where id = new.emisor_id;
-  perform public.enviar_push_pg(
-    new.receptor_id,
-    'Nuevo mensaje de ' || coalesce(v_nombre, 'Alguien'),
-    left(coalesce(new.contenido, ''), 100),
-    'mensajes'
-  );
+  -- Guard: un fallo de push (p. ej. sobrecarga ambigua de enviar_push_pg)
+  -- nunca debe romper el insert del mensaje.
+  begin
+    perform public.enviar_push_pg(
+      new.receptor_id,
+      ('Nuevo mensaje de ' || coalesce(v_nombre, 'Alguien'))::text,
+      left(coalesce(new.contenido, ''), 100)::text,
+      'mensajes'::text
+    );
+  exception when others then
+    null;
+  end;
   return new;
 end;
 $$;
@@ -1471,12 +1510,16 @@ declare
   v_nombre text;
 begin
   select nombre into v_nombre from public.profiles where id = new.usuario_id;
-  perform public.enviar_push_pg(
-    new.usuario_likeado_id,
-    'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' te dio Me Gusta',
-    'lesGusto'
-  );
+  begin
+    perform public.enviar_push_pg(
+      new.usuario_likeado_id,
+      'Flumi'::text,
+      (coalesce(v_nombre, 'Alguien') || ' te dio Me Gusta')::text,
+      'lesGusto'::text
+    );
+  exception when others then
+    null;
+  end;
   return new;
 end;
 $$;
@@ -1496,12 +1539,16 @@ declare
   v_nombre text;
 begin
   select nombre into v_nombre from public.profiles where id = new.visitante_id;
-  perform public.enviar_push_pg(
-    new.visitado_id,
-    'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' visitó tu perfil',
-    'visitas'
-  );
+  begin
+    perform public.enviar_push_pg(
+      new.visitado_id,
+      'Flumi'::text,
+      (coalesce(v_nombre, 'Alguien') || ' visitó tu perfil')::text,
+      'visitas'::text
+    );
+  exception when others then
+    null;
+  end;
   return new;
 end;
 $$;
@@ -1521,19 +1568,27 @@ declare
   v_nombre text;
 begin
   select nombre into v_nombre from public.profiles where id = new.usuario_a_id;
-  perform public.enviar_push_pg(
-    new.usuario_b_id,
-    'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' hizo match contigo',
-    'matches'
-  );
+  begin
+    perform public.enviar_push_pg(
+      new.usuario_b_id,
+      'Flumi'::text,
+      (coalesce(v_nombre, 'Alguien') || ' hizo match contigo')::text,
+      'matches'::text
+    );
+  exception when others then
+    null;
+  end;
   select nombre into v_nombre from public.profiles where id = new.usuario_b_id;
-  perform public.enviar_push_pg(
-    new.usuario_a_id,
-    'Flumi',
-    coalesce(v_nombre, 'Alguien') || ' hizo match contigo',
-    'matches'
-  );
+  begin
+    perform public.enviar_push_pg(
+      new.usuario_a_id,
+      'Flumi'::text,
+      (coalesce(v_nombre, 'Alguien') || ' hizo match contigo')::text,
+      'matches'::text
+    );
+  exception when others then
+    null;
+  end;
   return new;
 end;
 $$;
@@ -1774,7 +1829,7 @@ begin
     insert into public.suscripciones (usuario_id, plan, inicio, vence, activa, plan_reserva, vence_reserva, inicio_reserva)
     values (yo, v_plan_nuevo, now(), v_base + (p_dias || ' days')::interval, true, v_reserva_plan, v_reserva_vence, v_reserva_inicio)
     on conflict (usuario_id) do update set plan = excluded.plan, inicio = excluded.inicio, vence = excluded.vence, activa = true, plan_reserva = excluded.plan_reserva, vence_reserva = excluded.vence_reserva, inicio_reserva = excluded.inicio_reserva;
-    perform public.enviar_push_pg(yo, 'Pago verificado', 'Tu suscripción ' || p_plan || ' (' || p_dias || ' días) está activa', 'regalos');
+    perform public.enviar_push_pg(yo, 'Pago verificado'::text, ('Tu suscripción ' || p_plan || ' (' || p_dias || ' días) está activa')::text, 'regalos'::text);
     return jsonb_build_object('ok', true, 'monto', v_monto, 'auto_aprobado', true);
   end if;
 
@@ -1869,9 +1924,9 @@ begin
       vence_reserva = excluded.vence_reserva,
       inicio_reserva = excluded.inicio_reserva;
     -- Notifica al usuario
-    perform public.enviar_push_pg(r.usuario_id, 'Pago aprobado', 'Tu suscripción ' || r.plan || ' (' || r.dias || ' días) está activa', 'regalos');
+    perform public.enviar_push_pg(r.usuario_id, 'Pago aprobado'::text, ('Tu suscripción ' || r.plan || ' (' || r.dias || ' días) está activa')::text, 'regalos'::text);
   else
-    perform public.enviar_push_pg(r.usuario_id, 'Pago rechazado', coalesce(p_motivo, 'Tu pago fue rechazado. Revisa el Nro. e intenta de nuevo.'), 'regalos');
+    perform public.enviar_push_pg(r.usuario_id, 'Pago rechazado'::text, coalesce(p_motivo, 'Tu pago fue rechazado. Revisa el Nro. e intenta de nuevo.')::text, 'regalos'::text);
   end if;
 
   return jsonb_build_object('ok', true, 'estado', p_estado);

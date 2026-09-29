@@ -35,6 +35,7 @@ class EncuentrosPantalla extends StatefulWidget {
   final VisitasServicio visitasServicio;
   final HistorialLikesServicio historialLikesServicio;
   final VotosServicio votosServicio;
+  final ChatRepositorio chatRepo;
   final VoidCallback? onAmpliarBusqueda;
   final VoidCallback? onMatchPerdido;
 
@@ -49,6 +50,7 @@ class EncuentrosPantalla extends StatefulWidget {
     required this.visitasServicio,
     required this.historialLikesServicio,
     required this.votosServicio,
+    required this.chatRepo,
     this.onAmpliarBusqueda,
     this.onMatchPerdido,
   });
@@ -133,8 +135,22 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   /// después de cargar el mazo (realtime), que `_idsRecibidos` no habría
   /// capturado; si la BD aún no lo tiene y hay red, refresca el historial
   /// desde el servidor antes de decidir.
+  /// TAMBIÉN revisa la tabla `matches` directamente: si ya hay match con
+  /// este usuario (vino por Realtime del servidor), se rompe aunque el
+  /// like recíproco aún no haya sincronizado.
   Future<void> _avisarMatchPerdido(Usuario usuario) async {
     var leDioLike = _idsRecibidos.contains(usuario.uuid);
+    // 1. Chequeo rápido: ¿ya hay match local con este usuario?
+    final matchLocal = await (widget.db.select(widget.db.matches)
+          ..where((m) =>
+              (m.usuarioAId.equals(widget.miId) & m.usuarioBId.equals(usuario.uuid)) |
+              (m.usuarioAId.equals(usuario.uuid) & m.usuarioBId.equals(widget.miId)))
+          ..limit(1))
+        .getSingleOrNull();
+    if (matchLocal != null) {
+      leDioLike = true;
+      debugPrint('[MatchPerdido] ${usuario.nombre}: matchLocal=true');
+    }
     debugPrint('[MatchPerdido] ${usuario.nombre}: enIdsRecibidos=$leDioLike');
     if (!leDioLike) {
       try {
@@ -165,6 +181,8 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
     if (leDioLike) {
       _idsRecibidos.add(usuario.uuid);
+      // Rompe el match completamente (local + remoto)
+      unawaited(widget.chatRepo.romperMatch(usuario.uuid, widget.miId));
       // El aviso se muestra como tooltip sobre el botón Deshacer (header).
       widget.onMatchPerdido?.call();
     }

@@ -166,7 +166,8 @@ class _HistorialTile extends StatelessWidget {
   }
 
   String _formatoTiempo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
+    final localDt = dt.isUtc ? dt.toLocal() : dt;
+    final diff = DateTime.now().difference(localDt);
     if (diff.inMinutes < 60) return 'hace ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'hace ${diff.inHours} h';
     if (diff.inDays < 2) return 'Ayer';

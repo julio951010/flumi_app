@@ -430,7 +430,6 @@ class ChatRepositorio {
       try {
         // Solo MI columna (leido_hasta_a/b según mi lado): escribir la del
         // otro borraría SUS no leídos, y el trigger remoto lo impediría.
-        // Sin fila de match (like-only, oficiales) no hay nada que subir.
         final filaMatch = await (_db.select(_db.matches)
               ..where((m) =>
                   (m.usuarioAId.equals(miId) &
@@ -449,13 +448,30 @@ class ChatRepositorio {
                   '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
               .timeout(const Duration(seconds: 5));
         }
-        // El like propio también guarda leído (like-only). RLS solo permite
-        // tocar el like propio (usuario_gestiona_sus_likes).
+        // Like propio (yo di like): RLS permite actualizar mi fila.
         await Supabase.instance.client
             .from('historial_likes')
             .update({'leido_hasta': ahora.toUtc().toIso8601String()})
             .eq('usuario_id', miId)
             .eq('usuario_likeado_id', otroUsuarioId)
+            .timeout(const Duration(seconds: 5));
+        // Like recibido (el OTRO me dio like y yo leo): intento actualizar
+        // SU fila en historial_likes. Requiere policy que permita
+        // usuario_likeado_id = auth.uid() actualizar leido_hasta.
+        await Supabase.instance.client
+            .from('historial_likes')
+            .update({'leido_hasta': ahora.toUtc().toIso8601String()})
+            .eq('usuario_id', otroUsuarioId)
+            .eq('usuario_likeado_id', miId)
+            .timeout(const Duration(seconds: 5));
+        // Oficiales / sin match ni like: tabla conversaciones_leidas remota.
+        await Supabase.instance.client
+            .from('conversaciones_leidas')
+            .upsert({
+              'usuario_id': miId,
+              'otro_usuario_id': otroUsuarioId,
+              'leido_hasta': ahora.toUtc().toIso8601String(),
+            })
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
@@ -609,6 +625,35 @@ class ChatRepositorio {
         .go();
   }
 
+  /// Rompe un match completamente: borra la fila de matches en local y en
+  /// Supabase (no solo la conversación para mí). Se usa cuando el usuario
+  /// da Nope a alguien con quien tenía match.
+  Future<void> romperMatch(String otroUsuarioId, String miId) async {
+    // 1. Borra match local
+    await (_db.delete(_db.matches)
+          ..where((m) =>
+              (m.usuarioAId.equals(miId) & m.usuarioBId.equals(otroUsuarioId)) |
+              (m.usuarioAId.equals(otroUsuarioId) & m.usuarioBId.equals(miId))))
+        .go();
+    // 2. Borra mensajes locales de esta conversación
+    await (_db.delete(_db.mensajes)
+          ..where((m) =>
+              (m.emisorId.equals(miId) & m.receptorId.equals(otroUsuarioId)) |
+              (m.emisorId.equals(otroUsuarioId) & m.receptorId.equals(miId))))
+        .go();
+    // 3. Sube el borrado a Supabase (best-effort)
+    if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
+      try {
+        await Supabase.instance.client
+            .from(tablaMatches)
+            .delete()
+            .or(
+                '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+  }
+
   /// Sube el marcador "borré la conversación con X" (best-effort). RLS:
   /// solo puedo escribir mi propia fila (usuario_id = yo).
   Future<void> _subirMarcadorBorrado(
@@ -677,17 +722,63 @@ class ChatRepositorio {
   }
 
   /// Hasta qué mensaje (timestamp) el otro usuario ha leído la conversación
-  /// (ticks ✓✓ de mis enviados). Lee SU marcador (leidoHastaOtro), con
-  /// fallback a la columna histórica compartida en servidores sin migrar.
-  /// Cambia en vivo por Realtime cuando el otro marca leído.
+  /// (ticks ✓✓ de mis enviados). Combina 3 fuentes:
+  /// 1. matches.leidoHastaOtro (lado del otro en el match)
+  /// 2. historial_likes.leidoHasta (like-only: quien me dio like lee mi chat)
+  /// 3. conversacionesLeidas.leidoHasta (cuentas oficiales / sin match ni like)
+  /// Toma el máximo de los tres; Realtime de cada tabla lo actualiza en vivo.
   Stream<DateTime?> observarLeidoHasta(String otroUsuarioId, String miId) {
-    return (_db.select(_db.matches)
-          ..where((m) =>
-              (m.usuarioAId.equals(miId) & m.usuarioBId.equals(otroUsuarioId)) |
-              (m.usuarioAId.equals(otroUsuarioId) & m.usuarioBId.equals(miId))))
-        .watch()
-        .map((filas) =>
-            filas.isEmpty ? null : filas.first.leidoHastaOtro ?? filas.first.leidoHasta);
+    late final StreamController<DateTime?> ctrl;
+    ctrl = StreamController<DateTime?>.broadcast(
+      onListen: () {
+        final subs = <StreamSubscription>[];
+        DateTime? currentMatch;
+        DateTime? currentLike;
+        DateTime? currentConv;
+
+        void emitMax() {
+          final vals = [currentMatch, currentLike, currentConv].whereType<DateTime>().toList();
+          if (vals.isNotEmpty) {
+            vals.sort((a, b) => b.compareTo(a));
+            ctrl.add(vals.first);
+          } else {
+            ctrl.add(null);
+          }
+        }
+
+        subs.add((_db.select(_db.matches)
+              ..where((m) =>
+                  (m.usuarioAId.equals(miId) & m.usuarioBId.equals(otroUsuarioId)) |
+                  (m.usuarioAId.equals(otroUsuarioId) & m.usuarioBId.equals(miId))))
+            .watch()
+            .listen((filas) {
+          currentMatch = filas.isEmpty ? null : filas.first.leidoHastaOtro ?? filas.first.leidoHasta;
+          emitMax();
+        }));
+        subs.add((_db.select(_db.historialLikes)
+              ..where((h) =>
+                  h.usuarioId.equals(otroUsuarioId) & h.usuarioLikeadoId.equals(miId)))
+            .watch()
+            .listen((filas) {
+          currentLike = filas.isEmpty ? null : filas.first.leidoHasta;
+          emitMax();
+        }));
+        subs.add((_db.select(_db.conversacionesLeidas)
+              ..where((c) => c.otroUsuarioId.equals(otroUsuarioId)))
+            .watch()
+            .listen((filas) {
+          currentConv = filas.isEmpty ? null : filas.first.leidoHasta;
+          emitMax();
+        }));
+
+        ctrl.onCancel = () {
+          for (final s in subs) {
+            s.cancel();
+          }
+        };
+      },
+    );
+    return ctrl.stream;
   }
 
   Future<void> editarMensaje({
@@ -1057,7 +1148,7 @@ class ChatRepositorio {
         usuarioAId: a,
         usuarioBId: b,
         timestampMatch:
-            timestamp != null ? DateTime.parse(timestamp) : DateTime.now(),
+            timestamp != null ? DateTime.parse(timestamp) : previo?.timestampMatch ?? DateTime.now(),
         pendienteDeSincronizar: const Value(false),
         ultimoMensajePreview: Value(preview),
         ultimoMensajeTimestamp:

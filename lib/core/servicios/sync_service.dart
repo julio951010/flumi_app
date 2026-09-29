@@ -43,6 +43,7 @@ class SyncService {
         sincronizarHistorialLikes(userId),
         sincronizarRechazos(userId),
         sincronizarConversacionesBorradas(userId),
+        sincronizarConversacionesLeidas(userId),
         _sincronizarFeedCercanoDesdePerfilPropio(),
       ]);
     } catch (e) {
@@ -199,7 +200,11 @@ class SyncService {
         // vacÃ­o del servidor (p. ej. porque la subida fallÃ³ silenciosamente).
         // Usamos el servidor solo cuando este trae datos; si no, conservamos
         // la cachÃ© local para no perder la informaciÃ³n del usuario.
-        if (local != null && !_remotoTieneDatos(remoto)) {
+        // TAMBIÃ‰N protegemos: si el local ya tiene perfilCompletado=true,
+        // no lo rebajamos con un remoto que tenga perfil_completado=false.
+        if (local != null &&
+            (!_remotoTieneDatos(remoto) ||
+                (local.perfilCompletado && remoto['perfil_completado'] != true))) {
           return;
         }
         try {
@@ -279,7 +284,10 @@ class SyncService {
   /// descarga del servidor el historial completo (los mensajes que el
   /// Realtime pudo perder mientras estuvo caído/cerrado).
   Future<void> sincronizarMensajesPendientes() async {
-    if (_sincronizandoMensajes) return;
+    if (_sincronizandoMensajes) {
+      debugPrint('[Sync] sincronizarMensajesPendientes: omitido (ya en curso)');
+      return;
+    }
     _sincronizandoMensajes = true;
     try {
       await _subirMensajesPendientes();
@@ -309,7 +317,8 @@ class SyncService {
           estadoEnvio: Value('enviado'),
         ));
         EstadoServidorServicio.instancia.marcarExito();
-      } catch (e) {
+      } catch (e, st) {
+        debugPrint('[Sync] ERROR subiendo mensaje uuid=${mensaje.uuid}: $e\n$st');
         final intentos = mensaje.intentosDeSincronizacion + 1;
         await (_db.update(_db.mensajes)
               ..where((m) => m.uuid.equals(mensaje.uuid)))
@@ -336,7 +345,8 @@ class SyncService {
       final remoto = await sb.Supabase.instance.client
           .from('messages')
           .select()
-          .or('emisor_id.eq.$userId,receptor_id.eq.$userId');
+          .or('emisor_id.eq.$userId,receptor_id.eq.$userId')
+          .timeout(const Duration(seconds: 10));
       final filas =
           (remoto as List).map((f) => f as Map<String, dynamic>).toList();
       final pendientesLocales = (await (_db.select(_db.mensajes)
@@ -960,6 +970,45 @@ class SyncService {
     } catch (_) {}
   }
 
+  /// Sincroniza los marcadores de lectura de conversaciones (oficiales,
+  /// like-only, sin match): descarga leido_hasta remoto y fusiona con local
+  /// tomando el máximo (el leído más reciente gana). Sube los locales pendientes
+  /// (write-through ya los intenta, pero esto cubre fallos de red).
+  Future<void> sincronizarConversacionesLeidas([String? userId]) async {
+    if (kUsarServidorLocal) return;
+    final userIdResuelto = userId ?? _obtenerUserId();
+    if (userIdResuelto == null) return;
+    try {
+      final remoto = await sb.Supabase.instance.client
+          .from('conversaciones_leidas')
+          .select()
+          .eq('usuario_id', userIdResuelto);
+      final leidosLocales = {
+        for (final l in await _db.select(_db.conversacionesLeidas).get())
+          l.otroUsuarioId: l.leidoHasta
+      };
+      final filas = (remoto as List).map((fila) {
+        final f = fila as Map<String, dynamic>;
+        final otroId = f['otro_usuario_id'] as String?;
+        if (otroId == null) return null;
+        final remotoTs = PerfilMapeo.parsearFecha(f['leido_hasta']);
+        final localTs = leidosLocales[otroId];
+        final merged = leidoHastaMasReciente(localTs, remotoTs);
+        return merged != null
+            ? ConversacionesLeidasCompanion(
+                otroUsuarioId: Value(otroId),
+                leidoHasta: Value(merged),
+              )
+            : null;
+      }).whereType<ConversacionesLeidasCompanion>().toList();
+      if (filas.isNotEmpty) {
+        await _db.batch((batch) {
+          batch.insertAllOnConflictUpdate(_db.conversacionesLeidas, filas);
+        });
+      }
+    } catch (_) {}
+  }
+
   /// ¿Existe un mensaje local entre yo y [otroUsuarioId] más nuevo que
   /// [momento]? Si sí, el borrado de esa conversación ya no está vigente.
   /// Con tolerancia de reloj hacia lo "reciente": un mensaje nuevo cuyo
@@ -1069,6 +1118,20 @@ class SyncService {
         await _db.batch((batch) {
           batch.insertAllOnConflictUpdate(_db.rechazos, filas);
         });
+      }
+      // Fallback: si el trigger del servidor (trg_romper_match_por_rechazo)
+      // no borró el match remoto (p. ej. upsert hizo UPDATE en vez de INSERT),
+      // al sincronizar los rejections aquí borramos los matches locales
+      // correspondientes. userIdResuelto = yo; rechazadoId = el otro.
+      final rechazadosIds = filas.map((f) => f.rechazadoId.value).toSet();
+      if (rechazadosIds.isNotEmpty) {
+        await (_db.delete(_db.matches)
+              ..where((m) =>
+                  (m.usuarioAId.equals(userIdResuelto) &
+                      m.usuarioBId.isIn(rechazadosIds)) |
+                  (m.usuarioAId.isIn(rechazadosIds) &
+                      m.usuarioBId.equals(userIdResuelto))))
+            .go();
       }
       await _purgarRechazosHuerfanos(filas.map((f) => f.uuid.value).toSet());
       EstadoServidorServicio.instancia.marcarExito();
@@ -1324,7 +1387,10 @@ class SyncService {
       return;
     }
 
-    await sb.Supabase.instance.client.from('messages').upsert(body);
+    await sb.Supabase.instance.client
+        .from('messages')
+        .upsert(body)
+        .timeout(const Duration(seconds: 10));
   }
 
   Future<void> _subirMatch(Matche match) async {
@@ -1332,7 +1398,8 @@ class SyncService {
       'id': match.uuid,
       'usuario_a_id': match.usuarioAId,
       'usuario_b_id': match.usuarioBId,
-      'timestamp_match': match.timestampMatch.toUtc().toIso8601String(),
+      // NO incluir timestamp_match: el servidor lo pone con default now()
+      // al crear (trigger try_crear_match). Si ya existe, no lo tocamos.
     };
 
     if (kUsarServidorLocal) {

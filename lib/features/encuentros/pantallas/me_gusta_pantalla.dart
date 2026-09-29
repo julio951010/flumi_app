@@ -206,7 +206,9 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   String _formatoTiempo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
+    // Normalizar a local para comparar con DateTime.now() (local).
+    final localDt = dt.isUtc ? dt.toLocal() : dt;
+    final diff = DateTime.now().difference(localDt);
     if (diff.inMinutes < 60) return 'Hace ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'Hace ${diff.inHours} h';
     if (diff.inDays < 2) return 'Ayer';
@@ -619,6 +621,13 @@ void _abrirMatch(Usuario usuario) {
                       esMatch: esMatch,
                       onChat: () => _abrirChat(usuario),
                       onMeGusta: () => _meGusta(usuario),
+                      onRechazar: esMatch
+                          ? () async {
+                              await _chatRepo.romperMatch(
+                                  usuario.uuid, widget.miId);
+                              if (mounted) Navigator.pop(context);
+                            }
+                          : () => Navigator.pop(context),
                     ),
                   ),
                 );

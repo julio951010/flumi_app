@@ -495,7 +495,12 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
           esMatch: esMatch,
           onChat: () => _abrirChat(usuario),
           onMeGusta: () => _meGusta(usuario),
-          onRechazar: () {
+          onRechazar: esMatch
+        ? () async {
+            await _chatRepo.romperMatch(usuario.uuid, widget.miId);
+            if (mounted) Navigator.pop(context);
+          }
+        : () {
             // El "No me gusta" en Cerca de ti no registra rechazo: el perfil
             // se mantiene en el feed (los rechazos solo aplican al mazo).
             Navigator.pop(context);

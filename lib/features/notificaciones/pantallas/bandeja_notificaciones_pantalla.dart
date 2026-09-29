@@ -207,6 +207,9 @@ class _BandejaNotificacionesPantallaState
             for (final n in items) {
               _leidas.add(n.id);
             }
+            // Al abrir la bandeja por primera vez: marca todo como visto
+            // y notifica al nav para que limpie el badge (campana).
+            widget.onAbierto?.call();
           }
         });
       }
@@ -230,7 +233,8 @@ class _BandejaNotificacionesPantallaState
   }
 
   String _formatoTiempo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
+    final localDt = dt.isUtc ? dt.toLocal() : dt;
+    final diff = DateTime.now().difference(localDt);
     if (diff.inMinutes < 60) return 'Hace ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'Hace ${diff.inHours} h';
     if (diff.inDays < 2) return 'Ayer';
@@ -388,6 +392,10 @@ class _BandejaNotificacionesPantallaState
             esMeGusta: n.tipo == TipoNotificacion.meGusta,
             esMatch: true,
             onChat: () => _abrirChat(usuario),
+            onRechazar: () async {
+              await _chatRepo.romperMatch(usuario.uuid, widget.miId);
+              if (mounted) Navigator.pop(context);
+            },
           ),
         ),
       );
@@ -431,6 +439,12 @@ class _BandejaNotificacionesPantallaState
             esMeGusta: n.tipo == TipoNotificacion.meGusta,
             esMatch: esMatch,
             onChat: () => _abrirChat(usuario),
+            onRechazar: esMatch
+                ? () async {
+                    await _chatRepo.romperMatch(usuario.uuid, widget.miId);
+                    if (mounted) Navigator.pop(context);
+                  }
+                : () => Navigator.pop(context),
           ),
         ),
       );
