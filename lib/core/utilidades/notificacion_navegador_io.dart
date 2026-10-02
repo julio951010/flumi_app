@@ -48,6 +48,7 @@ class _PushMovil {
   /// sea el mismo, o los push del otro seguirán llegando aquí.
   String? _tokenUsuarioId;
   bool _mostrarLocales = false;
+  bool? _permisoConcedido;
   bool _criticoOk = false;
   bool _completoOk = false;
 
@@ -108,13 +109,35 @@ class _PushMovil {
           // Tap en notificación local (foreground) → placeholder, el FCM lleva el payload real.
         },
       );
-      _mostrarLocales = true;
 
-      await fcm.requestPermission(
+      // Permiso runtime POST_NOTIFICATIONS (Android 13+), pedido por la vía
+      // del plugin que realmente muestra la notificación local
+      // (flutter_local_notifications), no solo por firebase_messaging.
+      // Antes solo se pedía vía FCM y nunca se revisaba el resultado de
+      // ninguno de los dos: si Android negaba el permiso (o el diálogo de
+      // FCM no lo cubría en algún dispositivo/versión), la notificación se
+      // descartaba en silencio sin ningún error ni log — parecía "no
+      // funciona" sin ninguna pista de por qué.
+      final permisoLocal = await _locales
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+      debugPrint('[Push] permiso POST_NOTIFICATIONS (flutter_local_notifications): $permisoLocal');
+      _mostrarLocales = true;
+      _permisoConcedido = permisoLocal;
+
+      final ajustesFcm = await fcm.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+      debugPrint('[Push] permiso FCM: ${ajustesFcm.authorizationStatus}');
+      if (permisoLocal == false) {
+        debugPrint(
+            '[Push] AVISO: notificaciones denegadas por el usuario/sistema. '
+            'No se mostrará nada hasta que se habiliten desde Ajustes del '
+            'sistema > Apps > Flumi > Notificaciones.');
+      }
       fcm.setForegroundNotificationPresentationOptions(
         alert: true,
         badge: true,
@@ -284,6 +307,10 @@ final _push = _PushMovil();
 
 /// Pide permiso para notificaciones push (móvil).
 Future<bool> solicitarPermisoNotificaciones() => _push.solicitarPermiso();
+
+/// null = aún no se pidió el permiso; true/false = concedido/denegado.
+/// Útil para avisar en Configuración si quedaron desactivadas.
+bool? get notificacionesPermitidas => _push._permisoConcedido;
 
 /// Muestra una notificación local con el logo de la app.
 Future<void> notificarNavegador(String titulo, String cuerpo) =>

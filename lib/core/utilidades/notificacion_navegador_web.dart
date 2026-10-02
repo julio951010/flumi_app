@@ -58,5 +58,17 @@ Future<void> forzarRegistroPush() async {}
 
 Future<void> eliminarTokenPush() async {}
 
+/// null = aún no se pidió el permiso; true/false = concedido/denegado.
+bool? get notificacionesPermitidas {
+  switch (html.Notification.permission) {
+    case 'granted':
+      return true;
+    case 'denied':
+      return false;
+    default:
+      return null;
+  }
+}
+
 void setNotificacionTapHandler(void Function(dynamic) _) {}
 void setNotifTapHandler(void Function(dynamic) _) {}

@@ -1219,6 +1219,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     if (semillaActividad > _meGustaNoLeidas.value) {
       _meGustaNoLeidas.value = semillaActividad;
     }
+    // Seed sociales (like/visita/match no leídos) para que la campana y
+    // el badge de Perfil no arranquen en 0 tras reiniciar.
+    _socialesNoLeidas.value = semillaActividad;
+    _actualizarBadgeNotificaciones();
   }
 
   @override
