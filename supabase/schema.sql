@@ -205,10 +205,9 @@ create table if not exists public.blocks (
 );
 
 -- ------------------------------------------------------------
--- RECHAZOS (Nope): cada fila es un Nope. Varias filas por par = conteo
--- acumulado (3 Nopes al mismo perfil = exclusión definitiva). El RPC
--- perfiles_cercanos excluye solo los Nopes recientes (< 3 días) o con
--- 3+ filas; los demás quedan disponibles para reciclar en el feed.
+-- RECHAZOS (Nope): cada fila es un Nope. Sin exclusión: ningún perfil
+-- sale del feed por nopes. El rechazo solo ordena (el cliente pone los
+-- rechazados al final) y sirve para el Deshacer y el backstop de matches.
 -- ------------------------------------------------------------
 create table if not exists public.rechazos (
   id           uuid primary key default uuid_generate_v4(),
@@ -224,8 +223,9 @@ alter table public.rechazos drop constraint if exists par_rechazo_unico;
 create index if not exists rechazos_usuario_idx on public.rechazos (usuario_id);
 create index if not exists rechazos_par_idx on public.rechazos (usuario_id, rechazado_id);
 
--- Trigger: si se inserta un rechazo entre dos usuarios que tienen match,
--- se rompe el match automáticamente (server-side, cubre sync offline).
+-- Trigger: si se inserta/actualiza un rechazo entre dos usuarios que
+-- tienen match, se rompe el match automáticamente (server-side, cubre
+-- sync offline y upserts que caen en UPDATE).
 create or replace function public.romper_match_por_rechazo()
 returns trigger
 language plpgsql
@@ -241,7 +241,7 @@ $$;
 
 drop trigger if exists trg_romper_match_por_rechazo on public.rechazos;
 create trigger trg_romper_match_por_rechazo
-  after insert on public.rechazos
+  after insert or update on public.rechazos
   for each row execute function public.romper_match_por_rechazo();
 
 -- ------------------------------------------------------------

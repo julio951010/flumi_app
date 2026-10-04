@@ -333,7 +333,11 @@ class ChatRepositorio {
     for (final entry in porOtro.entries) {
       final otro = entry.key;
       if (ocultas.contains(otro)) continue;
-      final conv = entry.value..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      final conv = entry.value
+        ..sort((a, b) {
+          final c = a.timestamp.compareTo(b.timestamp);
+          return c != 0 ? c : a.uuid.compareTo(b.uuid);
+        });
       final ultimo = conv.last;
       resumenes.add(ResumenConversacion(
         otroUsuarioId: otro,
@@ -396,6 +400,22 @@ class ChatRepositorio {
   Future<void> marcarConversacionLeida(
       String otroUsuarioId, String miId) async {
     final ahora = DateTime.now();
+    // Antídoto contra relojes desincronizados: el corte de lectura debe
+    // cubrir el último mensaje VISTO aunque su timestamp (reloj del otro
+    // dispositivo) sea posterior a mi hora local. Si no, al salir del chat
+    // esos mensajes reaparecen como no leídos sin que llegue nada nuevo.
+    final ultimo = await (_db.select(_db.mensajes)
+          ..where((m) =>
+              (m.emisorId.equals(miId) & m.receptorId.equals(otroUsuarioId)) |
+              (m.emisorId.equals(otroUsuarioId) & m.receptorId.equals(miId)))
+          ..orderBy([(m) => OrderingTerm.desc(m.timestamp)])
+          ..limit(1))
+        .getSingleOrNull();
+    var corte = ahora;
+    final tsUltimo = ultimo?.timestamp;
+    if (tsUltimo != null && tsUltimo.isAfter(corte)) {
+      corte = tsUltimo.add(const Duration(milliseconds: 1));
+    }
     // Primero local (la UI refleja el leído al instante); el remoto se
     // propaga sin bloquear la lectura ni depender de la red.
     await (_db.update(_db.matches)
@@ -405,7 +425,7 @@ class ChatRepositorio {
               (m.usuarioAId.equals(otroUsuarioId) &
                   m.usuarioBId.equals(miId))))
         .write(MatchesCompanion(
-          leidoHasta: Value(ahora),
+          leidoHasta: Value(corte),
         ));
     // Conversaciones like-only (quien me dio like sin match todavía): el
     // leído también se guarda en historial_likes para que el badge de no
@@ -415,17 +435,17 @@ class ChatRepositorio {
     await (_db.update(_db.historialLikes)
           ..where((h) =>
               h.usuarioId.equals(miId) & h.usuarioLikeadoId.equals(otroUsuarioId)))
-        .write(HistorialLikesCompanion(leidoHasta: Value(ahora)));
+        .write(HistorialLikesCompanion(leidoHasta: Value(corte)));
     await (_db.update(_db.historialLikes)
           ..where((h) =>
               h.usuarioId.equals(otroUsuarioId) & h.usuarioLikeadoId.equals(miId)))
-        .write(HistorialLikesCompanion(leidoHasta: Value(ahora)));
+        .write(HistorialLikesCompanion(leidoHasta: Value(corte)));
     // Marcador local de lectura por conversación (fuente de verdad para el
     // badge de no leídos y el estado "visto"). Cubre también las cuentas
     // oficiales, que no tienen fila en matches ni historial_likes.
     await _db.into(_db.conversacionesLeidas).insertOnConflictUpdate(
         ConversacionesLeidasCompanion(
-            otroUsuarioId: Value(otroUsuarioId), leidoHasta: Value(ahora)));
+            otroUsuarioId: Value(otroUsuarioId), leidoHasta: Value(corte)));
     if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
       try {
         // Solo MI columna (leido_hasta_a/b según mi lado): escribir la del
@@ -443,7 +463,7 @@ class ChatRepositorio {
               filaMatch.usuarioAId == miId ? 'leido_hasta_a' : 'leido_hasta_b';
           await Supabase.instance.client
               .from(tablaMatches)
-              .update({columnaMia: ahora.toUtc().toIso8601String()})
+              .update({columnaMia: corte.toUtc().toIso8601String()})
               .or(
                   '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
               .timeout(const Duration(seconds: 5));
@@ -451,7 +471,7 @@ class ChatRepositorio {
         // Like propio (yo di like): RLS permite actualizar mi fila.
         await Supabase.instance.client
             .from('historial_likes')
-            .update({'leido_hasta': ahora.toUtc().toIso8601String()})
+            .update({'leido_hasta': corte.toUtc().toIso8601String()})
             .eq('usuario_id', miId)
             .eq('usuario_likeado_id', otroUsuarioId)
             .timeout(const Duration(seconds: 5));
@@ -460,7 +480,7 @@ class ChatRepositorio {
         // usuario_likeado_id = auth.uid() actualizar leido_hasta.
         await Supabase.instance.client
             .from('historial_likes')
-            .update({'leido_hasta': ahora.toUtc().toIso8601String()})
+            .update({'leido_hasta': corte.toUtc().toIso8601String()})
             .eq('usuario_id', otroUsuarioId)
             .eq('usuario_likeado_id', miId)
             .timeout(const Duration(seconds: 5));
@@ -470,7 +490,7 @@ class ChatRepositorio {
             .upsert({
               'usuario_id': miId,
               'otro_usuario_id': otroUsuarioId,
-              'leido_hasta': ahora.toUtc().toIso8601String(),
+              'leido_hasta': corte.toUtc().toIso8601String(),
             })
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
@@ -547,11 +567,20 @@ class ChatRepositorio {
                           m.receptorId.equals(otroUsuarioId)) |
                       (m.emisorId.equals(otroUsuarioId) &
                           m.receptorId.equals(miId))) &
-                  (corte == null
-                          ? const Constant(true)
-                          : m.timestamp.isBiggerThanValue(
-                              corte.subtract(_toleranciaBorrado))))
-          ..orderBy([(m) => OrderingTerm.asc(m.timestamp)]))
+                   (corte == null
+                           ? const Constant(true)
+                           : m.timestamp.isBiggerThanValue(
+                               corte.subtract(_toleranciaBorrado))))
+          // Desempate por orden de inserción (rowid): el timestamp local
+          // solo tiene precisión de segundos y varios mensajes del mismo
+          // segundo deben salir en el orden en que se enviaron/recibieron,
+          // no en orden arbitrario. El rowid se conserva en los upsert
+          // (ON CONFLICT DO UPDATE), así el orden no cambia con los syncs.
+          ..orderBy([
+            (m) => OrderingTerm.asc(m.timestamp),
+            (m) => OrderingTerm.asc(
+                const CustomExpression<int>('mensajes.rowid')),
+          ]))
         .get();
   }
 
@@ -568,7 +597,12 @@ class ChatRepositorio {
                         ? const Constant(true)
                         : m.timestamp.isBiggerThanValue(
                             corte.subtract(_toleranciaBorrado))))
-            ..orderBy([(m) => OrderingTerm.asc(m.timestamp)]))
+            // Ver obtenerConversacion: desempate por orden de inserción.
+            ..orderBy([
+              (m) => OrderingTerm.asc(m.timestamp),
+              (m) => OrderingTerm.asc(
+                  const CustomExpression<int>('mensajes.rowid')),
+            ]))
           .watch(),
     );
   }
@@ -580,12 +614,29 @@ class ChatRepositorio {
   }) async {
     final uuid = const Uuid().v4();
     debugPrint('[ChatRepo] enviarMensaje: uuid=$uuid emisor=$emisorId receptor=$receptorId');
+    // Reloj local atrasado respecto al otro dispositivo: si el mensaje
+    // llevara una hora anterior al último recibido, se pintaría ANTES que
+    // él. Se fija como mínimo 1ms después del último de la conversación
+    // (el desempate por rowid hace el resto aunque trunque a segundos).
+    final ultimo = await (_db.select(_db.mensajes)
+          ..where((m) =>
+              (m.emisorId.equals(emisorId) &
+                      m.receptorId.equals(receptorId)) |
+                  (m.emisorId.equals(receptorId) &
+                      m.receptorId.equals(emisorId)))
+          ..orderBy([(m) => OrderingTerm.desc(m.timestamp)])
+          ..limit(1))
+        .getSingleOrNull();
+    final ahora = DateTime.now();
+    final ts = ultimo == null || ahora.isAfter(ultimo.timestamp)
+        ? ahora
+        : ultimo.timestamp.add(const Duration(milliseconds: 1));
     await _db.into(_db.mensajes).insert(MensajesCompanion.insert(
       uuid: uuid,
       emisorId: emisorId,
       receptorId: receptorId,
       contenido: contenido,
-      timestamp: DateTime.now(),
+      timestamp: ts,
     ));
     debugPrint('[ChatRepo] mensaje insertado localmente');
     // Escribir yo reactiva la conversación si la había borrado solo para mí.
@@ -625,8 +676,9 @@ class ChatRepositorio {
         .go();
   }
 
-  /// Rompe un match completamente: borra la fila de matches en local y en
-  /// Supabase (no solo la conversación para mí). Se usa cuando el usuario
+  /// Rompe un match completamente: borra la fila de matches, los mensajes
+  /// y MI Me Gusta en local y en Supabase (best-effort con tombstone para
+  /// el like). El perfil vuelve a ser uno normal. Se usa cuando el usuario
   /// da Nope a alguien con quien tenía match.
   Future<void> romperMatch(String otroUsuarioId, String miId) async {
     // 1. Borra match local
@@ -641,7 +693,15 @@ class ChatRepositorio {
               (m.emisorId.equals(miId) & m.receptorId.equals(otroUsuarioId)) |
               (m.emisorId.equals(otroUsuarioId) & m.receptorId.equals(miId))))
         .go();
-    // 3. Sube el borrado a Supabase (best-effort)
+    // 3. Deshace MI Me Gusta (el perfil vuelve a ser normal). Con tombstone
+    // para que el sync no lo resucite; el borrado remoto se reintenta solo.
+    await (_db.delete(_db.historialLikes)
+          ..where((h) =>
+              h.usuarioId.equals(miId) &
+              h.usuarioLikeadoId.equals(otroUsuarioId)))
+        .go();
+    await SyncService.recordarLikeBorrado(miId, otroUsuarioId);
+    // 4. Sube los borrados a Supabase (best-effort)
     if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
       try {
         await Supabase.instance.client
@@ -650,6 +710,15 @@ class ChatRepositorio {
             .or(
                 '(usuario_a_id.eq.$miId,usuario_b_id.eq.$otroUsuarioId),(usuario_a_id.eq.$otroUsuarioId,usuario_b_id.eq.$miId)')
             .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      try {
+        await Supabase.instance.client
+            .from('historial_likes')
+            .delete()
+            .match(
+                {'usuario_id': miId, 'usuario_likeado_id': otroUsuarioId})
+            .timeout(const Duration(seconds: 5));
+        await SyncService.olvidarLikeBorrado(miId, otroUsuarioId);
       } catch (_) {}
     }
   }
@@ -1099,7 +1168,10 @@ class ChatRepositorio {
           ..limit(1))
         .getSingleOrNull();
     final nombre = cuentasOficialesFlumi[emisorId] ?? u?.nombre ?? 'Alguien';
-    await notificarNavegador('Flumi', 'Nuevo mensaje de $nombre: $contenido');
+    final fotos = u?.fotosUrls ?? const <String>[];
+    await notificarNavegador('Flumi', 'Nuevo mensaje de $nombre: $contenido',
+        fotoUrl: fotos.isNotEmpty ? fotos.first : null,
+        categoria: 'mensajes');
   }
 
   Future<void> _aplicarMatchRemoto(Map<String, dynamic> cambio) async {
@@ -1177,8 +1249,9 @@ class ChatRepositorio {
   // Presencia (ultima_conexion)
   // ------------------------------------------------------------
   /// Inicia el latido de presencia: sube `ultima_conexion` y refresca la de
-  /// los contactos cada 30 s, además de recuperar mensajes que el Realtime
-  /// pudiera haber perdido. Idempotente (un solo timer app-wide).
+  /// los contactos cada 30 s, además de recuperar mensajes, matches, likes
+  /// y visitas que el Realtime pudiera haber perdido. Idempotente (un solo
+  /// timer app-wide).
   void iniciarPresencia(String miId) {
     _presenciaMiId = miId;
     if (kUsarServidorLocal) return;
@@ -1207,6 +1280,12 @@ class ChatRepositorio {
       // Recupera mensajes que el Realtime pudo perder (el historial completo
       // se descarga en sincronizarMensajesPendientes).
       unawaited(_sync?.sincronizarMensajesPendientes());
+      // Lo mismo para matches/likes/visitas: con el Realtime caído un match
+      // nuevo quedaba en el servidor sin avisar. Al persistir, los watchers
+      // generan badges + popup local.
+      unawaited(_sync?.sincronizarMatchesPendientes());
+      unawaited(_sync?.sincronizarHistorialLikes(miId));
+      unawaited(_sync?.sincronizarVisitas(miId));
     } finally {
       _presenciaEnCurso = false;
     }

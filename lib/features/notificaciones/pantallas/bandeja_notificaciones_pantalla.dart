@@ -8,10 +8,7 @@ import '../../../core/servicios/preferencias_notificaciones_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
-import '../../chat/chat_repositorio.dart';
-import '../../chat/pantallas/chat_pantalla.dart';
-import '../../encuentros/pantallas/cerca_de_ti_pantalla.dart'
-    show PerfilDetallePage;
+import '../../../widgets_comunes/avatar_usuario.dart';
 
 enum TipoNotificacion { meGusta, visita, match, mensaje }
 
@@ -22,6 +19,9 @@ class BandejaNotificacionesPantalla extends StatefulWidget {
   final HistorialLikesServicio historialLikesServicio;
   final SuscripcionServicio suscripcionServicio;
   final VoidCallback? onAbierto;
+  /// Callback al pulsar "Marcar todas como leídas": limpia sociales Y
+  /// notificaciones de mensajes (para que la campana llegue a 0).
+  final VoidCallback? onMarcarTodas;
 
   /// Navega a la pestaña principal correspondiente (2 = Me Gusta, 3 = Chats)
   /// cuando la notificación no se puede abrir sin plan.
@@ -35,6 +35,7 @@ class BandejaNotificacionesPantalla extends StatefulWidget {
     required this.historialLikesServicio,
     required this.suscripcionServicio,
     this.onAbierto,
+    this.onMarcarTodas,
     this.onNavegarA,
   });
 
@@ -65,24 +66,13 @@ class _NotificacionInbox {
 
 class _BandejaNotificacionesPantallaState
     extends State<BandejaNotificacionesPantalla> {
-  static const _paletaAvatares = [
-    [Color(0xFF6C63FF), Color(0xFFFF6584)],
-    [Color(0xFF4ECDC4), Color(0xFF2ecc71)],
-    [Color(0xFF667eea), Color(0xFF764ba2)],
-    [Color(0xFFf093fb), Color(0xFFf5576c)],
-    [Color(0xFF3AA5ED), Color(0xFF7B2CBF)],
-  ];
-
   final Set<String> _leidas = {};
   List<_NotificacionInbox> _items = [];
   bool _cargando = true;
   bool _marcadoVisto = false;
-  late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
   late final VisitasServicio _visitasServicio = widget.visitasServicio;
   late final HistorialLikesServicio _historialLikesServicio =
       widget.historialLikesServicio;
-  final Set<String> _idsGustados = {};
-  final Set<String> _idsRecibidos = {};
 
   @override
   void initState() {
@@ -176,7 +166,9 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
-      final gustados = await _historialLikesServicio.obtenerHistorial();
+      // Refresca el espejo local (el await sincroniza; el resultado no se
+      // usa aquí: Mis gustas no se listan en la bandeja).
+      await _historialLikesServicio.obtenerHistorial();
       final abiertas =
           await (widget.db.select(widget.db.notificacionesAbiertas))
               .get()
@@ -186,12 +178,6 @@ class _BandejaNotificacionesPantallaState
 
       if (mounted) {
         setState(() {
-          _idsGustados
-            ..clear()
-            ..addAll(gustados.map((h) => h.usuarioLikeadoId));
-          _idsRecibidos
-            ..clear()
-            ..addAll(recibidos.map((h) => h.usuarioId));
           items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
           items.removeWhere((n) => abiertas.contains(n.id));
           // Preferencias de notificaciones: se descartan las categorías
@@ -199,16 +185,24 @@ class _BandejaNotificacionesPantallaState
           final prefs = PreferenciasNotificacionesServicio.instancia;
           items.removeWhere((n) => !_categoriaPermitida(prefs, n.tipo));
           _items = items;
-          // Cargar notificaciones ya leídas desde la BD
+          // Solo lo persistido en BD cuenta como leído: lo nuevo conserva
+          // su estilo de no leída hasta abrirlo o marcarlo.
           _leidas.clear();
           _leidas.addAll(abiertas);
           if (!_marcadoVisto) {
             _marcadoVisto = true;
+            // Al abrir la bandeja: limpia el badge del nav (campana) y
+            // persiste todo lo visible como visto EN SEGUNDO PLANO (a la
+            // próxima ya no vuelven como nuevas). Sobrevive reinicios,
+            // sesiones y recompilas.
             for (final n in items) {
-              _leidas.add(n.id);
+              unawaited(
+                  widget.db.into(widget.db.notificacionesAbiertas).insert(
+                        NotificacionesAbiertasCompanion.insert(
+                            notificacionId: n.id),
+                        mode: InsertMode.insertOrIgnore,
+                      ));
             }
-            // Al abrir la bandeja por primera vez: marca todo como visto
-            // y notifica al nav para que limpie el badge (campana).
             widget.onAbierto?.call();
           }
         });
@@ -302,19 +296,26 @@ class _BandejaNotificacionesPantallaState
     return count;
   }
 
-  /// Marca todas las notificaciones como leídas y las persiste.
+  /// Marca todas las notificaciones como leídas y las persiste (con await:
+  /// sin carrera con un refresh inmediato).
   Future<void> _marcarTodosLeidos() async {
-    setState(() {
-      for (final n in _items) {
-        _leidas.add(n.id);
-      }
-    });
-    for (final n in _items) {
-      unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
-            NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
+    final ids = _items.map((n) => n.id).toList();
+    if (ids.isNotEmpty) {
+      await widget.db.batch((b) {
+        for (final id in ids) {
+          b.insert(
+            widget.db.notificacionesAbiertas,
+            NotificacionesAbiertasCompanion.insert(notificacionId: id),
             mode: InsertMode.insertOrIgnore,
-          ));
+          );
+        }
+      });
     }
+    if (!mounted) return;
+    setState(() {
+      _leidas.addAll(ids);
+    });
+    widget.onMarcarTodas?.call();
     widget.onAbierto?.call();
   }
 
@@ -342,131 +343,67 @@ class _BandejaNotificacionesPantallaState
     if (confirmado == true) await _limpiarTodo();
   }
 
-  /// Elimina todas las notificaciones visibles y persiste el borrado para
-  /// que no reaparezcan al reabrir (igual que al abrir una por una).
+  /// Elimina TODAS las notificaciones visibles y persiste el borrado con
+  /// await (sin carrera): al reabrir no queda nada de lo borrado. Limpia
+  /// también la campana (sociales + mensajes).
   Future<void> _limpiarTodo() async {
     final ids = _items.map((n) => n.id).toList();
     if (ids.isEmpty) return;
+    await widget.db.batch((b) {
+      for (final id in ids) {
+        b.insert(
+          widget.db.notificacionesAbiertas,
+          NotificacionesAbiertasCompanion.insert(notificacionId: id),
+          mode: InsertMode.insertOrIgnore,
+        );
+      }
+    });
+    if (!mounted) return;
     setState(() {
       _items.clear();
       _leidas.addAll(ids);
     });
-    for (final id in ids) {
-      unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
-            NotificacionesAbiertasCompanion.insert(notificacionId: id),
-            mode: InsertMode.insertOrIgnore,
-          ));
-    }
+    widget.onMarcarTodas?.call();
     widget.onAbierto?.call();
   }
 
   /// Abre la notificación: navega al perfil, chat o pestaña correspondiente.
   Future<void> _abrir(_NotificacionInbox n) async {
+    // Persiste primero (con await): al reabrir la bandeja la notificación
+    // ya no aparece, sin carrera con un refresh inmediato.
+    await widget.db.into(widget.db.notificacionesAbiertas).insert(
+          NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
+          mode: InsertMode.insertOrIgnore,
+        );
+    if (!mounted) return;
     setState(() {
       _leidas.add(n.id);
       _items.removeWhere(
           (item) => item.id == n.id && item.timestamp == n.timestamp);
     });
-    // Persiste el borrado: al reabrir la bandeja la notificación ya no aparece.
-    unawaited(widget.db.into(widget.db.notificacionesAbiertas).insert(
-          NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
-          mode: InsertMode.insertOrIgnore,
-        ));
     final usuario = n.usuario;
     if (usuario == null) return;
-    final esMatch = n.tipo == TipoNotificacion.match ||
-        (n.tipo == TipoNotificacion.meGusta &&
-            _idsRecibidos.contains(usuario.uuid) &&
-            _idsGustados.contains(usuario.uuid));
-
-    final conPlan = widget.suscripcionServicio.tienePlus;
-
-    // El match siempre abre los detalles del usuario, tenga o no plan.
-    if (esMatch) {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PerfilDetallePage(
-            usuario: usuario,
-            esMeGusta: n.tipo == TipoNotificacion.meGusta,
-            esMatch: true,
-            onChat: () => _abrirChat(usuario),
-            onRechazar: () async {
-              await _chatRepo.romperMatch(usuario.uuid, widget.miId);
-              if (mounted) Navigator.pop(context);
-            },
-          ),
-        ),
-      );
-      return;
+    // Destinos de tap (igual que push): mensaje→Chats; match→Actividad/
+    // Matches; meGusta→Actividad/Le gustas; visita→Actividad/Visitas.
+    final int tab;
+    final int subindice;
+    switch (n.tipo) {
+      case TipoNotificacion.mensaje:
+        tab = 3;
+        subindice = 0;
+      case TipoNotificacion.match:
+        tab = 2;
+        subindice = 3;
+      case TipoNotificacion.meGusta:
+        tab = 2;
+        subindice = 0;
+      case TipoNotificacion.visita:
+        tab = 2;
+        subindice = 1;
     }
-
-    if (!conPlan) {
-      // Sin plan la notificación lleva a la pestaña exacta: Chats para
-      // mensajes; Me Gusta con la sub-pestaña correspondiente para el resto.
-      final int tab;
-      final int subindice;
-      switch (n.tipo) {
-        case TipoNotificacion.mensaje:
-          tab = 3;
-          subindice = 0;
-        case TipoNotificacion.meGusta:
-          tab = 2;
-          subindice = 0;
-        case TipoNotificacion.visita:
-          tab = 2;
-          subindice = 1;
-        case TipoNotificacion.match:
-          tab = 2;
-          subindice = 3;
-      }
-      if (!mounted) return;
-      Navigator.pop(context);
-      widget.onNavegarA?.call(tab, subindice);
-      return;
-    }
-
-    if (n.tipo == TipoNotificacion.mensaje) {
-      _abrirChat(usuario, esMatch: esMatch, esMeGusta: true);
-    } else {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PerfilDetallePage(
-            usuario: usuario,
-            esMeGusta: n.tipo == TipoNotificacion.meGusta,
-            esMatch: esMatch,
-            onChat: () => _abrirChat(usuario),
-            onRechazar: esMatch
-                ? () async {
-                    await _chatRepo.romperMatch(usuario.uuid, widget.miId);
-                    if (mounted) Navigator.pop(context);
-                  }
-                : () => Navigator.pop(context),
-          ),
-        ),
-      );
-    }
-  }
-
-  void _abrirChat(Usuario usuario, {bool? esMatch, bool? esMeGusta}) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ChatPantalla(
-          repositorio: _chatRepo,
-          otroUsuarioId: usuario.uuid,
-          miId: widget.miId,
-          nombreOtro: usuario.nombre,
-          online: ChatRepositorio.estaEnLinea(usuario),
-          esMeGusta: esMeGusta ?? false,
-          esMatch: esMatch ?? false,
-          suscripcionServicio: widget.suscripcionServicio,
-        ),
-      ),
-    );
+    if (!mounted) return;
+    Navigator.pop(context);
+    widget.onNavegarA?.call(tab, subindice);
   }
 
   @override
@@ -525,9 +462,9 @@ class _BandejaNotificacionesPantallaState
   Widget _fila(_NotificacionInbox n, bool leida, Color primario) {
     final usuario = n.usuario;
     final nombre = n.nombre;
-    final inicial = nombre.isNotEmpty ? nombre[0].toUpperCase() : '?';
-    final gradiente =
-        _paletaAvatares[nombre.hashCode.abs() % _paletaAvatares.length];
+    final fotoUrl = (usuario != null && usuario.fotosUrls.isNotEmpty)
+        ? usuario.fotosUrls.first
+        : null;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -544,26 +481,10 @@ class _BandejaNotificacionesPantallaState
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: gradiente,
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        inicial,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                    AvatarUsuario(
+                      nombre: nombre,
+                      fotoUrl: fotoUrl,
+                      size: 52,
                     ),
                     Positioned(
                       right: -2,
@@ -633,18 +554,8 @@ class _BandejaNotificacionesPantallaState
                         fontWeight:
                             leida ? FontWeight.normal : FontWeight.w600,
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    if (!leida)
-                      Container(
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          color: primario,
-                          shape: BoxShape.circle,
-                        ),
                       ),
-                  ],
+                    ],
                 ),
               ],
             ),

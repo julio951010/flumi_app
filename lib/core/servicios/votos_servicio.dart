@@ -13,17 +13,19 @@ import 'connectivity_service.dart';
 import 'estado_servidor_servicio.dart';
 import 'sync_service.dart';
 
-/// Registro de perfiles rechazados (Nope) con reciclaje:
+/// Registro de perfiles rechazados (Nope):
 ///
-/// * Nuevos primero; si no quedan suficientes nuevos entra el reciclaje:
-///   - quedan algunos nuevos (< [minimoNuevosParaReciclar]): solo Nopes
-///     con [edadMinimaReciclaje] cumplida (los más antiguos primero);
-///   - no queda ningún perfil nuevo: cualquier Nope vuelve sin esperar,
-///     reciente o viejo.
-/// * No hay exclusión permanente: todo Nope puede reciclarse con el tiempo.
+/// * El Nope avanza al siguiente perfil y el rechazado va al FINAL de la
+///   cola (más antiguos primero): vuelve a salir al agotarse los nuevos.
+/// * Sin exclusión: ningún perfil sale del feed por nopes, no importa
+///   cuántos tenga. El rechazo solo ordena (nuevos primero).
+/// * El Nope además deshace MI Me Gusta si lo había (ver
+///   [HistorialLikesServicio.eliminarLike]) y rompe el match si lo había.
 ///
 /// Cada Nope inserta una fila en la tabla [Rechazos] (múltiples filas por
-/// par = conteo acumulado), persistida y sincronizada con Supabase.
+/// par = conteo acumulado), persistida y sincronizada con Supabase. Sirve
+/// para el orden de reencolado, el Deshacer y el backstop en servidor
+/// (trigger que rompe el match al subir el rechazo).
 class VotosServicio extends ChangeNotifier {
   /// Edad mínima de un Nope para poder reciclarlo. En cero: los Nopes
   /// se reciclan sin espera (cuando el mazo los necesita).
@@ -157,26 +159,20 @@ class VotosServicio extends ChangeNotifier {
     return ids;
   }
 
-  /// Compone el mazo con la regla de reciclaje según la cantidad de perfiles
-  /// nuevos que queden:
-  ///
-  /// * >= [minimoNuevosParaReciclar] nuevos → solo nuevos.
-  /// * 1..[minimoNuevosParaReciclar)-1 nuevos → nuevos + reciclables por
-  ///   tiempo ([esReciclable]), más antiguos primero.
-  /// * 0 nuevos → todos los rechazados, sin esperar la edad mínima,
-  ///   más antiguos primero.
+  /// Compone el mazo con la regla de reciclaje: nuevos primero y SIEMPRE
+  /// al final los rechazados (más antiguos primero), sin importar cuántos
+  /// nopes tengan ni cuántos nuevos queden. No hay exclusión permanente:
+  /// ningún perfil sale del feed por nopes.
   List<Usuario> componerDeck(List<Usuario> entrada) {
     final disponibles = List.of(entrada);
     final nuevos =
         disponibles.where((u) => !_rechazos.containsKey(u.uuid)).toList();
-    if (nuevos.length >= minimoNuevosParaReciclar) return nuevos;
-    final reciclables = disponibles
+    final rechazados = disponibles
         .where((u) => _rechazos.containsKey(u.uuid))
         .toList()
       ..sort(
           (a, b) => ultimoRechazo(a.uuid)!.compareTo(ultimoRechazo(b.uuid)!));
-    if (nuevos.isEmpty) return reciclables;
-    return [...nuevos, ...reciclables.where((u) => esReciclable(u.uuid))];
+    return [...nuevos, ...rechazados];
   }
 
   Future<void> registrarRechazo(String uuid) async {

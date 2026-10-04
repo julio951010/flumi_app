@@ -208,15 +208,6 @@ class _MatchPantallaState extends State<MatchPantalla>
                   textAlign: TextAlign.center,
                 ),
               ),
-              if (widget.usuario.verificadoStatus) ...[
-                const SizedBox(width: 6),
-                const Icon(
-                  Icons.verified,
-                  color: Colors.white,
-                  size: 26,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
-                ),
-              ],
             ],
           ),
           const SizedBox(height: 6),

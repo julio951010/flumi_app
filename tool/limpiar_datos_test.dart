@@ -26,6 +26,11 @@ const _tablas = [
   'bloqueos',
   'reportes',
   'usos_diarios',
+  // Estado de visto/leído: sin esto, al reprobar con las mismas cuentas los
+  // badges y "Nuevo" no salen (todo figura como ya visto).
+  'notificaciones_abiertas',
+  'conversaciones_leidas',
+  'conversaciones_eliminadas',
 ];
 
 String _rutaPorDefecto() {

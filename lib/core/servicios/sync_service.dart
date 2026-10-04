@@ -8,8 +8,10 @@ import '../../config/env.dart';
 import '../constantes/constantes.dart';
 import '../base_datos_local/database.dart';
 import '../utilidades/perfil_mapeo.dart';
+import '../utilidades/notificacion_navegador.dart';
 import 'connectivity_service.dart';
 import 'estado_servidor_servicio.dart';
+import 'preferencias_notificaciones_servicio.dart';
 
 class SyncService {
   SyncService(this._db);
@@ -354,9 +356,18 @@ class SyncService {
           .get())
           .map((m) => m.uuid)
           .toSet();
+      // Para no re-notificar: lo que ya estaba en local (Realtime lo avisó
+      // en su momento) no vuelve a sonar al bajar por sync.
+      final existentesLocales = (await (_db.select(_db.mensajes)
+            ..where((m) => m.emisorId.equals(userId) | m.receptorId.equals(userId)))
+          .get())
+          .map((m) => m.uuid)
+          .toSet();
       final borrados = await _leerMensajesBorrados();
 
       final companiones = <MensajesCompanion>[];
+      // Entrantes genuinamente nuevos (para el popup por remitente).
+      final nuevosEntrantes = <MapEntry<String, DateTime>>[];
       // Cortes de borrado: el historial anterior al borrado de una
       // conversación no se vuelve a descargar del servidor, aunque la
       // conversación esté reactivada (solo renace con los mensajes nuevos).
@@ -393,6 +404,12 @@ class SyncService {
           pendienteDeSincronizar: const Value(false),
           estadoEnvio: Value(emisor == userId ? 'enviado' : 'entregado'),
         ));
+        final receptor = f['receptor_id'] as String? ?? '';
+        if (receptor == userId &&
+            emisor != userId &&
+            !existentesLocales.contains(id)) {
+          nuevosEntrantes.add(MapEntry(emisor, timestamp));
+        }
       }
       if (companiones.isNotEmpty) {
         await _db.batch(
@@ -434,7 +451,75 @@ class SyncService {
               ..where((m) => m.uuid.isIn(aBorrar)))
             .go();
       }
+      // Popup por remitente de lo recuperado offline → online. La campana NO
+      // se toca (mensajes van al badge de Chats, que se actualiza por watch).
+      await _notificarMensajesDescargados(userId, nuevosEntrantes);
     } catch (_) {}
+  }
+
+  /// Avisos locales por mensajes recuperados del sync (offline → online):
+  /// un popup por remitente ("Tienes un nuevo mensaje de X"). Con los mismos
+  /// guards que el Realtime (bloqueo, ya-leído, prefs, borrado ya filtrado).
+  Future<void> _notificarMensajesDescargados(
+      String userId, List<MapEntry<String, DateTime>> nuevos) async {
+    if (nuevos.isEmpty) return;
+    final porEmisor = <String, DateTime>{};
+    for (final e in nuevos) {
+      final prev = porEmisor[e.key];
+      if (prev == null || e.value.isAfter(prev)) porEmisor[e.key] = e.value;
+    }
+    final prefs = PreferenciasNotificacionesServicio.instancia;
+    await prefs.asegurarCargada();
+    if (!prefs.mensajes) return;
+    for (final entry in porEmisor.entries) {
+      final emisor = entry.key;
+      try {
+        final bloqueado = await (_db.select(_db.bloqueos)
+              ..where((b) =>
+                  b.bloqueadorId.equals(userId) & b.bloqueadoId.equals(emisor))
+              ..limit(1))
+            .getSingleOrNull();
+        if (bloqueado != null) continue;
+        if (await _mensajeDescargadoYaLeido(userId, emisor, entry.value)) {
+          continue;
+        }
+        final u = await (_db.select(_db.usuarios)
+              ..where((u) => u.uuid.equals(emisor))
+              ..limit(1))
+            .getSingleOrNull();
+        final nombre = cuentasOficialesFlumi[emisor] ?? u?.nombre ?? 'Alguien';
+        final fotos = u?.fotosUrls ?? const <String>[];
+        await notificarNavegador('Flumi', 'Tienes un nuevo mensaje de $nombre',
+            fotoUrl: fotos.isNotEmpty ? fotos.first : null,
+            categoria: 'mensajes');
+      } catch (_) {}
+    }
+  }
+
+  /// True si el mensaje ya estaba leído (corte de lectura posterior): no es
+  /// novedad aunque venga del sync.
+  Future<bool> _mensajeDescargadoYaLeido(
+      String userId, String emisor, DateTime timestamp) async {
+    final match = await (_db.select(_db.matches)
+          ..where((m) =>
+              (m.usuarioAId.equals(userId) & m.usuarioBId.equals(emisor)) |
+              (m.usuarioAId.equals(emisor) & m.usuarioBId.equals(userId)))
+          ..limit(1))
+        .getSingleOrNull();
+    final leidoMatch = match?.leidoHasta;
+    if (leidoMatch != null && !timestamp.isAfter(leidoMatch)) return true;
+    final like = await (_db.select(_db.historialLikes)
+          ..where((h) =>
+              h.usuarioId.equals(emisor) & h.usuarioLikeadoId.equals(userId))
+          ..limit(1))
+        .getSingleOrNull();
+    final leidoLike = like?.leidoHasta;
+    if (leidoLike != null && !timestamp.isAfter(leidoLike)) return true;
+    final conv = await (_db.select(_db.conversacionesLeidas)
+          ..where((c) => c.otroUsuarioId.equals(emisor))
+          ..limit(1))
+        .getSingleOrNull();
+    return conv != null && !timestamp.isAfter(conv.leidoHasta);
   }
 
   // ------------------------------------------------------------
@@ -778,6 +863,50 @@ class SyncService {
     return remoto;
   }
 
+  // ------------------------------------------------------------
+  // Likes deshechos por Nope (tombstones)
+  // ------------------------------------------------------------
+  /// Pares "usuarioId|likeadoId" de Me Gustas que el usuario deshizo con un
+  /// Nope: la descarga los salta para que un unlike offline no resucite al
+  /// sincronizar, y el borrado remoto se reintenta en cada sync. Al volver
+  /// a dar Me Gusta se olvida el tombstone (ver registrarLike).
+  static const _prefsLikesBorrados = 'flumi_likes_borrados';
+  static const _maxLikesBorrados = 500;
+
+  static Future<void> recordarLikeBorrado(
+      String usuarioId, String likeadoId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final clave = '$usuarioId|$likeadoId';
+      final lista = prefs.getStringList(_prefsLikesBorrados) ?? <String>[];
+      lista.remove(clave);
+      lista.add(clave);
+      while (lista.length > _maxLikesBorrados) {
+        lista.removeAt(0);
+      }
+      await prefs.setStringList(_prefsLikesBorrados, lista);
+    } catch (_) {}
+  }
+
+  static Future<Set<String>> _leerLikesBorrados() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getStringList(_prefsLikesBorrados)?.toSet() ?? <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  static Future<void> olvidarLikeBorrado(
+      String usuarioId, String likeadoId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_prefsLikesBorrados) ?? <String>[];
+      lista.remove('$usuarioId|$likeadoId');
+      await prefs.setStringList(_prefsLikesBorrados, lista);
+    } catch (_) {}
+  }
+
   Future<void> sincronizarHistorialLikes([String? userId]) async {
     final userIdResuelto = userId ?? _obtenerUserId();
     if (userIdResuelto == null) return;
@@ -796,6 +925,25 @@ class SyncService {
                   pendienteDeSincronizar: Value(false)));
         } catch (_) {}
       }
+
+      // Reintenta borrados de likes pendientes (unlike offline) antes de
+      // descargar, para no resucitarlos.
+      for (final clave in (await _leerLikesBorrados()).toList()) {
+        final partes = clave.split('|');
+        if (partes.length != 2) continue;
+        if (kUsarServidorLocal) continue;
+        if (!ConnectivityService.instancia.hayConexion) break;
+        try {
+          await sb.Supabase.instance.client
+              .from('historial_likes')
+              .delete()
+              .match(
+                  {'usuario_id': partes[0], 'usuario_likeado_id': partes[1]})
+              .timeout(const Duration(seconds: 6));
+          await olvidarLikeBorrado(partes[0], partes[1]);
+        } catch (_) {}
+      }
+      final likesBorrados = await _leerLikesBorrados();
 
       if (kUsarServidorLocal) {
         final token = await LocalTokenStore.obtenerToken();
@@ -827,6 +975,13 @@ class SyncService {
                 : leidosLocales[f['id']]),
             esSuper: Value((f['es_super'] as bool?) ?? false),
           );
+        }).where((c) {
+          // Salta Me Gustas deshechos por Nope (tombstone): solo filas
+          // propias, las recibidas no se tocan.
+          final esPropia = c.usuarioId.value == userIdResuelto;
+          return !esPropia ||
+              !likesBorrados
+                  .contains('${c.usuarioId.value}|${c.usuarioLikeadoId.value}');
         }).toList();
         if (filas.isNotEmpty) {
           await _db.batch((batch) {
@@ -864,6 +1019,11 @@ class SyncService {
               : leidosLocales[f['id']]),
           esSuper: Value((f['es_super'] as bool?) ?? false),
         );
+      }).where((c) {
+        final esPropia = c.usuarioId.value == userIdResuelto;
+        return !esPropia ||
+            !likesBorrados
+                .contains('${c.usuarioId.value}|${c.usuarioLikeadoId.value}');
       }).toList();
       if (filas.isNotEmpty) {
         await _db.batch((batch) {

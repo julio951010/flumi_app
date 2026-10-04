@@ -57,6 +57,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
   Set<String> _idsSuperRecibidos = {};
+  /// Matches según la tabla matches (fuente canónica del servidor).
+  Set<String> _idsMatchTabla = {};
   bool _cargando = true;
   Timer? _recargaTimer;
 
@@ -113,6 +115,18 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   @override
+  void didUpdateWidget(MeGustaPantalla old) {
+    super.didUpdateWidget(old);
+    // Las notificaciones eligen sub-pestaña (match→Matches, etc.): el
+    // TabController solo respeta initialIndex al crear, hay que animarlo.
+    if (widget.indiceInicial != old.indiceInicial &&
+        widget.indiceInicial >= 0 &&
+        widget.indiceInicial < _tabCtrl.length) {
+      _tabCtrl.animateTo(widget.indiceInicial);
+    }
+  }
+
+  @override
   void dispose() {
     widget.contador.removeListener(_alCambiarContador);
     _recargaTimer?.cancel();
@@ -145,9 +159,29 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       _idsSuperRecibidos =
           recibidos.where((h) => h.esSuper).map((h) => h.usuarioId).toSet();
 
-      // Los matches viven solo en su pestaña: se quitan de Le gustas,
-      // Visitas y Me gustan para no repetirlos.
-      final idsMatch = _idsGustados.intersection(_idsRecibidos);
+      // Los matches salen de la tabla matches (fuente canónica del
+      // servidor, igual que popup, badges y bandeja): se quitan de Le
+      // gustas, Visitas y Me gustan para no repetirlos. Así romperMatch
+      // los saca de aquí de inmediato y el timestamp es el del servidor
+      // (igual en ambos dispositivos).
+      final matchesRows = await (widget.db.select(widget.db.matches)
+            ..where((m) =>
+                m.usuarioAId.equals(widget.miId) |
+                m.usuarioBId.equals(widget.miId)))
+          .get();
+      final idsMatch = {
+        for (final m in matchesRows)
+          m.usuarioAId == widget.miId ? m.usuarioBId : m.usuarioAId,
+      };
+      _idsMatchTabla = idsMatch;
+      final timestampMatch = {
+        for (final m in matchesRows)
+          (m.usuarioAId == widget.miId ? m.usuarioBId : m.usuarioAId):
+              m.timestampMatch,
+      };
+      // Enriquece también contrapartes de match sin perfil local (la fila
+      // matches puede llegar antes que la fila del like recíproco).
+      await _enriquecerPerfiles(mapa, idsMatch.toList());
 
       _likes = recibidos
           .map((h) => _ItemInteraccion(
@@ -170,15 +204,13 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
               i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
           .toList();
 
-      final timestampsRecibidos = {
-        for (final h in recibidos) h.usuarioId: h.timestamp
-      };
       _matches = idsMatch
           .map((id) => _ItemInteraccion(
               usuario: mapa[id],
-              timestamp: timestampsRecibidos[id] ?? DateTime.now()))
+              timestamp: timestampMatch[id] ?? DateTime.now()))
           .where((i) => i.usuario != null)
-          .toList();
+          .toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
       // Chips = interacciones no vistas. Se cuentan los ids crudos (sin
       // match) aunque el perfil aún no esté descargado: el chip cuenta
       // interacciones, la grilla solo muestra perfiles conocidos.
@@ -295,7 +327,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
                         CategoriaMeGusta.visitas),
                     _grilla(_misLikes, true, CategoriaMeGusta.misLikes,
                         bloquearDetallesSinPlan: true),
-                    _grilla(_matches, true, CategoriaMeGusta.matches),
+                    _grilla(_matches, true, CategoriaMeGusta.matches,
+                        forzarEsMatch: true),
                   ],
                 ),
         ),
@@ -432,8 +465,9 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
 
   void _abrirChat(Usuario usuario) {
     if (!widget.suscripcionServicio.tienePremium &&
-        !(_idsGustados.contains(usuario.uuid) &&
-            _idsRecibidos.contains(usuario.uuid))) {
+        !(_idsMatchTabla.contains(usuario.uuid) ||
+            (_idsGustados.contains(usuario.uuid) &&
+                _idsRecibidos.contains(usuario.uuid)))) {
       mostrarBloqueoSuscripcion(
         context,
         funcionalidad: 'Enviar mensaje',
@@ -548,6 +582,7 @@ void _abrirMatch(Usuario usuario) {
       bool puedeVer,
       CategoriaMeGusta categoria, {
       bool bloquearDetallesSinPlan = false,
+      bool forzarEsMatch = false,
     }) {
     if (items.isEmpty) {
       return Center(
@@ -578,7 +613,8 @@ void _abrirMatch(Usuario usuario) {
             final usuario = item.usuario!;
             final tiempo = _formatoTiempo(item.timestamp);
             final gustado = _idsGustados.contains(usuario.uuid);
-            final esMatch = gustado && _idsRecibidos.contains(usuario.uuid);
+            final esMatch = forzarEsMatch ||
+                (gustado && _idsRecibidos.contains(usuario.uuid));
             final esNuevo = widget.contador.esNuevo(categoria, usuario.uuid);
             final esSuperRecibido = _idsSuperRecibidos.contains(usuario.uuid);
 
@@ -897,6 +933,26 @@ class ContadorMeGusta extends ChangeNotifier {
         break;
     }
     notifyListeners();
+  }
+
+  /// Olvida que se vio la tarjeta de [categoria]/[usuarioId] (ej. llega un
+  /// NUEVO match con la misma persona): vuelve a contar como nuevo en chips
+  /// y campana. Persiste el olvido borrando la clave de vistos.
+  void olvidarVista(CategoriaMeGusta categoria, String usuarioId) {
+    final clave = '${categoria.name}|$usuarioId';
+    if (!_vistos.remove(clave)) return;
+    final db = _db;
+    if (db != null) {
+      unawaited(() async {
+        try {
+          await (db.delete(db.notificacionesAbiertas)
+                ..where((t) =>
+                    t.notificacionId.equals('$_prefijoPersistencia$clave')))
+              .go();
+        } catch (_) {}
+      }());
+    }
+    _recalcularConteos();
   }
 
   void marcarTodasVistas() {

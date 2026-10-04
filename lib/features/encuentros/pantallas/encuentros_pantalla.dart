@@ -121,6 +121,10 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             superlikeAction: () => _superlike(u),
             nopeAction: () {
               widget.votosServicio.registrarRechazo(u.uuid);
+              // El Nope deshace MI Me Gusta si lo había: el perfil vuelve a
+              // ser uno normal (local + remoto con tombstone).
+              unawaited(_historialLikes.eliminarLike(u.uuid));
+              _idsGustados.remove(u.uuid);
               // Nopear a alguien que ya te dio Me Gusta = match perdido.
               unawaited(_avisarMatchPerdido(u));
             },
@@ -181,8 +185,13 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     }
     if (leDioLike) {
       _idsRecibidos.add(usuario.uuid);
-      // Rompe el match completamente (local + remoto)
-      unawaited(widget.chatRepo.romperMatch(usuario.uuid, widget.miId));
+      // Solo rompe si hay match de verdad: sin match no se tocan los
+      // mensajes (el Nope a un admirador no borra la conversación).
+      if (matchLocal != null) {
+        // Rompe el match completamente (match + mensajes + mi Me Gusta,
+        // local + remoto con tombstone).
+        unawaited(widget.chatRepo.romperMatch(usuario.uuid, widget.miId));
+      }
       // El aviso se muestra como tooltip sobre el botón Deshacer (header).
       widget.onMatchPerdido?.call();
     }
@@ -844,12 +853,15 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       engine!.currentItem!.nope();
       return;
     }
-    // Fallback: la carta no es la actual. Registra el rechazo y la quita de
-    // la lista visible sin tocar _idsGustados (ese set es solo para likes).
+    // Fallback: la carta no es la actual. Registra el rechazo, deshace mi
+    // Me Gusta si lo había y la quita de la lista visible sin tocar
+    // _idsGustados (ese set es solo para likes).
     widget.votosServicio.registrarRechazo(usuario.uuid);
+    unawaited(_historialLikes.eliminarLike(usuario.uuid));
     unawaited(_avisarMatchPerdido(usuario));
     if (!mounted) return;
     setState(() {
+      _idsGustados.remove(usuario.uuid);
       _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
       if (!_agotado && _filtrados.length < 5 && _hayMasRemoto) {
         unawaited(_cargarMas());

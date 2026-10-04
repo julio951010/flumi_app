@@ -3,8 +3,9 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
@@ -25,12 +26,20 @@ Future<void> _fcmBackgroundHandler(RemoteMessage mensaje) async {
   }
 }
 
-/// Callback global para taps en notificaciones (foreground/background/cerrada).
+/// Callback global para taps en notificaciones FCM (background/cerrada).
 /// La app lo asigna al arrancar para navegar a la bandeja/chat correspondiente.
 typedef NotifTapCallback = void Function(RemoteMessage mensaje);
 NotifTapCallback? _onTap;
 
 void setNotifTapHandler(NotifTapCallback cb) => _onTap = cb;
+
+/// Callback para taps en notificaciones LOCALES (foreground). Lleva la
+/// categoría ('mensajes', 'matches', 'les_gusto', 'visitas', ...).
+typedef NotifLocalTapCallback = void Function(String categoria);
+NotifLocalTapCallback? _onLocalTap;
+
+void setNotificacionLocalTapHandler(NotifLocalTapCallback cb) =>
+    _onLocalTap = cb;
 
 /// Implementación móvil (Android/iOS): push real con Firebase Cloud
 /// Messaging. Las notificaciones que llegan con la app en primer plano se
@@ -106,7 +115,13 @@ class _PushMovil {
       await _locales.initialize(
         init,
         onDidReceiveNotificationResponse: (resp) {
-          // Tap en notificación local (foreground) → placeholder, el FCM lleva el payload real.
+          // Tap en notificación local (foreground): navega por categoría.
+          final cat = resp.payload;
+          if (cat != null && cat.isNotEmpty) {
+            try {
+              _onLocalTap?.call(cat);
+            } catch (_) {}
+          }
         },
       );
 
@@ -181,8 +196,11 @@ class _PushMovil {
     final cuerpo = mensaje.notification?.body ??
         mensaje.data['cuerpo'] ??
         '';
-    debugPrint('[Push] onMessage foreground: categoria=${mensaje.data['categoria']} titulo=$titulo');
-    return notificarNavegador(titulo, cuerpo);
+    final categoria =
+        (mensaje.data['categoria'] ?? mensaje.data['category'] ?? 'bandeja')
+            .toString();
+    debugPrint('[Push] onMessage foreground: categoria=$categoria titulo=$titulo');
+    return notificarNavegador(titulo, cuerpo, categoria: categoria);
   }
 
   Future<String?> _obtenerToken() async {
@@ -263,16 +281,15 @@ class _PushMovil {
     _tokenUsuarioId = null;
   }
 
-  /// Notificación local inmediata con el logo de la app (primer plano).
-  Future<void> mostrarLocal(String titulo, String cuerpo) async {
+  /// Notificación local inmediata: solo cuerpo en una sola línea con el
+  /// avatar circular del remitente (MessagingStyle lo dibuja redondo a la
+  /// altura del cuerpo). Sin título y sin logo grande. Sin foto se muestra
+  /// el cuerpo solo con el icono de la app.
+  Future<void> mostrarLocal(String titulo, String cuerpo,
+      {String? fotoUrl, String? categoria}) async {
     if (!_mostrarLocales) return;
     try {
-      ByteArrayAndroidBitmap? logo;
-      try {
-        final datos = await rootBundle.load('assets/images/flumi_logo.png');
-        logo = ByteArrayAndroidBitmap(datos.buffer.asUint8List());
-      } catch (_) {}
-      const canalBase = AndroidNotificationDetails(
+      AndroidNotificationDetails android = const AndroidNotificationDetails(
         'flumi',
         'Flumi',
         channelDescription: 'Mensajes, Me Gustas, visitas y matches',
@@ -280,26 +297,58 @@ class _PushMovil {
         priority: Priority.high,
         icon: 'ic_notif',
       );
+      final avatar = await _descargarAvatar(fotoUrl);
+      if (avatar != null) {
+        final persona = Person(icon: avatar);
+        android = AndroidNotificationDetails(
+          'flumi',
+          'Flumi',
+          channelDescription: 'Mensajes, Me Gustas, visitas y matches',
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: 'ic_notif',
+          styleInformation: MessagingStyleInformation(
+            persona,
+            messages: [Message(cuerpo, DateTime.now(), persona)],
+            groupConversation: false,
+          ),
+        );
+      }
       await _locales.show(
         DateTime.now().millisecondsSinceEpoch % 100000,
-        titulo,
+        null,
         cuerpo,
-        NotificationDetails(
-          android: logo == null
-              ? canalBase
-              : AndroidNotificationDetails(
-                  'flumi',
-                  'Flumi',
-                  channelDescription: 'Mensajes, Me Gustas, visitas y matches',
-                  importance: Importance.high,
-                  priority: Priority.high,
-                  icon: 'ic_notif',
-                  styleInformation: BigPictureStyleInformation(logo,
-                      contentTitle: titulo, summaryText: cuerpo),
-                ),
-        ),
+        NotificationDetails(android: android),
+        payload: categoria,
       );
     } catch (_) {}
+  }
+
+  /// Descarga la foto y la recorta cuadrada (el sistema la dibuja circular).
+  /// Solo URLs http(s); cualquier fallo devuelve null (aviso simple).
+  Future<ByteArrayAndroidIcon?> _descargarAvatar(String? url) async {
+    try {
+      if (url == null || !url.startsWith('http')) return null;
+      final res =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      final decoded = img.decodeImage(res.bodyBytes);
+      if (decoded == null) return null;
+      final lado = decoded.width < decoded.height
+          ? decoded.width
+          : decoded.height;
+      final recortada = img.copyCrop(
+        decoded,
+        x: (decoded.width - lado) ~/ 2,
+        y: (decoded.height - lado) ~/ 2,
+        width: lado,
+        height: lado,
+      );
+      return ByteArrayAndroidIcon(
+          Uint8List.fromList(img.encodePng(recortada)));
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -312,9 +361,11 @@ Future<bool> solicitarPermisoNotificaciones() => _push.solicitarPermiso();
 /// Útil para avisar en Configuración si quedaron desactivadas.
 bool? get notificacionesPermitidas => _push._permisoConcedido;
 
-/// Muestra una notificación local con el logo de la app.
-Future<void> notificarNavegador(String titulo, String cuerpo) =>
-    _push.mostrarLocal(titulo, cuerpo);
+/// Muestra una notificación local con el avatar del remitente si se pasa.
+/// `categoria` viaja en el payload para navegar al tocarla.
+Future<void> notificarNavegador(String titulo, String cuerpo,
+        {String? fotoUrl, String? categoria}) =>
+    _push.mostrarLocal(titulo, cuerpo, fotoUrl: fotoUrl, categoria: categoria);
 
 /// Fase crítica de push (Firebase + handler de background). Llamar con
 /// `await` antes de `runApp()`.

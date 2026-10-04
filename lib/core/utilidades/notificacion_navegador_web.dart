@@ -34,18 +34,37 @@ Future<String?> _obtenerIconoUrl() async {
 /// Muestra una notificación del navegador siempre que el permiso esté
 /// concedido, esté o no la pestaña enfocada: el usuario quiere enterarse de
 /// likes, visitas y matches aunque esté mirando otra pestaña del navegador.
-Future<void> notificarNavegador(String titulo, String cuerpo) async {
+/// Sin título: solo cuerpo con la foto del remitente (o el logo de la app).
+/// El tap navega a la sección (ver routing en main).
+Future<void> notificarNavegador(String titulo, String cuerpo,
+    {String? fotoUrl, String? categoria}) async {
   try {
     if (html.Notification.permission != 'granted') return;
-    final icono = await _obtenerIconoUrl();
-    html.Notification(
-      titulo,
+    final icono = (fotoUrl != null && fotoUrl.startsWith('http'))
+        ? fotoUrl
+        : await _obtenerIconoUrl();
+    final notif = html.Notification(
+      '',
       body: cuerpo,
       tag: 'flumi-notif',
       icon: icono,
     );
+    final cat = categoria;
+    if (cat != null && cat.isNotEmpty) {
+      notif.onClick.listen((_) {
+        try {
+          _onLocalTap?.call(cat);
+        } catch (_) {}
+      });
+    }
   } catch (_) {}
 }
+
+/// Tap en notificaciones locales web → navega por categoría.
+void Function(String)? _onLocalTap;
+
+void setNotificacionLocalTapHandler(void Function(String) cb) =>
+    _onLocalTap = cb;
 
 /// No aplica en web: el navegador gestiona sus propias notificaciones.
 Future<void> inicializarPushCritico() async {}

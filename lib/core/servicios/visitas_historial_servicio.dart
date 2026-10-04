@@ -173,6 +173,10 @@ class HistorialLikesServicio with ChangeNotifier {
     final usuarioId = await _obtenerUsuarioPropioId(_db);
     if (usuarioId == null || usuarioId == usuarioLikeadoId) return null;
 
+    // Si este par tenía tombstone de unlike (Nope anterior), se olvida: el
+    // nuevo Me Gusta vuelve a valer y debe sincronizarse/descargarse.
+    await SyncService.olvidarLikeBorrado(usuarioId, usuarioLikeadoId);
+
     if (ConnectivityService.instancia.hayConexion && !kUsarServidorLocal) {
       try {
         final resultado = await sb.Supabase.instance.client.rpc(
@@ -202,6 +206,35 @@ class HistorialLikesServicio with ChangeNotifier {
     await _db.into(_db.historialLikes).insert(comp);
     unawaited(_sync.sincronizarHistorialLikes());
     return null;
+  }
+
+  /// Deshace MI Me Gusta a [usuarioLikeadoId] (Nope a perfil gustado o match
+  /// roto): el perfil vuelve a ser uno normal. Borra local + remoto
+  /// (best-effort con tombstone: el sync reintenta el borrado y la descarga
+  /// lo salta para que no resucite). Idempotente.
+  Future<void> eliminarLike(String usuarioLikeadoId) async {
+    final usuarioId = await _obtenerUsuarioPropioId(_db);
+    if (usuarioId == null || usuarioId == usuarioLikeadoId) return;
+    await (_db.delete(_db.historialLikes)
+          ..where((h) =>
+              h.usuarioId.equals(usuarioId) &
+              h.usuarioLikeadoId.equals(usuarioLikeadoId)))
+        .go();
+    await SyncService.recordarLikeBorrado(usuarioId, usuarioLikeadoId);
+    if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
+      try {
+        await sb.Supabase.instance.client
+            .from('historial_likes')
+            .delete()
+            .match(
+                {'usuario_id': usuarioId, 'usuario_likeado_id': usuarioLikeadoId})
+            .timeout(const Duration(seconds: 6));
+        await SyncService.olvidarLikeBorrado(usuarioId, usuarioLikeadoId);
+      } catch (e) {
+        EstadoServidorServicio.instancia.marcarFallo(e);
+      }
+    }
+    notifyListeners();
   }
 
   Future<List<HistorialLike>> obtenerHistorial({int? limite, bool sincronizar = true}) async {

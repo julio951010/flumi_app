@@ -128,6 +128,10 @@ void main() async {
     // Usa el navigator global para cambiar de pestaña.
     navPrincipalKey.currentState?.manejarTapPush(cat);
   });
+  // Handler de tap en notificaciones LOCALES (foreground) → mismo routing.
+  setNotificacionLocalTapHandler((cat) {
+    navPrincipalKey.currentState?.navegarACategoria(cat);
+  });
   ConnectivityService.instancia.stream.listen((estado) {
     if (estado == EstadoConexion.conectado) {
       syncService.sincronizarTodo(alIniciarSesion: true);
@@ -797,12 +801,19 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   final ValueNotifier<int> _undoSignal = ValueNotifier<int>(0);
   final GlobalKey _undoBotonKey = GlobalKey();
   final LayerLink _undoLink = LayerLink();
-  final ValueNotifier<int> _notificacionesNoLeidas = ValueNotifier<int>(0);
-  /// Notificaciones NUEVAS sin leer (sociales + mensajes): alimenta la
-  /// campana del encabezado de Perfil y su indicador en el nav inferior.
+  /// Notificaciones sociales NUEVAS sin leer (likes, visitas, matches) +
+  /// notificaciones de mensajes nuevos (una por conversación con no leídos,
+  /// NO por mensaje): alimenta la campana del encabezado de Perfil y su
+  /// indicador en el nav inferior. El badge de Chats lleva solo chats.
   final ValueNotifier<int> _notificacionesPendientes = ValueNotifier<int>(0);
   final ValueNotifier<int> _socialesNoLeidas = ValueNotifier<int>(0);
-  int _chatsNoLeidos = 0;
+  /// Notificaciones de mensajes: réplica de la bandeja (1 ítem por
+  /// remitente no leído y no descartado). Para la campana y Perfil. El
+  /// badge de Chats usa su propio contador (_chatsNoLeidosConversaciones).
+  final ValueNotifier<int> _mensajesNoLeidas = ValueNotifier<int>(0);
+  /// Conversaciones con mensajes sin leer. Notifier propio para que el punto
+  /// de la pestaña Chats se repinte solo (cuenta conversaciones, no mensajes).
+  final ValueNotifier<int> _chatsNoLeidosConversaciones = ValueNotifier<int>(0);
   final ValueNotifier<int> _meGustaNoLeidas = ValueNotifier<int>(0);
   final ContadorMeGusta _contadorMeGusta = ContadorMeGusta(db: database);
   StreamSubscription? _convSub;
@@ -842,17 +853,22 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     unawaited(UbicacionAutoServicio.actualizarAlAbrirApp(
         db: database, repo: perfilRepositorio));
     final miId = authService.usuarioActual!['id'] as String;
-    _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) {
-      // Cuenta CONVERSACIONES con mensajes sin leer (notificaciones), no
-      // total de mensajes sin leer.
-      _chatsNoLeidos =
+    _convSub = chatRepositorio.observarConversaciones(miId).listen((resumenes) async {
+      // Chats: conversaciones con no leídos. Campana: solo notificaciones
+      // (ítems de bandeja no descartados); puede ser menor que Chats.
+      _chatsNoLeidosConversaciones.value =
           resumenes.where((r) => r.noLeidos > 0).length;
+      _mensajesNoLeidas.value =
+          await _contarNotificacionesMensajes(miId, resumenes);
       _actualizarBadgeNotificaciones();
     });
     // Fase 5: los badges de Me Gusta se derivan de la BD local (dedupe por
     // uuid), así funcionan aunque el socket de Realtime de este navegador se
     // caiga o tarde: lo que llegue por sync también incrementa.
     _observarInteraccionesLocales(miId);
+    // El corazón del nav refleja los chips del contador (vistos persistidos):
+    // entrar a la pestaña ya no lo borra; baja al ver tarjetas o marcar vistas.
+    _contadorMeGusta.addListener(_sincronizarCorazonNav);
     _iniciarRealtimeInteracciones(miId);
     // Fase 4: chat en vivo app-wide (mensajes y matches); la conexión de
     // cada pantalla de chat es redundante e idempotente (upsert por uuid).
@@ -894,14 +910,20 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     }
   }
 
-  /// Campana de Notificaciones = solo lo social (likes, visitas, matches).
-  /// Los mensajes NO cuentan aquí; tienen su propio badge en la pestaña Chats.
+  /// Campana de Notificaciones = sociales + notificaciones de mensajes
+  /// (una por conversación con no leídos, NO por mensaje). El badge de Chats
+  /// usa _chatsNoLeidosConversaciones (conversaciones con no leídos).
   void _actualizarBadgeNotificaciones() {
-    _notificacionesPendientes.value = _socialesNoLeidas.value;
-    final total = _chatsNoLeidos + _socialesNoLeidas.value;
-    // Mientras se está viendo la pestaña Chats el indicador del nav queda
-    // apagado; el chip de la campana (bandeja social) se mantiene.
-    _notificacionesNoLeidas.value = _indice == 3 ? 0 : total;
+    _notificacionesPendientes.value =
+        _socialesNoLeidas.value + _mensajesNoLeidas.value;
+  }
+
+  /// Espejo del corazón: suma de chips no vistos del contador (única fuente).
+  void _sincronizarCorazonNav() {
+    final total = _contadorMeGusta.likesNoLeidos +
+        _contadorMeGusta.visitasNoLeidas +
+        _contadorMeGusta.matchesNoLeidos;
+    if (_meGustaNoLeidas.value != total) _meGustaNoLeidas.value = total;
   }
 
   /// Registra una notificación social nueva: sube la campana de
@@ -917,6 +939,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
           ..limit(1))
         .getSingleOrNull();
     final nombre = u?.nombre ?? 'Un usuario';
+    final fotos = u?.fotosUrls ?? const <String>[];
+    final fotoUrl = fotos.isNotEmpty ? fotos.first : null;
     final texto = switch (tipo) {
       'like' => '$nombre le dio Me Gusta a tu perfil',
       'visita' => '$nombre visit\u00f3 tu perfil',
@@ -932,7 +956,13 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       _ => prefs.matches,
     };
     if (!permitido) return;
-    await notificarNavegador('Flumi', texto);
+    final categoria = switch (tipo) {
+      'like' => 'les_gusto',
+      'visita' => 'visitas',
+      _ => 'matches',
+    };
+    await notificarNavegador('Flumi', texto,
+        fotoUrl: fotoUrl, categoria: categoria);
   }
 
   /// Observa la BD local (alimentada por Realtime y por sync) e incrementa
@@ -955,9 +985,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       }
       for (final h in recibidos) {
         if (_badgeLikes.add(h.uuid)) {
-          // Si ya es match su tarjeta vive en Matches: no cuenta aquí.
-          if (_idsMatch.contains(h.usuarioId)) continue;
-          _meGustaNoLeidas.value++;
+          // El corazón lo deriva el listener desde el contador; aquí solo
+          // campana (si la tarjeta sigue sin ver) + popup.
           _contadorMeGusta.incrementarLikes();
           unawaited(_registrarNotificacionSocial('like', h.usuarioId));
         }
@@ -982,9 +1011,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       }
       for (final v in recibidas) {
         if (_badgeVisitas.add(v.uuid)) {
-          // Visitas de un match no cuentan: su tarjeta está en Matches.
-          if (_idsMatch.contains(v.visitanteId)) continue;
-          _meGustaNoLeidas.value++;
+          // Igual que likes: corazón vía listener, aquí campana + popup.
           _contadorMeGusta.incrementarVisitas();
           unawaited(_registrarNotificacionSocial('visita', v.visitanteId));
         }
@@ -1002,9 +1029,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       }
       for (final m in mios) {
         if (_badgeMatches.add(m.uuid)) {
-          _meGustaNoLeidas.value++;
-          _contadorMeGusta.incrementarMatches(1);
           final otroId = m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId;
+          // Un match NUEVO (aunque sea con la misma persona) rearma lo
+          // visto: vuelve a contar como nuevo en chips y campana.
+          _contadorMeGusta.olvidarVista(CategoriaMeGusta.matches, otroId);
+          _contadorMeGusta.incrementarMatches(1);
           _idsMatch.add(otroId);
           _contadorMeGusta.marcarMatch(otroId);
           unawaited(_registrarNotificacionSocial('match', otroId));
@@ -1178,6 +1207,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       await syncService.sincronizarHistorialLikes(miId);
       await syncService.sincronizarVisitas(miId);
     } catch (_) {}
+    // Recalcular badges DESPUÉS del sync: el sync puede haber traído nuevas
+    // visitas/likes que el seed anterior no vio (race condition watch/sync).
+    await _recalcularBadgesSociales(miId);
     final gustados = await historialLikesServicio.obtenerHistorial(limite: 1000);
     // Quita del conteo de Me gustan los que ya son match (viven en su pestaña).
     final matchesLocales = await database.select(database.matches).get();
@@ -1208,22 +1240,120 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
           ? _contadorMeGusta.matchesNoLeidos
           : 0,
     );
-    // El punto del nav (corazón) también debe reflejar lo pendiente al
-    // arrancar: antes solo contaba eventos en vivo post-arranque y tras un
-    // reinicio quedaba en 0 aunque hubiera registros sin ver. Máximo para no
-    // pisar incrementos en vivo llegados durante los awaits de arriba. Los
-    // "Me gustan" enviados no cuentan (son acción propia, no novedad).
-    final semillaActividad = _contadorMeGusta.likesNoLeidos +
-        _contadorMeGusta.visitasNoLeidas +
-        _contadorMeGusta.matchesNoLeidos;
-    if (semillaActividad > _meGustaNoLeidas.value) {
-      _meGustaNoLeidas.value = semillaActividad;
-    }
-    // Seed sociales (like/visita/match no leídos) para que la campana y
-    // el badge de Perfil no arranquen en 0 tras reiniciar.
-    _socialesNoLeidas.value = semillaActividad;
+    // _recalcularBadgesSociales ya calculó y puso los badges correctos.
+    // Seed de chats + notificaciones de mensajes (réplica bandeja).
+    final resumenes = await chatRepositorio.observarConversaciones(miId).first;
+    _chatsNoLeidosConversaciones.value =
+        resumenes.where((r) => r.noLeidos > 0).length;
+    _mensajesNoLeidas.value =
+        await _contarNotificacionesMensajes(miId, resumenes);
     _actualizarBadgeNotificaciones();
   }
+
+  /// Notificaciones de mensajes para la campana: réplica exacta de la
+  /// bandeja (1 ítem por remitente con el último mensaje). Cuenta solo no
+  /// leídos cuyo ítem no fue descartado/visto en bandeja. Por eso una
+  /// conversación sin leer puede NO contar en campana (su notificación ya
+  /// se descartó), aunque siga contando en Chats.
+  Future<int> _contarNotificacionesMensajes(
+      String miId, List<ResumenConversacion> resumenes) async {
+    await PreferenciasNotificacionesServicio.instancia.asegurarCargada();
+    if (!PreferenciasNotificacionesServicio.instancia.mensajes) return 0;
+    final abiertas =
+        (await database.select(database.notificacionesAbiertas).get())
+            .map((n) => n.notificacionId)
+            .toSet();
+    var n = 0;
+    for (final r in resumenes) {
+      if (r.noLeidos <= 0) continue;
+      if (abiertas.contains(
+          'mensaje:${r.otroUsuarioId}:${r.timestamp.millisecondsSinceEpoch}')) {
+        continue;
+      }
+      n++;
+    }
+    return n;
+  }
+
+/// Recalcula `_socialesNoLeidas` y `_meGustaNoLeidas` consultando
+  /// directamente la BD local (likes/visitas/matches no leídos). Útil
+  /// tras el sync inicial o al volver a primer plano, para evitar que
+  /// el seed inicial se calcule antes de que el sync traiga los datos.
+  Future<void> _recalcularBadgesSociales(String miId) async {
+    // 1) Chats: conversaciones con no leídos. Campana: notificaciones de
+    // la bandeja (réplica exacta del conteo de ítems).
+    final resumenes = await chatRepositorio.observarConversaciones(miId).first;
+    _chatsNoLeidosConversaciones.value =
+        resumenes.where((r) => r.noLeidos > 0).length;
+    _mensajesNoLeidas.value =
+        await _contarNotificacionesMensajes(miId, resumenes);
+
+    // 2) Sociales: consultar BD directamente contando solo NO LEÍDOS.
+    // Fuentes de "visto" (cualquiera vale): leído en BD (leidoHasta),
+    // tarjeta vista en Actividades (mgvn|*) y notificación abierta en
+    // bandeja (ids sintéticos 'tipo:uuid:ms'). Sin esto, un reinicio
+    // resucita notificaciones ya vistas.
+    final abiertas = (await database.select(database.notificacionesAbiertas).get())
+        .map((n) => n.notificacionId)
+        .toSet();
+    bool vistaEnBandeja(String idSintetico) => abiertas.contains(idSintetico);
+final visitas = await (database.select(database.visitas)
+          ..where((v) => v.visitadoId.equals(miId)))
+        .get();
+
+    // Likes no leídos.
+    final likes = await (database.select(database.historialLikes)
+          ..where((h) => h.usuarioLikeadoId.equals(miId)))
+        .get();
+
+    // Matches no leídos.
+    final matches = await (database.select(database.matches)
+          ..where((m) =>
+              m.usuarioAId.equals(miId) | m.usuarioBId.equals(miId)))
+        .get();
+
+    // 3) Actualizar campana (solo sociales NO vistas). El corazón lo
+    // deriva el listener desde el contador.
+    // Visitas: UNA por visitante (la más reciente), igual que la bandeja
+    // (obtenerVisitas dedupica por persona). Si no, N visitas de la misma
+    // persona cuentan N aunque la bandeja muestre 1.
+    final visitasPorVisitante = <String, Visita>{};
+    for (final v in visitas) {
+      final prev = visitasPorVisitante[v.visitanteId];
+      if (prev == null || prev.timestamp.isBefore(v.timestamp)) {
+        visitasPorVisitante[v.visitanteId] = v;
+      }
+    }
+    final visitasContadas = visitasPorVisitante.values
+            .where((v) =>
+                !vistaEnBandeja(
+                    'visita:${v.visitanteId}:${v.timestamp.millisecondsSinceEpoch}') &&
+                _contadorMeGusta.esNuevo(
+                    CategoriaMeGusta.visitas, v.visitanteId))
+            .toList();
+    final likesContados = likes
+            .where((l) =>
+                l.leidoHasta == null &&
+                !vistaEnBandeja(
+                    'meGusta:${l.usuarioId}:${l.timestamp.millisecondsSinceEpoch}') &&
+                _contadorMeGusta.esNuevo(
+                    CategoriaMeGusta.likes, l.usuarioId))
+            .toList();
+    final matchesContados = matches.where((m) {
+          final otro = m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId;
+          return (m.usuarioAId == miId ? m.leidoHasta : m.leidoHastaOtro) ==
+                  null &&
+              !vistaEnBandeja(
+                  'match:$otro:${m.timestampMatch.millisecondsSinceEpoch}') &&
+              _contadorMeGusta.esNuevo(CategoriaMeGusta.matches, otro);
+        }).toList();
+    final total = visitasContadas.length +
+        likesContados.length +
+        matchesContados.length;
+
+    _socialesNoLeidas.value = total;
+    _actualizarBadgeNotificaciones();
+}
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -1234,6 +1364,12 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       // Reclama el token FCM para la cuenta actual (por si cambió de usuario
       // sin reiniciar o el token quedó registrado para otra sesión).
       unawaited(forzarRegistroPush());
+      // Recalcular badges por si el sync trajo novedades mientras la app
+      // estaba en background (visitas, likes, matches).
+      final miId = authService.usuarioActual?['id'] as String?;
+      if (miId != null) {
+        unawaited(_recalcularBadgesSociales(miId));
+      }
     }
   }
 
@@ -1258,10 +1394,12 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _matchesSub?.cancel();
     _matchesSub = null;
     _undoSignal.dispose();
+    _contadorMeGusta.removeListener(_sincronizarCorazonNav);
     _contadorMeGusta.dispose();
     _meGustaNoLeidas.dispose();
     _socialesNoLeidas.dispose();
-    _notificacionesNoLeidas.dispose();
+    _mensajesNoLeidas.dispose();
+    _chatsNoLeidosConversaciones.dispose();
     _notificacionesPendientes.dispose();
     EstadoServidorServicio.instancia.removeListener(_alCambiarEstadoServidor);
     super.dispose();
@@ -1269,13 +1407,21 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
 
   /// Llamado desde el handler de tap en push (app en 2do plano / cerrada).
   void manejarTapPush(String categoria) {
+    navegarACategoria(categoria);
+  }
+
+  /// Routing único de taps en notificaciones (push FCM y locales):
+  /// mensaj* → Chats; match → Actividad/Matches; les_gusto → Actividad/Le
+  /// gustas; visita → Actividad/Visitas; resto → bandeja.
+  /// Sub-pestañas de MeGusta: 0=Le gustas, 1=Visitas, 2=Me gustan, 3=Matches.
+  void navegarACategoria(String categoria) {
     final c = categoria.toLowerCase();
     if (c.contains('mensaj')) {
       setState(() => _indice = 3); // Chats
     } else if (c.contains('match')) {
       setState(() {
         _indice = 2;
-        _indiceMeGusta = 1; // pestaña Matches dentro de Me Gusta
+        _indiceMeGusta = 3; // Matches
       });
     } else if (c.contains('gusto') || c.contains('les_gusto') || c.contains('lesgusto')) {
       setState(() {
@@ -1283,7 +1429,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
         _indiceMeGusta = 0; // Le gustas
       });
     } else if (c.contains('visita')) {
-      _abrirBandejaNotificaciones();
+      setState(() {
+        _indice = 2;
+        _indiceMeGusta = 1; // Visitas
+      });
     } else {
       // Fallback: bandeja general
       _abrirBandejaNotificaciones();
@@ -1305,12 +1454,12 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
           historialLikesServicio: historialLikesServicio,
           suscripcionServicio: suscripcionServicio,
           onAbierto: _marcarBandejaVista,
+          onMarcarTodas: _marcarTodasNotificaciones,
           onNavegarA: (tab, subindice) {
             setState(() {
               _indice = tab;
               _indiceMeGusta = subindice;
             });
-            if (tab == 2) _meGustaNoLeidas.value = 0;
             _actualizarBadgeNotificaciones();
           },
         ),
@@ -1326,12 +1475,20 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     _actualizarBadgeNotificaciones();
   }
 
+  void _marcarTodasNotificaciones() {
+    // "Marcar todas" en la bandeja: limpia sociales Y notificaciones de
+    // mensajes (para que la campana llegue a 0). Los chats reales NO se
+    // tocan; su badge se actualiza solo al abrir cada conversación.
+    _socialesNoLeidas.value = 0;
+    _mensajesNoLeidas.value = 0;
+    _actualizarBadgeNotificaciones();
+  }
+
   void _marcarNotificacionesVistas() {
-    // Solo limpia lo de la página Me gusta (chips del contador e indicador
-    // del corazón en el bottom nav). Los chats y la bandeja de
+    // Solo limpia lo de la página Me gusta (chips del contador; el corazón
+    // del nav se apaga solo vía listener). Los chats y la bandeja de
     // notificaciones se limpian al abrirlos.
     _contadorMeGusta.marcarTodasVistas();
-    _meGustaNoLeidas.value = 0;
   }
 
   /// Campana de notificaciones con contador (bandeja social). Vive en el
@@ -1636,7 +1793,7 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
         valueListenable: _meGustaNoLeidas,
         builder: (context, meGustaCount, _) {
           return ValueListenableBuilder<int>(
-            valueListenable: _notificacionesNoLeidas,
+            valueListenable: _chatsNoLeidosConversaciones,
             builder: (context, chatsCount, _) {
               return ValueListenableBuilder<int>(
                 valueListenable: _notificacionesPendientes,
@@ -1645,27 +1802,22 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
                     indiceActual: _indice,
                     onCambio: (i) {
                       setState(() => _indice = i);
-                      // Al abrir cada página se limpia su indicador del nav:
-                      // Me Gusta → corazón; Chats → mensajes no leídos.
+                      // Entrar a una pestaña no borra nada por sí solo (el
+                      // corazón lo deriva el listener; Chats se oculta
+                      // mientras se está en ella, ver abajo). Solo se
+                      // reordena la sub-pestaña inicial de Actividad.
                       if (i == 2) {
                         // Desde el nav se vuelve a la sub-pestaña inicial; la
                         // sub-pestaña exacta solo la eligen las notificaciones.
                         _indiceMeGusta = 0;
-                        _meGustaNoLeidas.value = 0;
-                      }
-                      if (i == 3) {
-                        // Solo se apaga el indicador del nav: los chats NO se
-                        // marcan leídos (eso ocurre al abrir la conversación).
-                        _notificacionesNoLeidas.value = 0;
-                      } else {
-                        _actualizarBadgeNotificaciones();
                       }
                     },
-                    meGustaNoLeidas: meGustaCount,
-                    chatsNoLeidos: chatsCount,
-                    // Igual que Chats: el punto de Perfil avisa de bandeja
-                    // sin leer (sociales + mensajes) y se apaga al abrir
-                    // la bandeja (o la pestaña).
+                    meGustaNoLeidas: _indice == 2 ? 0 : meGustaCount,
+                    // Solo chats: conversaciones con no leídos. Se oculta mientras
+                    // se está en la pestaña Chats.
+                    chatsNoLeidos: _indice == 3 ? 0 : chatsCount,
+                    // El punto de Perfil avisa de notificaciones nuevas
+                    // (sociales + mensajes) y baja al abrir la bandeja.
                     perfilNoLeidas:
                         _indice == 4 ? 0 : socialesCount,
                   );
