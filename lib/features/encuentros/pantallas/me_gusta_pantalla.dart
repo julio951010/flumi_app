@@ -8,6 +8,8 @@ import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/connectivity_service.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
+import '../../../core/servicios/votos_servicio.dart';
+import '../../../core/servicios/sync_service.dart';
 import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
@@ -26,6 +28,8 @@ class MeGustaPantalla extends StatefulWidget {
   final SuscripcionServicio suscripcionServicio;
   final VisitasServicio visitasServicio;
   final HistorialLikesServicio historialLikesServicio;
+  final VotosServicio votosServicio;
+  final SyncService syncService;
   final int indiceInicial;
 
   const MeGustaPantalla({
@@ -36,6 +40,8 @@ class MeGustaPantalla extends StatefulWidget {
     required this.suscripcionServicio,
     required this.visitasServicio,
     required this.historialLikesServicio,
+    required this.votosServicio,
+    required this.syncService,
     this.indiceInicial = 0,
   });
 
@@ -50,6 +56,8 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
   late final VisitasServicio _visitasServicio = widget.visitasServicio;
   late final HistorialLikesServicio _historialLikesServicio = widget.historialLikesServicio;
+  late final VotosServicio _votosServicio = widget.votosServicio;
+  late final SyncService _syncService = widget.syncService;
   List<_ItemInteraccion> _likes = [];
   List<_ItemInteraccion> _visitas = [];
   List<_ItemInteraccion> _misLikes = [];
@@ -99,6 +107,10 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
     // cuando el contador cambia (sin tocar nada).
     widget.contador.addListener(_alCambiarContador);
     _cargar();
+    // Forzar sync de matches al entrar en Actividad para que los matches
+    // creados en el servidor (likes recíprocos) bajen al cliente y la
+    // pestaña Matches los muestre correctamente.
+    unawaited(_syncService.sincronizarMatchesPendientes());
   }
 
   void _alCambiarContador() {

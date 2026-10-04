@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fondo del splash nativo (antes del primer frame de Flutter).
+         Celeste de marca (FlumiTema.colorPrimario). -->
+    <color name="launch_background_color">#FF3AA5ED</color>
+</resources>

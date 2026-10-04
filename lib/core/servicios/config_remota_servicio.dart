@@ -66,17 +66,25 @@ class ConfigRemotaServicio extends ChangeNotifier {
     final client = _client;
     if (client == null) return;
     try {
-      final res = await client.from('app_config').select('clave,valor').inFilter(
-        'clave',
-        const [
-          'suscripciones_habilitadas',
-          'mantenimiento',
-          'mantenimiento_mensaje',
-          'version_minima_build',
-          'actualizar_url',
-          'actualizar_mensaje',
-        ],
-      );
+      final res = await client
+          .from('app_config')
+          .select('clave,valor')
+          .inFilter(
+            'clave',
+            const [
+              'suscripciones_habilitadas',
+              'mantenimiento',
+              'mantenimiento_mensaje',
+              'version_minima_build',
+              'actualizar_url',
+              'actualizar_mensaje',
+            ],
+          )
+          // Esta llamada se espera directo en el arranque (main() -> Grupo 2
+          // -> inicializar()). Sin tope, una red lenta/caída podía dejar la
+          // pantalla en negro indefinidamente antes de runApp(). Con tope,
+          // el catch de abajo absorbe el timeout y sigue con los defaults.
+          .timeout(const Duration(seconds: 5));
       var cambio = false;
       for (final fila in (res as List).cast<Map<String, dynamic>>()) {
         final clave = (fila['clave'] as String?) ?? '';

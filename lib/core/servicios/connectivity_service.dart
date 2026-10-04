@@ -17,8 +17,13 @@ class ConnectivityService {
   EstadoConexion get estadoActual => _estadoActual;
 
   StreamSubscription<List<ConnectivityResult>>? _suscripcion;
+  bool _iniciado = false;
 
   Future<void> iniciar() async {
+    // Idempotente: el arranque puede llamarlo dos veces si el Grupo 1
+    // falla a medias (timeout) y se reintenta por fuera.
+    if (_iniciado) return;
+    _iniciado = true;
     if (kIsWeb) {
       // En web asumimos conexión salvo que detectemos lo contrario.
       // connectivity_plus en web puede reportar 'none' inicialmente.

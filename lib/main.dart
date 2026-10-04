@@ -65,6 +65,12 @@ late final VotosServicio votosServicio;
 late final PerfilRepositorio perfilRepositorio;
 late final ChatRepositorio chatRepositorio;
 
+/// true si Supabase terminó de inicializar en este arranque. Con red/DNS
+/// caídos el init puede colgar: se entra en modo offline con caché local y
+/// los accesos a Supabase.instance fallan controlados (try/catch) hasta
+/// que haya sesión válida.
+bool supabaseListo = false;
+
 /// Navigator global para abrir pantallas desde handlers de push en background.
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 /// Key del scaffold principal para cambiar de pestaña al tocar una push.
@@ -82,15 +88,27 @@ void main() async {
 
   // Grupo 1 (paralelo): inicializaciones independientes entre sí. Antes iban
   // en serie y cada handshake sumaba segundos con pantalla en negro.
-  await Future.wait([
-    if (!kUsarServidorLocal)
-      Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey),
-    ConnectivityService.instancia.iniciar(),
-    // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
-    // de runApp(). Sin este registro, los push con la app cerrada no
-    // despiertan. Nunca lanza (sin google-services.json queda deshabilitado).
-    inicializarPushCritico(),
-  ]);
+  // Supabase.initialize lleva tope: con DNS/red caídos colgaba el arranque
+  // en negro; si falla se sigue offline (supabaseListo=false) y todo lo
+  // posterior que lo necesite usa caché local o espera reconexión.
+  try {
+    await Future.wait([
+      if (!kUsarServidorLocal)
+        Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey),
+      ConnectivityService.instancia.iniciar(),
+      // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
+      // de runApp(). Sin este registro, los push con la app cerrada no
+      // despiertan. Nunca lanza (sin google-services.json queda deshabilitado).
+      inicializarPushCritico(),
+    ]).timeout(const Duration(seconds: 10));
+    if (!kUsarServidorLocal) supabaseListo = true;
+  } on TimeoutException {
+    debugPrint('[Arranque] Supabase.initialize con tope: sigo offline');
+  } catch (e) {
+    debugPrint('[Arranque] Supabase.initialize falló: $e — sigo offline');
+  }
+  // Connectivity debe quedar iniciado aunque el grupo falle.
+  unawaited(ConnectivityService.instancia.iniciar());
 
   authService = AuthService();
   AuthService.initDb(database);
@@ -100,7 +118,7 @@ void main() async {
   await Future.wait([
     authService.inicializar(),
     () async {
-      if (!kUsarServidorLocal) {
+      if (!kUsarServidorLocal && supabaseListo) {
         configRemota = ConfigRemotaServicio(Supabase.instance.client);
         await configRemota.inicializar();
       } else {
@@ -569,8 +587,23 @@ bool _esperandoSincronizacion = false;
       if (mounted) {
         setState(() => _perfilCompletado = propio?.perfilCompletado ?? false);
       }
-    } catch (_) {
-      if (mounted) setState(() => _perfilCompletado = false);
+    } catch (e) {
+      // Antes, cualquier falla/timeout de red acá (muy común con la
+      // conectividad del público objetivo) asumía "perfil incompleto" a
+      // ciegas y hacía reaparecer el onboarding/cuestionario a usuarios
+      // que ya lo habían completado hace tiempo — la red lenta no borra el
+      // caché local, así que se consulta ese caché (sin red) antes de
+      // rendirse. Solo un usuario genuinamente nuevo (sin fila local
+      // propia aún) cae de verdad en "incompleto".
+      debugPrint('[Main] asegurarPerfilPropio falló/timeout: $e — uso caché local');
+      try {
+        final propio = await perfilRepositorio.obtenerPerfilPropio();
+        if (mounted) {
+          setState(() => _perfilCompletado = propio?.perfilCompletado ?? false);
+        }
+      } catch (_) {
+        if (mounted) setState(() => _perfilCompletado = false);
+      }
     }
   }
 
@@ -1654,6 +1687,8 @@ final visitas = await (database.select(database.visitas)
         suscripcionServicio: suscripcionServicio,
         visitasServicio: visitasServicio,
         historialLikesServicio: historialLikesServicio,
+        votosServicio: votosServicio,
+        syncService: syncService,
         indiceInicial: _indiceMeGusta,
       ),
       ChatsPantalla(

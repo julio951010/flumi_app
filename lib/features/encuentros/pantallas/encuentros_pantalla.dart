@@ -219,6 +219,11 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       }
       _filtrados = sinRechazados;
       _agotado = false;
+      // Guard: si el mazo quedó muy pequeño (< 3 perfiles) y hay más
+      // remoto, recargamos para no quedarnos con 1-2 tarjetas en el engine.
+      if (_filtrados.length < 3 && _hayMasRemoto && !_cargandoMas) {
+        unawaited(_cargarMas());
+      }
       _motorBase = _filtrados.indexWhere((u) => u.uuid == referente?.uuid);
       if (_motorBase < 0) _motorBase = 0;
       _progresoFoto = 0;
@@ -425,8 +430,21 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         _motorBase = indiceInsercion;
         _progresoFoto = 0;
         _motorId++;
-        _matchEngine?.removeListener(_alCambiarCarta);
-        _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
+        // Si insertamos en índice 0 (estamos en el "origen"), forzamos
+        // un reset total del engine para evitar desincronía al volver a
+        // pasar tarjetas tras múltiples deshacer.
+        if (indiceInsercion == 0) {
+          _motorBase = 0;
+          _consumidasEnMotor = 0;
+          _motorId++;
+          _matchEngine?.removeListener(_alCambiarCarta);
+          _matchEngine = _crearMotor(_filtrados);
+        } else {
+          _matchEngine?.removeListener(_alCambiarCarta);
+          _matchEngine = _crearMotor(_filtrados.sublist(_motorBase));
+        }
+        _progresoFoto = 0;
+        _motorId++;
       });
       if (mounted) {
         NotificacionServicio.exito(context, 'Deshecho.');
@@ -521,23 +539,23 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         : (f.distanciaKm > 0
             ? (f.distanciaKm * 1000).round()
             : feedRadioMetrosDefault);
-    return widget.syncService.consultarFeedRemoto(
-      lat: _miLat,
-      lon: _miLon,
-      radioMetros: radioMetros,
-      filtros: SyncService.filtrosARpcJson(
-        generos: f.generos,
-        edadMin: f.edadRango.start,
-        edadMax: f.edadRango.end,
-        enLineaAhora: f.enLineaAhora,
-        perfilesVerificados: f.perfilesVerificados,
-        ciudad: f.ubicacion,
-        ampliar: conAmpliacion,
-        orden: 'score',
-      ),
-      desde: _offset,
-      cuantos: _loteTamanio,
-    );
+return widget.syncService.consultarFeedRemoto(
+        lat: _miLat,
+        lon: _miLon,
+        radioMetros: radioMetros,
+        filtros: SyncService.filtrosARpcJson(
+          generos: f.generos,
+          edadMin: f.edadRango.start,
+          edadMax: f.edadRango.end,
+          enLineaAhora: f.enLineaAhora,
+          perfilesVerificados: f.perfilesVerificados,
+          ciudad: f.ubicacion,
+          ampliar: conAmpliacion,
+          orden: 'distancia', // Era 'score': filtraba perfiles sin score calculado
+        ),
+        desde: _offset,
+        cuantos: _loteTamanio,
+      );
   }
 
   /// Carga predictiva en segundo plano (Fase 2): trae más perfiles cuando la
@@ -623,6 +641,12 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       if (candidatos.isEmpty) {
         setState(() => _agotado = true);
         return;
+      }
+      // Guard: si el mazo queda muy pequeño (< 3 perfiles) y hay más
+      // remoto, forzamos una recarga para no quedarnos con 1-2 tarjetas
+      // en el engine (se vería como "solo pasa el mismo perfil").
+      if (candidatos.length < 3 && _hayMasRemoto && !_cargandoMas) {
+        unawaited(_cargarMas());
       }
       _matchEngine?.removeListener(_alCambiarCarta);
       setState(() {

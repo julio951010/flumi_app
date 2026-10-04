@@ -4,18 +4,31 @@ import '../core/estilos/tema.dart';
 import '../core/servicios/connectivity_service.dart';
 import '../core/servicios/notificacion_servicio.dart';
 
-/// Pantalla a pantalla completa que se muestra cuando la app no tiene
-/// conexión a la red. Ofrece un botón para reintentar y, si se reconecta,
-/// el contenedor que la muestra (p. ej. [IndicadorConexion]) vuelve a
-/// renderizar la app.
+/// Pantalla a pantalla completa para problemas de conexión. Dos modos:
+/// - sin red (no hay interfaz): título/mensaje/icono por defecto.
+/// - servidor inalcanzable (hay red pero Supabase no responde: caído,
+///   lento o DNS bloqueado): se pasa título/mensaje/icono propios y el
+///   reintento sondea al servidor en vez de la interfaz de red.
+/// Ofrece un botón para reintentar y, si se reconecta, el contenedor que
+/// la muestra (p. ej. [IndicadorConexion]) vuelve a renderizar la app.
 class SinConexionPantalla extends StatefulWidget {
   final VoidCallback? onReintentar;
   final bool mostrarBotonReintentar;
+  final String titulo;
+  final String mensaje;
+  final IconData icono;
+  final Future<bool> Function()? comprobarServidor;
 
   const SinConexionPantalla({
     super.key,
     this.onReintentar,
     this.mostrarBotonReintentar = true,
+    this.titulo = 'Sin conexión',
+    this.mensaje =
+        'No pudimos conectar con Flumi. Revisa tu Wi-Fi o datos móviles '
+        'y vuelve a intentarlo.',
+    this.icono = Icons.wifi_off_rounded,
+    this.comprobarServidor,
   });
 
   @override
@@ -28,6 +41,24 @@ class _SinConexionPantallaState extends State<SinConexionPantalla> {
   Future<void> _reintentar() async {
     setState(() => _verificando = true);
     try {
+      // Si hay comprobador de servidor, lo usamos (modo servidor caído);
+      // si no, comprobamos la interfaz de red (modo sin red).
+      final comprobar = widget.comprobarServidor;
+      if (comprobar != null) {
+        final responde = await comprobar();
+        if (responde) {
+          widget.onReintentar?.call();
+          return;
+        }
+        if (mounted) {
+          NotificacionServicio.advertencia(
+            context,
+            'Flumi sigue sin responder. Puedes seguir usando la app '
+            'sin conexión; se sincronizará sola al recuperarse.',
+          );
+        }
+        return;
+      }
       final conectado =
           await ConnectivityService.instancia.comprobarAhora();
       if (conectado) {
@@ -47,7 +78,7 @@ class _SinConexionPantallaState extends State<SinConexionPantalla> {
 
   @override
   Widget build(BuildContext context) {
-    final primario = FlumiTema.colorPrimario;
+    const primario = FlumiTema.colorPrimario;
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -58,21 +89,20 @@ class _SinConexionPantallaState extends State<SinConexionPantalla> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.wifi_off_rounded,
+                  widget.icono,
                   size: 96,
                   color: primario.withValues(alpha: 0.85),
                 ),
                 const SizedBox(height: 28),
-                const Text(
-                  'Sin conexión',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                Text(
+                  widget.titulo,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'No pudimos conectar con Flumi. Revisa tu Wi-Fi o datos móviles '
-                  'y vuelve a intentarlo.',
+                Text(
+                  widget.mensaje,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 15,
                     color: Colors.black54,
                     height: 1.5,

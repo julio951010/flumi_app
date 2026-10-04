@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Fondo de la pantalla de arranque nativa (antes de que Flutter pinte su
+     primer frame). Antes era @android:color/white liso; en dispositivos con
+     tema oscuro esto se veía NEGRO durante todo lo que tarda main() (red,
+     Supabase, Firebase) en resolver — se percibía como "pantalla negra"/app
+     trabada. Ahora usa el celeste de marca con el ícono al centro, igual
+     que el splash real en Flutter, para que la transición nativa -> Flutter
+     se vea continua en vez de un corte. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
+    <item android:drawable="@color/launch_background_color" />
 
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item>
         <bitmap
             android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:src="@mipmap/ic_launcher" />
+    </item>
 </layer-list>

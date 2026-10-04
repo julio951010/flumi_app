@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fondo del splash nativo en modo oscuro: azul noche para que no
+         queme de noche; el icono a color sigue legible encima. -->
+    <color name="launch_background_color">#FF1B1B2F</color>
+</resources>
