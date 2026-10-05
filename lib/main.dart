@@ -906,11 +906,6 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // El corazón del nav refleja los chips del contador (vistos persistidos):
     // entrar a la pestaña ya no lo borra; baja al ver tarjetas o marcar vistas.
     _contadorMeGusta.addListener(_sincronizarCorazonNav);
-    // Forzar rebuild del nav cuando cambia el badge del corazón (evita que
-    // solo se vea al navegar).
-    _meGustaNoLeidas.addListener(() {
-      if (mounted) setState(() {});
-    });
     _iniciarRealtimeInteracciones(miId);
     // Fase 4: chat en vivo app-wide (mensajes y matches); la conexión de
     // cada pantalla de chat es redundante e idempotente (upsert por uuid).
@@ -1821,7 +1816,13 @@ final visitas = await (database.select(database.visitas)
               // Feedback de fallos de conexión/timeout con el servidor:
               // aviso transitorio (notificación flotante) cuando Supabase no
               // responde; al recuperarse se avisa con la notificación de éxito.
-              Expanded(child: pantallas[_indice]),
+              // Las 5 páginas se mantienen vivas con IndexedStack: cambiar
+              // de pestaña ya no destruye el estado (no se recarga desde
+              // cero). Los args cambiantes (filtros, indiceInicial) siguen
+              // llegando por didUpdateWidget de cada pantalla.
+              Expanded(
+                child: IndexedStack(index: _indice, children: pantallas),
+              ),
             ],
           ),
           Positioned(
