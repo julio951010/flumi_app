@@ -225,33 +225,47 @@ class _PushMovil {
 
   /// Registra el token FCM del dispositivo en Supabase (RPC
   /// registrar_device_token, upsert por token: reclama el token para el
-  /// usuario actual). Sin conexión o sin Firebase: no hace nada (y NO marca
-  /// como registrado, para reintentar en la próxima llamada).
-  Future<void> registrarToken() async {
+  /// usuario actual). Reintenta si Supabase aún no inicializó o no hay
+  /// sesión todavía (arranque offline-first): antes ese caso lanzaba fuera
+  /// del try y el token nunca quedaba registrado (Edge Function devolvía
+  /// `sin_tokens` y no llegaba ningún push).
+  Future<void> registrarToken({int reintentos = 4}) async {
     if (kUsarServidorLocal) return;
     final token = await _obtenerToken();
     if (token == null) {
       debugPrint('[Push] sin token FCM: no se registra nada');
       return;
     }
-    final miId = sb.Supabase.instance.client.auth.currentUser?.id;
-    // Evita spam si ya quedó registrado este token PARA ESTE usuario.
-    // Si cambió la cuenta (mismo dispositivo, otra sesión) hay que
-    // re-registrar aunque el token sea idéntico.
-    if (token == _token && miId != null && miId == _tokenUsuarioId) return;
-    try {
-      await sb.Supabase.instance.client.rpc(
-        'registrar_device_token',
-        params: {
-          'p_token': token,
-          'p_plataforma': Platform.isIOS ? 'ios' : 'android',
-        },
-      );
-      _token = token;
-      _tokenUsuarioId = miId;
-      debugPrint('[Push] token registrado en device_tokens');
-    } catch (e) {
-      debugPrint('[Push] registrar_device_token falló: $e');
+    for (var intento = 0; intento <= reintentos; intento++) {
+      try {
+        final miId = sb.Supabase.instance.client.auth.currentUser?.id;
+        if (miId == null) {
+          debugPrint(
+              '[Push] sin sesión todavía (intento $intento/$reintentos): reintento luego');
+        } else {
+          // Evita spam si ya quedó registrado este token PARA ESTE usuario.
+          // Si cambió la cuenta (mismo dispositivo, otra sesión) hay que
+          // re-registrar aunque el token sea idéntico.
+          if (token == _token && miId == _tokenUsuarioId) return;
+          await sb.Supabase.instance.client.rpc(
+            'registrar_device_token',
+            params: {
+              'p_token': token,
+              'p_plataforma': Platform.isIOS ? 'ios' : 'android',
+            },
+          );
+          _token = token;
+          _tokenUsuarioId = miId;
+          debugPrint('[Push] token registrado en device_tokens');
+          return;
+        }
+      } catch (e) {
+        debugPrint(
+            '[Push] registrar_device_token falló (intento $intento/$reintentos): $e');
+      }
+      if (intento < reintentos) {
+        await Future.delayed(Duration(seconds: 5 * (intento + 1)));
+      }
     }
   }
 

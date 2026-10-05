@@ -72,9 +72,7 @@ class _IndicadorConexionState extends State<IndicadorConexion> {
           mensaje: sinRed
               ? 'No pudimos conectar con Flumi. Revisa tu Wi-Fi o datos móviles '
                   'y vuelve a intentarlo.'
-              : 'Tienes red, pero Flumi no responde (servidor caído, lento o '
-                  'bloqueado). Puedes seguir usando la app sin conexión: se '
-                  'sincronizará sola al recuperarse.',
+              : 'Flumi no responde.',
           icono: sinRed ? Icons.wifi_off_rounded : Icons.cloud_off_rounded,
           comprobarServidor: sinRed
               ? null

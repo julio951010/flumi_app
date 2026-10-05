@@ -89,23 +89,27 @@ void main() async {
   // Grupo 1 (paralelo): inicializaciones independientes entre sí. Antes iban
   // en serie y cada handshake sumaba segundos con pantalla en negro.
   // Supabase.initialize lleva tope: con DNS/red caídos colgaba el arranque
-  // en negro; si falla se sigue offline (supabaseListo=false) y todo lo
-  // posterior que lo necesite usa caché local o espera reconexión.
+  // en negro; si falla se sigue offline (supabaseListo=false) y los accesos
+  // a Supabase.instance fallan controlados (try/catch) hasta que haya sesión
+  // válida.
+  final supabaseInit = kUsarServidorLocal
+      ? Future<void>.value()
+      : Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey)
+          .then((_) => supabaseListo = true);
+
   try {
     await Future.wait([
-      if (!kUsarServidorLocal)
-        Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey),
+      supabaseInit,
       ConnectivityService.instancia.iniciar(),
       // Push móvil (FCM), fase crítica: Firebase + handler de background ANTES
       // de runApp(). Sin este registro, los push con la app cerrada no
       // despiertan. Nunca lanza (sin google-services.json queda deshabilitado).
       inicializarPushCritico(),
     ]).timeout(const Duration(seconds: 10));
-    if (!kUsarServidorLocal) supabaseListo = true;
   } on TimeoutException {
-    debugPrint('[Arranque] Supabase.initialize con tope: sigo offline');
+    debugPrint('[Arranque] timeout general: sigo offline por ahora');
   } catch (e) {
-    debugPrint('[Arranque] Supabase.initialize falló: $e — sigo offline');
+    debugPrint('[Arranque] falló: $e — sigo offline');
   }
   // Connectivity debe quedar iniciado aunque el grupo falle.
   unawaited(ConnectivityService.instancia.iniciar());
@@ -902,6 +906,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // El corazón del nav refleja los chips del contador (vistos persistidos):
     // entrar a la pestaña ya no lo borra; baja al ver tarjetas o marcar vistas.
     _contadorMeGusta.addListener(_sincronizarCorazonNav);
+    // Forzar rebuild del nav cuando cambia el badge del corazón (evita que
+    // solo se vea al navegar).
+    _meGustaNoLeidas.addListener(() {
+      if (mounted) setState(() {});
+    });
     _iniciarRealtimeInteracciones(miId);
     // Fase 4: chat en vivo app-wide (mensajes y matches); la conexión de
     // cada pantalla de chat es redundante e idempotente (upsert por uuid).
