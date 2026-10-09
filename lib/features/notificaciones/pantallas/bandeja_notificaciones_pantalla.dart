@@ -11,6 +11,7 @@ import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
+import '../../../main.dart'; // para syncService global
 
 enum TipoNotificacion { meGusta, visita, match, mensaje, soporte }
 
@@ -208,10 +209,10 @@ class _BandejaNotificacionesPantallaState
       // Refresca el espejo local (el await sincroniza; el resultado no se
       // usa aquí: Mis gustas no se listan en la bandeja).
       await _historialLikesServicio.obtenerHistorial();
-      final abiertas =
-          await (widget.db.select(widget.db.notificacionesAbiertas))
-              .get()
-              .then((fs) => fs.map((f) => f.notificacionId).toSet());
+      final abiertas = await (widget.db.select(widget.db.notificacionesVistas)
+            ..where((n) => n.usuarioId.equals(widget.miId)))
+          .get()
+          .then((fs) => fs.map((f) => f.notificacionId).toSet());
 
       await PreferenciasNotificacionesServicio.instancia.asegurarCargada();
 
@@ -236,9 +237,9 @@ class _BandejaNotificacionesPantallaState
             // sesiones y recompilas.
             for (final n in items) {
               unawaited(
-                  widget.db.into(widget.db.notificacionesAbiertas).insert(
-                        NotificacionesAbiertasCompanion.insert(
-                            notificacionId: n.id),
+                  widget.db.into(widget.db.notificacionesVistas).insert(
+                        NotificacionesVistasCompanion.insert(
+                            usuarioId: widget.miId, notificacionId: n.id),
                         mode: InsertMode.insertOrIgnore,
                       ));
             }
@@ -335,8 +336,9 @@ class _BandejaNotificacionesPantallaState
     for (final n in _items) {
       if (!_leidas.contains(n.id)) {
         // Verificar en BD si no está en memoria local
-        final query = widget.db.select(widget.db.notificacionesAbiertas)
-          ..where((na) => na.notificacionId.equals(n.id));
+        final query = widget.db.select(widget.db.notificacionesVistas)
+          ..where((na) =>
+              na.usuarioId.equals(widget.miId) & na.notificacionId.equals(n.id));
         final existe = await query.getSingleOrNull();
         if (existe == null) count++;
       }
@@ -349,15 +351,7 @@ class _BandejaNotificacionesPantallaState
   Future<void> _marcarTodosLeidos() async {
     final ids = _items.map((n) => n.id).toList();
     if (ids.isNotEmpty) {
-      await widget.db.batch((b) {
-        for (final id in ids) {
-          b.insert(
-            widget.db.notificacionesAbiertas,
-            NotificacionesAbiertasCompanion.insert(notificacionId: id),
-            mode: InsertMode.insertOrIgnore,
-          );
-        }
-      });
+      await syncService.marcarNotificacionesVistas(ids);
     }
     if (!mounted) return;
     setState(() {
@@ -397,15 +391,7 @@ class _BandejaNotificacionesPantallaState
   Future<void> _limpiarTodo() async {
     final ids = _items.map((n) => n.id).toList();
     if (ids.isEmpty) return;
-    await widget.db.batch((b) {
-      for (final id in ids) {
-        b.insert(
-          widget.db.notificacionesAbiertas,
-          NotificacionesAbiertasCompanion.insert(notificacionId: id),
-          mode: InsertMode.insertOrIgnore,
-        );
-      }
-    });
+    await syncService.marcarNotificacionesVistas(ids);
     if (!mounted) return;
     setState(() {
       _items.clear();
@@ -419,10 +405,7 @@ class _BandejaNotificacionesPantallaState
   Future<void> _abrir(_NotificacionInbox n) async {
     // Persiste primero (con await): al reabrir la bandeja la notificación
     // ya no aparece, sin carrera con un refresh inmediato.
-    await widget.db.into(widget.db.notificacionesAbiertas).insert(
-          NotificacionesAbiertasCompanion.insert(notificacionId: n.id),
-          mode: InsertMode.insertOrIgnore,
-        );
+    await syncService.marcarNotificacionesVistas([n.id]);
     if (!mounted) return;
     setState(() {
       _leidas.add(n.id);

@@ -7,6 +7,12 @@ import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
 
+/// Wrapper para _debugPrint que funciona en todas las plataformas.
+void _debugPrint(String msg) {
+  // ignore: avoid_print
+  print(msg);
+}
+
 /// Lee los bytes de una ruta local o blob (multiplataforma vía XFile).
 /// Devuelve null si no se puede leer (URLs remotas, assets empaquetados).
 Future<Uint8List?> bytesDeRuta(String ruta) async {
@@ -55,7 +61,8 @@ class PerfilFotoServicio {
               jsonDecode(await res.stream.bytesToString()) as Map<String, dynamic>;
           return body['url'] as String?;
         }
-      } catch (_) {
+      } catch (e, st) {
+        _debugPrint('[PerfilFoto] Error servidor local: $e\n$st');
         return null;
       }
       return null;
@@ -64,15 +71,19 @@ class PerfilFotoServicio {
     // Rama Supabase: almacenamiento en el bucket 'profile-photos'.
     try {
       final datos = await archivo.readAsBytes();
+      _debugPrint('[PerfilFoto] Subiendo foto perfil: ${datos.length} bytes');
       final nombre =
           '${usuarioId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await sb.Supabase.instance.client.storage
           .from('profile-photos')
           .uploadBinary(nombre, datos);
-      return sb.Supabase.instance.client.storage
+      final url = sb.Supabase.instance.client.storage
           .from('profile-photos')
           .getPublicUrl(nombre);
-    } catch (_) {
+      _debugPrint('[PerfilFoto] URL pública: $url');
+      return url;
+    } catch (e, st) {
+      _debugPrint('[PerfilFoto] Error Supabase: $e\n$st');
       return null;
     }
   }
@@ -87,16 +98,25 @@ class PerfilFotoServicio {
     if (kUsarServidorLocal) return null;
     try {
       final datos = await bytesDeRuta(archivoRuta);
-      if (datos == null) return null;
+      if (datos == null) {
+        _debugPrint('[Verificación] No se pudieron leer los bytes del archivo: $archivoRuta');
+        return null;
+      }
+      _debugPrint('[Verificación] Subiendo archivo: ${datos.length} bytes');
       final nombre =
           'verificacion/${usuarioId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await sb.Supabase.instance.client.storage
           .from('profile-photos')
           .uploadBinary(nombre, datos);
-      return sb.Supabase.instance.client.storage
+      _debugPrint('[Verificación] Upload OK, obteniendo URL pública...');
+      final url = sb.Supabase.instance.client.storage
           .from('profile-photos')
           .getPublicUrl(nombre);
-    } catch (_) {
+      _debugPrint('[Verificación] URL pública: $url');
+      return url;
+    } catch (e, st) {
+      _debugPrint('[Verificación] ERROR al subir: $e');
+      _debugPrint('[Verificación] Stack trace: $st');
       return null;
     }
   }

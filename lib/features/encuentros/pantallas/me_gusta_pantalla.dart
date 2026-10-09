@@ -20,6 +20,7 @@ import 'cerca_de_ti_pantalla.dart' show PerfilDetallePage;
 import 'match_pantalla.dart';
 import '../../suscripcion/suscripcion_sheet.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
+import '../../../main.dart'; // para authService global
 
 class MeGustaPantalla extends StatefulWidget {
   final AppDatabase db;
@@ -919,7 +920,12 @@ class ContadorMeGusta extends ChangeNotifier {
     final db = _db;
     if (db == null) return;
     try {
-      final filas = await (db.select(db.notificacionesAbiertas)).get();
+      final userId = authService.usuarioActual?['id'] as String?;
+      if (userId == null) return;
+      final filas = await (db.select(db.notificacionesVistas)
+            ..where((n) =>
+                n.usuarioId.equals(userId) & n.notificacionId.like('$_prefijoPersistencia%')))
+          .get();
       for (final f in filas) {
         final clave = f.notificacionId;
         if (clave.startsWith(_prefijoPersistencia)) {
@@ -934,18 +940,11 @@ class ContadorMeGusta extends ChangeNotifier {
     final db = _db;
     final nuevas = claves.toList();
     if (db == null || nuevas.isEmpty) return;
+    final userId = authService.usuarioActual?['id'] as String?;
+    if (userId == null) return;
     unawaited(() async {
-      await db.batch((b) {
-        for (final c in nuevas) {
-          b.insert(
-            db.notificacionesAbiertas,
-            NotificacionesAbiertasCompanion.insert(
-              notificacionId: '$_prefijoPersistencia$c',
-            ),
-            mode: InsertMode.insertOrIgnore,
-          );
-        }
-      });
+      await syncService.marcarNotificacionesVistas(
+          nuevas.map((c) => '$_prefijoPersistencia$c').toList());
     }());
   }
 
@@ -1033,12 +1032,14 @@ class ContadorMeGusta extends ChangeNotifier {
   void olvidarVista(CategoriaMeGusta categoria, String usuarioId) {
     final clave = '${categoria.name}|$usuarioId';
     if (!_vistos.remove(clave)) return;
+    final userId = authService.usuarioActual?['id'] as String?;
     final db = _db;
-    if (db != null) {
+    if (userId != null && db != null) {
       unawaited(() async {
         try {
-          await (db.delete(db.notificacionesAbiertas)
+          await (db.delete(db.notificacionesVistas)
                 ..where((t) =>
+                    t.usuarioId.equals(userId) &
                     t.notificacionId.equals('$_prefijoPersistencia$clave')))
               .go();
         } catch (_) {}

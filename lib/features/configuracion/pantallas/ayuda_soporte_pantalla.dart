@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import 'contactar_soporte_pantalla.dart';
+import '../../../main.dart'; // database global
 
 class AyudaSoportePantalla extends StatelessWidget {
   /// Se llama cuando el hilo muestra respuestas (para darlas por vistas).
@@ -15,6 +17,7 @@ class AyudaSoportePantalla extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => ContactarSoportePantalla(
           onRespuestasVistas: onRespuestasVistas,
+          database: database,
         ),
       ),
     );

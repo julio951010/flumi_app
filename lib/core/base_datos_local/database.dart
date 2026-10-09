@@ -5,12 +5,12 @@ import 'tables.dart';
 
 part 'database.g.dart';
 
-@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes, Rechazos, NotificacionesAbiertas, ConversacionesEliminadas, ConversacionesLeidas])
+@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes, Rechazos, NotificacionesVistas, ConversacionesEliminadas, ConversacionesLeidas])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 23;
+  int get schemaVersion => 24;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -119,7 +119,7 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(rechazos);
       }
       if (from < 12) {
-        await m.createTable(notificacionesAbiertas);
+        await m.createTable(notificacionesVistas);
       }
       if (from < 13) {
         await m.addColumn(historialLikes, historialLikes.leidoHasta);
@@ -158,6 +158,21 @@ class AppDatabase extends _$AppDatabase {
         // Marcador del OTRO participante (ticks ✓✓). leidoHasta sigue
         // siendo MI marcador (badge de no leídos).
         await m.addColumn(matches, matches.leidoHastaOtro);
+      }
+      if (from < 24) {
+        // Nueva tabla unificada de notificaciones vistas (cross-device).
+        // Reemplaza NotificacionesAbiertas (solo local) por NotificacionesVistas (usuario_id + notificacion_id).
+        await m.createTable(notificacionesVistas);
+        // Migrar datos existentes de NotificacionesAbiertas (si existe) al nuevo formato.
+        // NotificacionesAbiertas solo tenía notificacionId; le asignamos el usuario actual.
+        // Como no sabemos el usuario exacto de cada fila antigua, usamos un placeholder
+        // y la app lo corregirá al sincronizar (upsert con usuario real).
+        await customStatement('''
+          INSERT OR IGNORE INTO notificaciones_vistas (usuario_id, notificacion_id, visto_en)
+          SELECT 'migrado_local', notificacion_id, abierta_en
+          FROM notificaciones_abiertas
+        ''');
+        // La tabla vieja se queda como respaldo (no la borramos por si acaso).
       }
     },
   );

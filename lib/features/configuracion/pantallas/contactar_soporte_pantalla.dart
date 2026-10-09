@@ -1,17 +1,21 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../config/env.dart';
+import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
+import '../../../main.dart'; // para syncService global
 
 class ContactarSoportePantalla extends StatefulWidget {
   /// Se llama cuando el hilo muestra respuestas (para darlas por vistas).
   final VoidCallback? onRespuestasVistas;
+  final AppDatabase database;
 
-  const ContactarSoportePantalla({super.key, this.onRespuestasVistas});
+  const ContactarSoportePantalla({super.key, this.onRespuestasVistas, required this.database});
 
   @override
   State<ContactarSoportePantalla> createState() =>
@@ -49,7 +53,6 @@ class _ContactarSoportePantallaState extends State<ContactarSoportePantalla> {
   bool _cargando = true;
   bool _enviando = false;
   StreamSubscription? _sub;
-  final Set<String> _vistosNotificados = {};
 
   @override
   void initState() {
@@ -82,6 +85,10 @@ class _ContactarSoportePantallaState extends State<ContactarSoportePantalla> {
     } catch (_) {}
   }
 
+  /// Genera el mismo ID que usa _marcarSoporteVisto en main.dart
+  String _idSoporte(String ticketId, DateTime ts) =>
+      'soporte:$ticketId:${ts.millisecondsSinceEpoch}';
+
   Future<void> _cargar({bool silencioso = false}) async {
     if (!silencioso) setState(() => _cargando = true);
     try {
@@ -102,18 +109,35 @@ class _ContactarSoportePantallaState extends State<ContactarSoportePantalla> {
           .limit(50)
           .timeout(const Duration(seconds: 10));
       if (!mounted) return;
-      setState(() {
-        _tickets =
-            (res as List).map((e) => _TicketSoporte.fromMap(e as Map<String, dynamic>)).toList();
-        _cargando = false;
-      });
-      // Las respuestas a la vista se dan por vistas (apaga badges/campana).
-      final nuevos = _tickets
-          .where((t) => t.respondido && !_vistosNotificados.contains(t.id))
+      final tickets =
+          (res as List).map((e) => _TicketSoporte.fromMap(e as Map<String, dynamic>)).toList();
+
+      // Leer qué respuestas ya están marcadas como vistas en la BD local (NotificacionesVistas)
+      final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+      final abiertas = await (database.select(database.notificacionesVistas)
+            ..where((n) =>
+                n.usuarioId.equals(currentUserId) & n.notificacionId.like('soporte:%')))
+          .get()
+          .then((rows) => rows.map((n) => n.notificacionId).toSet());
+
+      // Detectar respuestas NUEVAS a la vista (respondidas y no vistas en BD)
+      final nuevos = tickets
+          .where((t) => t.respondido && !abiertas.contains(_idSoporte(t.id, t.creadoEn)))
           .map((t) => t.id)
           .toList();
+
+      setState(() {
+        _tickets = tickets;
+        _cargando = false;
+      });
+
+      // Marcar las nuevas respuestas como vistas (apaga badges/campana + sync cross-device)
       if (nuevos.isNotEmpty) {
-        _vistosNotificados.addAll(nuevos);
+        final ids = tickets
+            .where((t) => nuevos.contains(t.id))
+            .map((t) => _idSoporte(t.id, t.creadoEn))
+            .toList();
+        await syncService.marcarNotificacionesVistas(ids);
         widget.onRespuestasVistas?.call();
       }
     } catch (_) {

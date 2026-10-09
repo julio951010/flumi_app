@@ -1005,11 +1005,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
 
   /// Recalcula _soporteNoLeidas desde el servidor menos lo ya visto.
   Future<void> _sincronizarSoporteNoLeidas(String miId) async {
-    final abiertas =
-        (await database.select(database.notificacionesAbiertas).get())
-            .map((n) => n.notificacionId)
-            .where((id) => id.startsWith('soporte:'))
-            .toSet();
+    final abiertas = await (database.select(database.notificacionesVistas)
+          ..where((n) =>
+              n.usuarioId.equals(miId) & n.notificacionId.like('soporte:%')))
+        .get()
+        .then((rows) => rows.map((n) => n.notificacionId).toSet());
     var n = 0;
     for (final r in await _respuestasSoporte(miId)) {
       if (!abiertas.contains(_idSoporte(r.id, r.ts))) n++;
@@ -1024,16 +1024,8 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     if (miId == null) return;
     final vistos = await _respuestasSoporte(miId);
     if (vistos.isNotEmpty) {
-      await database.batch((b) {
-        for (final r in vistos) {
-          b.insert(
-            database.notificacionesAbiertas,
-            NotificacionesAbiertasCompanion.insert(
-                notificacionId: _idSoporte(r.id, r.ts)),
-            mode: InsertMode.insertOrIgnore,
-          );
-        }
-      });
+      final ids = vistos.map((r) => _idSoporte(r.id, r.ts)).toList();
+      await syncService.marcarNotificacionesVistas(ids);
     }
     _soporteNoLeidas.value = 0;
     _actualizarBadgeNotificaciones();
@@ -1423,10 +1415,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       String miId, List<ResumenConversacion> resumenes) async {
     await PreferenciasNotificacionesServicio.instancia.asegurarCargada();
     if (!PreferenciasNotificacionesServicio.instancia.mensajes) return 0;
-    final abiertas =
-        (await database.select(database.notificacionesAbiertas).get())
-            .map((n) => n.notificacionId)
-            .toSet();
+    final abiertas = await (database.select(database.notificacionesVistas)
+          ..where((n) =>
+              n.usuarioId.equals(miId) & n.notificacionId.like('mensaje:%')))
+        .get()
+        .then((rows) => rows.map((n) => n.notificacionId).toSet());
     var n = 0;
     for (final r in resumenes) {
       if (r.noLeidos <= 0) continue;
@@ -1457,9 +1450,10 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // tarjeta vista en Actividades (mgvn|*) y notificación abierta en
     // bandeja (ids sintéticos 'tipo:uuid:ms'). Sin esto, un reinicio
     // resucita notificaciones ya vistas.
-    final abiertas = (await database.select(database.notificacionesAbiertas).get())
-        .map((n) => n.notificacionId)
-        .toSet();
+    final abiertas = await (database.select(database.notificacionesVistas)
+          ..where((n) => n.usuarioId.equals(miId)))
+        .get()
+        .then((rows) => rows.map((n) => n.notificacionId).toSet());
     bool vistaEnBandeja(String idSintetico) => abiertas.contains(idSintetico);
 final visitas = await (database.select(database.visitas)
           ..where((v) => v.visitadoId.equals(miId)))
@@ -1619,6 +1613,7 @@ final visitas = await (database.select(database.visitas)
       MaterialPageRoute(
         builder: (_) => ContactarSoportePantalla(
           onRespuestasVistas: () => unawaited(_marcarSoporteVisto()),
+          database: database,
         ),
       ),
     );

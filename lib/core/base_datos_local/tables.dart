@@ -293,11 +293,14 @@ class ConversacionesLeidas extends Table {
   Set<Column> get primaryKey => {otroUsuarioId};
 }
 
-class NotificacionesAbiertas extends Table {
-  /// Id de la notificación de bandeja ya abierta (ej. 'mensaje:<uuid>:<millis>').
+class NotificacionesVistas extends Table {
+  /// Usuario dueño de la vista (para sync cross-device).
+  TextColumn get usuarioId => text()();
+  /// Id compuesto de la notificación (ej. 'soporte:abc:123', 'mensaje:xyz:456', 'like:123', 'visita:456', 'match:789').
   TextColumn get notificacionId => text()();
-  DateTimeColumn get abiertaEn => dateTime().withDefault(currentDateAndTime)();
+  /// Cuándo se marcó como vista (local + remoto via sync).
+  DateTimeColumn get vistoEn => dateTime().withDefault(currentDateAndTime)();
 
   @override
-  Set<Column> get primaryKey => {notificacionId};
+  Set<Column> get primaryKey => {usuarioId, notificacionId};
 }

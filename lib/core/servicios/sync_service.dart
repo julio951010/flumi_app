@@ -46,6 +46,7 @@ class SyncService {
         sincronizarRechazos(userId),
         sincronizarConversacionesBorradas(userId),
         sincronizarConversacionesLeidas(userId),
+        sincronizarNotificacionesVistas(userId),
         _sincronizarFeedCercanoDesdePerfilPropio(),
       ]);
     } catch (e) {
@@ -1169,6 +1170,69 @@ class SyncService {
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------
+  // Notificaciones vistas (cross-device unificado)
+  // ------------------------------------------------------------
+  /// Sincroniza la tabla notificaciones_vistas: sube locales, baja remotas,
+  /// fusiona por PK (usuario_id, notificacion_id) tomando el visto_en más reciente.
+  Future<void> sincronizarNotificacionesVistas([String? userId]) async {
+    if (kUsarServidorLocal) return;
+    final userIdResuelto = userId ?? _obtenerUserId();
+    if (userIdResuelto == null) return;
+    try {
+      // 1) Subir filas locales que aún no están en remoto (o son más nuevas).
+      final locales = await _db.select(_db.notificacionesVistas).get();
+      final propias = locales.where((n) => n.usuarioId == userIdResuelto).toList();
+      if (propias.isNotEmpty) {
+        await sb.Supabase.instance.client
+            .from('notificaciones_vistas')
+            .upsert(propias
+                .map((n) => {
+                      'usuario_id': n.usuarioId,
+                      'notificacion_id': n.notificacionId,
+                      'visto_en': n.vistoEn.toUtc().toIso8601String(),
+                    })
+                .toList());
+      }
+
+      // 2) Descargar remotas y fusionar con local (max por PK).
+      final remoto = await sb.Supabase.instance.client
+          .from('notificaciones_vistas')
+          .select()
+          .eq('usuario_id', userIdResuelto);
+      final filas = (remoto as List).map((fila) {
+        final f = fila as Map<String, dynamic>;
+        return NotificacionesVistasCompanion.insert(
+          usuarioId: f['usuario_id'] as String,
+          notificacionId: f['notificacion_id'] as String,
+          vistoEn: Value(PerfilMapeo.parsearFecha(f['visto_en']) ?? DateTime.now()),
+        );
+      }).toList();
+      if (filas.isNotEmpty) {
+        await _db.batch((batch) {
+          batch.insertAllOnConflictUpdate(_db.notificacionesVistas, filas);
+        });
+      }
+
+      // 3) Limpiar huérfanas locales (ya no existen en remoto).
+      final idsRemotos = filas.map((f) => f.notificacionId.value).toSet();
+      final localesTodas = await _db.select(_db.notificacionesVistas).get();
+      final aBorrar = localesTodas
+          .where((n) => n.usuarioId == userIdResuelto && !idsRemotos.contains(n.notificacionId))
+          .map((n) => n.notificacionId)
+          .toList();
+      if (aBorrar.isNotEmpty) {
+        await (_db.delete(_db.notificacionesVistas)
+              ..where((n) =>
+                  n.usuarioId.equals(userIdResuelto) & n.notificacionId.isIn(aBorrar)))
+            .go();
+      }
+      EstadoServidorServicio.instancia.marcarExito();
+    } catch (e) {
+      EstadoServidorServicio.instancia.marcarFallo(e);
+    }
+  }
+
   /// ¿Existe un mensaje local entre yo y [otroUsuarioId] más nuevo que
   /// [momento]? Si sí, el borrado de esa conversación ya no está vigente.
   /// Con tolerancia de reloj hacia lo "reciente": un mensaje nuevo cuyo
@@ -1843,5 +1907,28 @@ class SyncService {
       if (generos.isNotEmpty) 'generos': generos,
       if (ciudad.trim().isNotEmpty) 'ciudad': ciudad.trim(),
     };
+  }
+
+  /// Marca una lista de notificaciones como vistas (upsert local + queue sync).
+  /// [ids] usa el formato compuesto: 'soporte:<ticket_id>:<ms>', 'mensaje:<uuid>:<ms>',
+  /// 'like:<uuid>', 'visita:<uuid>', 'match:<uuid>', 'sistema:<id>'.
+  /// Devuelve Future que completa el upsert local; el sync a remoto va en background.
+  Future<void> marcarNotificacionesVistas(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final userId = _obtenerUserId();
+    if (userId == null) return;
+    final ahora = DateTime.now();
+    final companiones = ids
+        .map((id) => NotificacionesVistasCompanion.insert(
+              usuarioId: userId,
+              notificacionId: id,
+              vistoEn: Value(ahora),
+            ))
+        .toList();
+    await _db.batch((batch) {
+      batch.insertAllOnConflictUpdate(_db.notificacionesVistas, companiones);
+    });
+    // Sync a remoto en background (no bloquea UI).
+    Future.microtask(() => sincronizarNotificacionesVistas(userId));
   }
 }
