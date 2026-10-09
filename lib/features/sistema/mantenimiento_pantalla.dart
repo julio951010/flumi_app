@@ -31,7 +31,7 @@ class MantenimientoPantalla extends StatelessWidget {
                   color: FlumiTema.colorPrimario.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.build_outlined,
                   size: 48,
                   color: FlumiTema.colorPrimario,
@@ -73,7 +73,7 @@ class MantenimientoPantalla extends StatelessWidget {
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: FlumiTema.colorPrimario,
-                      side: BorderSide(color: FlumiTema.colorPrimario),
+                      side: const BorderSide(color: FlumiTema.colorPrimario),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),

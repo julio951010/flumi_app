@@ -735,7 +735,9 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
                   if (_omitido) {
                     await (widget.db.update(widget.db.usuarios)
                         ..where((u) => u.uuid.equals(widget.usuarioUuid)))
-                      .write(const UsuariosCompanion(perfilCompletado: Value(true)));
+                      .write(const UsuariosCompanion(
+                          perfilCompletado: Value(true),
+                          pendienteDeSincronizar: Value(true)));
                   }
                   if (mounted) widget.onCompletado();
                 },

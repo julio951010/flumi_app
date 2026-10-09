@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../legal/contenido_legal_pantalla.dart';
+import 'nuestras_redes_pantalla.dart';
 
 class SobreNosotrosPantalla extends StatelessWidget {
   const SobreNosotrosPantalla({super.key});
@@ -26,17 +28,16 @@ class SobreNosotrosPantalla extends StatelessWidget {
       titulo: 'Licencias',
       icono: Icons.verified_outlined,
     ),
-    (
-      clave: 'contactos',
-      titulo: 'Contactos',
-      icono: Icons.contact_support_outlined,
-    ),
-    (
-      clave: 'sobre_flumi',
-      titulo: 'Sobre Flumi',
-      icono: Icons.info_outline,
-    ),
   ];
+
+  Future<String> _version() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return 'Flumi v${info.version} (${info.buildNumber})';
+    } catch (_) {
+      return 'Flumi';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,31 +57,73 @@ class SobreNosotrosPantalla extends StatelessWidget {
       ),
       body: SafeArea(
         top: false,
-        child: ListView.separated(
+        child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          itemCount: _secciones.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, i) {
-            final s = _secciones[i];
-            return ListTile(
-              leading: Icon(s.icono, color: secundario),
-              title: Text(
-                s.titulo,
-                style:
-                    const TextStyle(color: Colors.black87, fontSize: 15),
+          children: [
+            ListTile(
+              leading: Icon(Icons.info_outline, color: secundario),
+              title: const Text(
+                'Sobre Flumi',
+                style: TextStyle(color: Colors.black87, fontSize: 15),
               ),
               trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ContenidoLegalPantalla(
-                    clave: s.clave,
-                    titulo: s.titulo,
+                  builder: (_) => const ContenidoLegalPantalla(
+                    clave: 'sobre_flumi',
+                    titulo: 'Sobre Flumi',
                   ),
                 ),
               ),
-            );
-          },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.share_outlined, color: secundario),
+              title: const Text(
+                'Nuestras redes',
+                style: TextStyle(color: Colors.black87, fontSize: 15),
+              ),
+              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const NuestrasRedesPantalla(),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            for (final s in _secciones) ...[
+              ListTile(
+                leading: Icon(s.icono, color: secundario),
+                title: Text(
+                  s.titulo,
+                  style:
+                      const TextStyle(color: Colors.black87, fontSize: 15),
+                ),
+                trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContenidoLegalPantalla(
+                      clave: s.clave,
+                      titulo: s.titulo,
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+            ],
+            const SizedBox(height: 24),
+            FutureBuilder<String>(
+              future: _version(),
+              builder: (context, snap) => Text(
+                snap.data ?? 'Flumi',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
+            ),
+          ],
         ),
       ),
     );

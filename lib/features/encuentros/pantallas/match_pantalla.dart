@@ -4,7 +4,9 @@ import '../../../core/utilidades/fotos_perfil.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../features/suscripcion/suscripcion_sheet.dart';
 import '../../../widgets_comunes/foto_perfil_io.dart';
+import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
 import '../../chat/chat_repositorio.dart';
 import '../../chat/pantallas/chat_pantalla.dart';
 
@@ -49,17 +51,51 @@ class _MatchPantallaState extends State<MatchPantalla>
     super.dispose();
   }
 
+  void _toast(String texto) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(texto),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _enviarYConversar() async {
     final texto = _mensajeCtrl.text.trim();
-    // Mismo gate que ChatPantalla._enviar: gratis no puede enviar mensajes.
-    // Sin esto, el match permitía saltarse el paywall de mensajería.
-    if (texto.isNotEmpty && !widget.suscripcionServicio.esGratis) {
-      await widget.chatRepo.enviarMensaje(
-        emisorId: widget.miId,
-        receptorId: widget.usuario.uuid,
-        contenido: texto,
-      );
+    if (texto.isEmpty) {
+      if (!mounted) return;
+      _toast('Escribe un mensaje para empezar a hablar');
+      return;
     }
+    if (widget.suscripcionServicio.esGratis) {
+      if (!mounted) return;
+      mostrarBloqueoSuscripcion(
+        context,
+        funcionalidad: 'Enviar el primer mensaje',
+        planMinimo: PlanTipo.plus,
+        descripcion: 'Para iniciar una conversación necesitas Flumi Plus o Premium.',
+        onSuscribir: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DetallePlanPantalla(
+              nombre: 'Flumi Plus',
+              periodo: 'mensual',
+              precio: '250 cup',
+              icono: Icons.auto_awesome,
+              detalle: 'Funciones extra',
+              destacado: true,
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    await widget.chatRepo.enviarMensaje(
+      emisorId: widget.miId,
+      receptorId: widget.usuario.uuid,
+      contenido: texto,
+    );
     if (!mounted) return;
     Navigator.pushReplacement(
       context,

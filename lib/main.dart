@@ -42,6 +42,7 @@ import 'features/perfiles/pantallas/perfil_pantalla.dart';
 import 'features/perfiles/pantallas/editar_perfil_pantalla.dart';
 import 'features/notificaciones/pantallas/bandeja_notificaciones_pantalla.dart';
 import 'features/configuracion/pantallas/configuracion_pantalla.dart';
+import 'features/configuracion/pantallas/contactar_soporte_pantalla.dart';
 import 'widgets_comunes/animacion_agua.dart';
 import 'widgets_comunes/barra_navegacion.dart';
 import 'core/servicios/config_remota_servicio.dart';
@@ -659,10 +660,16 @@ bool _esperandoSincronizacion = false;
       return CuestionarioPerfilPantalla(
         db: database,
         usuarioUuid: uuid,
-        onCompletado: () => setState(() {
-          _mostrarCuestionario = false;
-          _perfilCompletado = true;
-        }),
+        onCompletado: () {
+          setState(() {
+            _mostrarCuestionario = false;
+            _perfilCompletado = true;
+          });
+          // El onboarding deja el perfil pendiente en local: subirlo ya
+          // para que el servidor (feed, matches) lo vea sin esperar a un
+          // reinicio o cambio de red.
+          unawaited(syncService.sincronizarTodo());
+        },
       );
     }
     // Mostrar onboarding de perfil si no está completo
@@ -675,7 +682,9 @@ bool _esperandoSincronizacion = false;
           final uuid = authService.usuarioActual?['id'] as String? ?? '';
           await (database.update(database.usuarios)
                 ..where((u) => u.uuid.equals(uuid)))
-              .write(UsuariosCompanion(perfilCompletado: const Value(true)));
+              .write(const UsuariosCompanion(
+                  perfilCompletado: Value(true),
+                  pendienteDeSincronizar: Value(true)));
           setState(() => _mostrarCuestionario = true);
           _verificarPerfilCompletado(uuid);
         },
@@ -852,10 +861,14 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   /// de la pestaña Chats se repinte solo (cuenta conversaciones, no mensajes).
   final ValueNotifier<int> _chatsNoLeidosConversaciones = ValueNotifier<int>(0);
   final ValueNotifier<int> _meGustaNoLeidas = ValueNotifier<int>(0);
+  /// Respuestas de soporte nuevas sin leer: campana + badge de
+  /// Configuración + indicador de Ayuda y soporte.
+  final ValueNotifier<int> _soporteNoLeidas = ValueNotifier<int>(0);
   final ContadorMeGusta _contadorMeGusta = ContadorMeGusta(db: database);
   StreamSubscription? _convSub;
   StreamSubscription? _likesRealtimeSub;
   StreamSubscription? _visitasRealtimeSub;
+  StreamSubscription? _soporteRealtimeSub;
   List<StreamSubscription> _matchesRealtimeSubs = [];
   StreamSubscription? _likesWatchSub;
   StreamSubscription? _visitasWatchSub;
@@ -869,6 +882,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   bool _visitasSembrado = false;
   bool _matchesSembrado = false;
   bool _misLikesSembrado = false;
+  // Respuestas de soporte ya vistas (para avisar solo las NUEVAS en vivo).
+  final Set<String> _soporteNotificados = <String>{};
+  bool _soporteSembrado = false;
   int _genRealtime = 0;
   int _reintentosRealtime = 0;
   static const int _realtimeMaxReintentos = 10;
@@ -948,11 +964,79 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   }
 
   /// Campana de Notificaciones = sociales + notificaciones de mensajes
-  /// (una por conversación con no leídos, NO por mensaje). El badge de Chats
-  /// usa _chatsNoLeidosConversaciones (conversaciones con no leídos).
+  /// (una por conversación con no leídos, NO por mensaje) + respuestas de
+  /// soporte. El badge de Chats usa _chatsNoLeidosConversaciones
+  /// (conversaciones con no leídos).
   void _actualizarBadgeNotificaciones() {
-    _notificacionesPendientes.value =
-        _socialesNoLeidas.value + _mensajesNoLeidas.value;
+    _notificacionesPendientes.value = _socialesNoLeidas.value +
+        _mensajesNoLeidas.value +
+        _soporteNoLeidas.value;
+  }
+
+  /// Tickets de soporte respondidos (id remoto + instante de respuesta).
+  Future<List<({String id, DateTime ts})>> _respuestasSoporte(
+      String miId) async {
+    if (kUsarServidorLocal) return const [];
+    try {
+      final res = await Supabase.instance.client
+          .from('soporte_mensajes')
+          .select('id,respuesta,respondido_en,creado_en')
+          .eq('usuario_id', miId)
+          .eq('respondido', true)
+          .timeout(const Duration(seconds: 8));
+      final out = <({String id, DateTime ts})>[];
+      for (final f in (res as List).cast<Map<String, dynamic>>()) {
+        if (((f['respuesta'] as String?) ?? '').trim().isEmpty) continue;
+        final ts = DateTime.tryParse(
+                (f['respondido_en'] as String?) ?? '') ??
+            DateTime.tryParse((f['creado_en'] as String?) ?? '');
+        if (ts == null) continue;
+        out.add((id: f['id'] as String, ts: ts));
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Id de bandeja/visto para una respuesta ('soporte:<ticket>:<ms>').
+  String _idSoporte(String ticketId, DateTime ts) =>
+      'soporte:$ticketId:${ts.millisecondsSinceEpoch}';
+
+  /// Recalcula _soporteNoLeidas desde el servidor menos lo ya visto.
+  Future<void> _sincronizarSoporteNoLeidas(String miId) async {
+    final abiertas =
+        (await database.select(database.notificacionesAbiertas).get())
+            .map((n) => n.notificacionId)
+            .where((id) => id.startsWith('soporte:'))
+            .toSet();
+    var n = 0;
+    for (final r in await _respuestasSoporte(miId)) {
+      if (!abiertas.contains(_idSoporte(r.id, r.ts))) n++;
+    }
+    _soporteNoLeidas.value = n;
+    _actualizarBadgeNotificaciones();
+  }
+
+  /// Marca todas las respuestas de soporte como vistas (al abrir el hilo).
+  Future<void> _marcarSoporteVisto() async {
+    final miId = authService.usuarioActual?['id'] as String?;
+    if (miId == null) return;
+    final vistos = await _respuestasSoporte(miId);
+    if (vistos.isNotEmpty) {
+      await database.batch((b) {
+        for (final r in vistos) {
+          b.insert(
+            database.notificacionesAbiertas,
+            NotificacionesAbiertasCompanion.insert(
+                notificacionId: _idSoporte(r.id, r.ts)),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
+    }
+    _soporteNoLeidas.value = 0;
+    _actualizarBadgeNotificaciones();
   }
 
   /// Espejo del corazón: suma de chips no vistos del contador (única fuente).
@@ -1194,6 +1278,49 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       s.cancel();
     }
     _matchesRealtimeSubs = [matchesSubA, matchesSubB];
+
+    // Respuestas de soporte en vivo: como el resto de actividades, avisa
+    // con notificación local si la app está abierta (el push FCM cubre
+    // 2do plano/cerrada vía trigger notificar_push_soporte_trg).
+    final soporteSub = client
+        .from('soporte_mensajes')
+        .stream(primaryKey: ['id'])
+        .eq('usuario_id', miId)
+        .listen((eventos) async {
+      if (!_soporteSembrado) {
+        // Siembra: lo ya respondido no vuelve a sonar (ni tras reinicio).
+        for (final fila in eventos) {
+          final id = fila['id'] as String?;
+          if (id != null &&
+              (fila['respondido'] as bool?) == true) {
+            _soporteNotificados.add(id);
+          }
+        }
+        _soporteSembrado = true;
+        return;
+      }
+      for (final fila in eventos) {
+        final id = fila['id'] as String?;
+        if (id == null || _soporteNotificados.contains(id)) continue;
+        if ((fila['respondido'] as bool?) != true) continue;
+        final respuesta = (fila['respuesta'] as String?) ?? '';
+        if (respuesta.trim().isEmpty) continue;
+        _soporteNotificados.add(id);
+        _soporteNoLeidas.value++;
+        _actualizarBadgeNotificaciones();
+        await notificarNavegador(
+          'Soporte Flumi',
+          'Tienes una nueva respuesta de soporte',
+          categoria: 'soporte',
+        );
+      }
+    }, onError: (Object _) => _reconectarRealtime(miId, gen));
+    if (gen != _genRealtime) {
+      soporteSub.cancel();
+      return;
+    }
+    _soporteRealtimeSub?.cancel();
+    _soporteRealtimeSub = soporteSub;
   }
 
   void _reconectarRealtime(String miId, int gen) {
@@ -1389,7 +1516,8 @@ final visitas = await (database.select(database.visitas)
         matchesContados.length;
 
     _socialesNoLeidas.value = total;
-    _actualizarBadgeNotificaciones();
+    // Soporte: respuestas no vistas (su propio conteo + campana).
+    await _sincronizarSoporteNoLeidas(miId);
 }
 
   @override
@@ -1420,6 +1548,8 @@ final visitas = await (database.select(database.visitas)
     _likesRealtimeSub = null;
     _visitasRealtimeSub?.cancel();
     _visitasRealtimeSub = null;
+    _soporteRealtimeSub?.cancel();
+    _soporteRealtimeSub = null;
     for (final s in _matchesRealtimeSubs) {
       s.cancel();
     }
@@ -1434,6 +1564,7 @@ final visitas = await (database.select(database.visitas)
     _contadorMeGusta.removeListener(_sincronizarCorazonNav);
     _contadorMeGusta.dispose();
     _meGustaNoLeidas.dispose();
+    _soporteNoLeidas.dispose();
     _socialesNoLeidas.dispose();
     _mensajesNoLeidas.dispose();
     _chatsNoLeidosConversaciones.dispose();
@@ -1470,10 +1601,27 @@ final visitas = await (database.select(database.visitas)
         _indice = 2;
         _indiceMeGusta = 1; // Visitas
       });
+    } else if (c.contains('soporte')) {
+      // Respuesta de soporte (push FCM o aviso local) → abre el hilo.
+      _abrirSoporte();
     } else {
       // Fallback: bandeja general
       _abrirBandejaNotificaciones();
     }
+  }
+
+  void _abrirSoporte() {
+    // Hilo de Ayuda y soporte (tickets + respuestas), destino de los taps
+    // en notificaciones de categoría 'soporte'. El hilo marca las
+    // respuestas como vistas al mostrarlas (apaga campana, badge y punto).
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContactarSoportePantalla(
+          onRespuestasVistas: () => unawaited(_marcarSoporteVisto()),
+        ),
+      ),
+    );
   }
 
   void _abrirBandejaNotificaciones() {
@@ -1492,6 +1640,7 @@ final visitas = await (database.select(database.visitas)
           suscripcionServicio: suscripcionServicio,
           onAbierto: _marcarBandejaVista,
           onMarcarTodas: _marcarTodasNotificaciones,
+          onAbrirSoporte: _abrirSoporte,
           onNavegarA: (tab, subindice) {
             setState(() {
               _indice = tab;
@@ -1509,6 +1658,7 @@ final visitas = await (database.select(database.visitas)
     // revisan aquí. El corazón de Me Gusta no se toca (se limpia al
     // revisar la página o con "Marcar todos como vistos").
     _socialesNoLeidas.value = 0;
+    _soporteNoLeidas.value = 0;
     _actualizarBadgeNotificaciones();
   }
 
@@ -1518,6 +1668,7 @@ final visitas = await (database.select(database.visitas)
     // tocan; su badge se actualiza solo al abrir cada conversación.
     _socialesNoLeidas.value = 0;
     _mensajesNoLeidas.value = 0;
+    _soporteNoLeidas.value = 0;
     _actualizarBadgeNotificaciones();
   }
 
@@ -1544,6 +1695,26 @@ final visitas = await (database.select(database.visitas)
         ),
         onPressed: _abrirBandejaNotificaciones,
         tooltip: 'Notificaciones',
+      ),
+    );
+  }
+
+  /// Engrane de Configuración con badge: avisa de respuestas de soporte
+  /// nuevas sin leer. Vive en el encabezado de Perfil.
+  Widget _botonConfig(Color primario, BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: _soporteNoLeidas,
+      builder: (context, total, _) => IconButton(
+        icon: Badge(
+          isLabelVisible: total > 0,
+          label: Text(
+            '$total',
+            style: const TextStyle(fontSize: 10),
+          ),
+          child: Icon(Icons.settings_outlined, color: primario, size: 24),
+        ),
+        onPressed: () => _abrirConfiguracion(context),
+        tooltip: 'Configuración',
       ),
     );
   }
@@ -1598,21 +1769,15 @@ final visitas = await (database.select(database.visitas)
   }
 
 
-  Future<void> _editarPerfil() async {
-    final perfil = await perfilRepositorio.obtenerPerfilPropio();
-    if (perfil == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Completa tu perfil para editarlo'),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
+  void _editarPerfil() {
+    // Navegación instantánea: la pantalla muestra el caché y refresca en
+    // segundo plano. Antes se descargaba el perfil de la red ANTES de
+    // navegar (sin indicador), y la pantalla lo volvía a pedir al abrir.
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => EditarPerfilPantalla(perfil: perfil, repositorio: perfilRepositorio),
+        builder: (_) => EditarPerfilPantalla(
+            perfil: perfilRepositorio.perfilPropio.value,
+            repositorio: perfilRepositorio),
       ),
     );
   }
@@ -1626,6 +1791,8 @@ final visitas = await (database.select(database.visitas)
           db: database,
           suscripcionServicio: suscripcionServicio,
           syncService: syncService,
+          soporteNoLeidas: _soporteNoLeidas,
+          onRespuestasVistas: () => unawaited(_marcarSoporteVisto()),
           onCerrarSesion: _cerrarSesion,
         ),
       ),
@@ -1797,12 +1964,7 @@ final visitas = await (database.select(database.visitas)
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   _botonCampana(primario),
-                                  IconButton(
-                                    icon: Icon(Icons.settings_outlined,
-                                        color: primario, size: 24),
-                                    onPressed: () => _abrirConfiguracion(context),
-                                    tooltip: 'Configuración',
-                                  ),
+                                  _botonConfig(primario, context),
                                   IconButton(
                                     icon: Icon(Icons.edit_outlined,
                                         color: primario, size: 24),

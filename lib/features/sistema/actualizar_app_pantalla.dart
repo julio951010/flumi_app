@@ -54,7 +54,7 @@ class ActualizarAppPantalla extends StatelessWidget {
                   color: FlumiTema.colorPrimario.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.system_update_outlined,
                   size: 48,
                   color: FlumiTema.colorPrimario,

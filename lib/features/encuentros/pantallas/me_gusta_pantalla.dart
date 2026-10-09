@@ -72,7 +72,9 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
 
   /// Completa [mapa] con los perfiles que faltan (visitantes/likers aún no
   /// descargados) en una sola consulta, para que las grillas muestren
-  /// tarjetas reales en vez de descartarlos.
+  /// tarjetas reales en vez de descartarlos. Además los persiste en la BD
+  /// local: Chats/Personas leen de ahí sus fotos y sin esto sus círculos
+  /// quedan con la inicial.
   Future<void> _enriquecerPerfiles(
       Map<String, Usuario> mapa, List<String> ids) async {
     final faltantes =
@@ -91,6 +93,13 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
         final id = m['id'] as String?;
         if (id == null) continue;
         mapa[id] = PerfilMapeo.perfilRemotoAUsuario(m, esPropio: false);
+        try {
+          await widget.db.into(widget.db.usuarios).insertOnConflictUpdate(
+                PerfilMapeo.perfilRemotoACompanion(m, esPropio: false).copyWith(
+                  pendienteDeSincronizar: const Value(false),
+                ),
+              );
+        } catch (_) {}
       }
     } catch (_) {}
   }
@@ -170,6 +179,12 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
       _idsRecibidos = recibidos.map((h) => h.usuarioId).toSet();
       _idsSuperRecibidos =
           recibidos.where((h) => h.esSuper).map((h) => h.usuarioId).toSet();
+      // Reportados por mí: excluidos de todas las listas.
+      final reportados = (await (widget.db.select(widget.db.reportes)
+            ..where((r) => r.reportanteId.equals(widget.miId)))
+          .get())
+        .map((r) => r.reportadoId)
+        .toSet();
 
       // Los matches salen de la tabla matches (fuente canónica del
       // servidor, igual que popup, badges y bandeja): se quitan de Le
@@ -199,28 +214,35 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
           .map((h) => _ItemInteraccion(
               usuario: mapa[h.usuarioId], timestamp: h.timestamp))
           .where((i) =>
-              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
+              i.usuario != null &&
+              !idsMatch.contains(i.usuario!.uuid) &&
+              !reportados.contains(i.usuario!.uuid))
           .toList();
 
       _visitas = visitas
           .map((v) => _ItemInteraccion(
               usuario: mapa[v.visitanteId], timestamp: v.timestamp))
           .where((i) =>
-              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
+              i.usuario != null &&
+              !idsMatch.contains(i.usuario!.uuid) &&
+              !reportados.contains(i.usuario!.uuid))
           .toList();
 
       _misLikes = gustados
           .map((h) => _ItemInteraccion(
               usuario: mapa[h.usuarioLikeadoId], timestamp: h.timestamp))
           .where((i) =>
-              i.usuario != null && !idsMatch.contains(i.usuario!.uuid))
+              i.usuario != null &&
+              !idsMatch.contains(i.usuario!.uuid) &&
+              !reportados.contains(i.usuario!.uuid))
           .toList();
 
       _matches = idsMatch
           .map((id) => _ItemInteraccion(
               usuario: mapa[id],
               timestamp: timestampMatch[id] ?? DateTime.now()))
-          .where((i) => i.usuario != null)
+          .where((i) =>
+              i.usuario != null && !reportados.contains(i.usuario!.uuid))
           .toList()
         ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
       // Chips = interacciones no vistas. Se cuentan los ids crudos (sin
@@ -669,12 +691,70 @@ void _abrirMatch(Usuario usuario) {
                       esMatch: esMatch,
                       onChat: () => _abrirChat(usuario),
                       onMeGusta: () => _meGusta(usuario),
-                      onRechazar: esMatch
-                          ? () async {
-                              await _chatRepo.romperMatch(
-                                  usuario.uuid, widget.miId);
-                              if (mounted) Navigator.pop(context);
+                      onReportar: (codigo) async {
+                        final resultado =
+                            await _chatRepo.reportarUsuario(
+                          miId: widget.miId,
+                          otroId: usuario.uuid,
+                          motivo: codigo,
+                          detalle: 'desde: actividad',
+                        );
+                        if (mounted) {
+                          setState(() {
+                            for (final lista in [
+                              _likes,
+                              _visitas,
+                              _misLikes,
+                              _matches
+                            ]) {
+                              lista.removeWhere(
+                                  (i) => i.usuario?.uuid == usuario.uuid);
                             }
+                          });
+                        }
+                        return resultado;
+                      },
+                      onBloquear: () async {
+                        await _chatRepo.bloquearUsuario(
+                          miId: widget.miId,
+                          otroId: usuario.uuid,
+                        );
+                        if (mounted) {
+                          setState(() {
+                            for (final lista in [
+                              _likes,
+                              _visitas,
+                              _misLikes,
+                              _matches
+                            ]) {
+                              lista.removeWhere(
+                                  (i) => i.usuario?.uuid == usuario.uuid);
+                            }
+                          });
+                          Navigator.pop(context);
+                        }
+                      },
+onRechazar: esMatch
+                      ? () async {
+                          await _chatRepo.romperMatch(
+                              usuario.uuid, widget.miId);
+                          if (mounted) Navigator.pop(context);
+                        }
+                      : categoria == CategoriaMeGusta.misLikes
+                          // Mis Me Gustas: la X deshace mi like (como romper
+                          // el match, pero sin match).
+                          ? () async {
+                              await _historialLikesServicio
+                                  .eliminarLike(usuario.uuid);
+                              if (mounted) {
+                                setState(() {
+                                  _misLikes.removeWhere((i) =>
+                                      i.usuario?.uuid == usuario.uuid);
+                                });
+                                Navigator.pop(context);
+                              }
+                            }
+                          // Le gustas / Visitas: la X solo cierra el detalle.
                           : () => Navigator.pop(context),
                     ),
                   ),

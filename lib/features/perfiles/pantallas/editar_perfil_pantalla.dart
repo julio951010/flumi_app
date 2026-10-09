@@ -22,7 +22,8 @@ import 'subpaginas_perfil.dart';
 import 'verificacion_cuenta_pantalla.dart';
 
 class EditarPerfilPantalla extends StatefulWidget {
-  final Usuario perfil;
+  /// Perfil inicial (caché, puede ser null): la pantalla refresca sola.
+  final Usuario? perfil;
   final PerfilRepositorio repositorio;
 
   const EditarPerfilPantalla({
@@ -59,14 +60,30 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   @override
   void initState() {
     super.initState();
+    // Si hay caché se muestra al instante (sin loader); si no, loader
+    // mientras llega la red. Siempre se refresca en segundo plano.
+    _perfil = widget.perfil;
+    _cargando = widget.perfil == null;
     _recargar();
   }
 
   Future<void> _recargar() async {
     final perfil = await widget.repositorio.obtenerPerfilPropio();
     if (!mounted) return;
+    if (perfil == null && _perfil == null) {
+      // Sin perfil ni en red ni en caché: no hay nada que editar.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo cargar tu perfil'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      Navigator.of(context).pop();
+      return;
+    }
     setState(() {
-      _perfil = perfil;
+      _perfil = perfil ?? _perfil;
       _cargando = false;
     });
   }
@@ -855,6 +872,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
 
   Future<XFile?> _recortar(XFile foto) async {
     final bytes = await foto.readAsBytes();
+    if (!mounted) return null;
     final recortada = await Navigator.of(context).push<XFile>(
       MaterialPageRoute(
         builder: (_) => RecortarImagenPantalla(

@@ -98,9 +98,9 @@ class _LoginPantallaState extends State<LoginPantalla> {
           margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
           constraints: BoxConstraints(maxWidth: maxCardWidth),
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withOpacity(0.5)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(15),
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(15),
@@ -246,7 +246,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                           TextSpan(
                             text: '¿No tienes cuenta? ',
                             style: TextStyle(
-                              color: primario.withOpacity(0.85),
+                              color: primario.withValues(alpha: 0.85),
                               fontSize: 14,
                             ),
                             children: [
@@ -313,7 +313,7 @@ class _CampoAuth extends StatelessWidget {
         ),
         decoration: InputDecoration(
           filled: true,
-          fillColor: Colors.white.withOpacity(0.9),
+          fillColor: Colors.white.withValues(alpha: 0.9),
           labelText: label,
           labelStyle: TextStyle(
             color: esOscuro ? Colors.white70 : Colors.black45,
@@ -321,7 +321,7 @@ class _CampoAuth extends StatelessWidget {
           ),
           prefixIcon: Icon(
             icono,
-            color: colorPrimario.withOpacity(0.7),
+            color: colorPrimario.withValues(alpha: 0.7),
             size: 20,
           ),
           suffixIcon: esPassword
@@ -340,11 +340,11 @@ class _CampoAuth extends StatelessWidget {
               : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
+            borderSide: BorderSide(color: colorPrimario.withValues(alpha: 0.3)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorPrimario.withOpacity(0.3)),
+            borderSide: BorderSide(color: colorPrimario.withValues(alpha: 0.3)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),

@@ -1,43 +1,48 @@
 import 'package:flutter/material.dart';
 
-/// Placeholder que se muestra cuando una foto no carga (URL rota, sin red,
-/// archivo borrado) en lugar de dejar un hueco vacio.
+/// Fallback cuando una foto no carga (URL rota, sin red, archivo borrado):
+/// icono de Flumi grande y centrado en el área que ocuparía la imagen.
 class PlaceholderFoto extends StatelessWidget {
   final double? width;
   final double? height;
-  final String? inicial;
+  final String? inicial; // Sin uso: se conserva por compatibilidad.
 
   const PlaceholderFoto({super.key, this.width, this.height, this.inicial});
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      'assets/images/profile-picture-placeholder.png',
+    return Container(
       width: width,
       height: height,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) {
-        // Fallback si hasta el placeholder falla (asset no empaquetado)
-        final letra = (inicial ?? '').trim().isNotEmpty
-            ? inicial!.trim()[0].toUpperCase()
-            : null;
-        return Container(
-          width: width,
-          height: height,
-          color: const Color(0xFFE0E0E0),
-          alignment: Alignment.center,
-          child: letra != null
-              ? Text(
-                  letra,
-                  style: TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[500],
-                  ),
-                )
-              : Icon(Icons.person, size: 48, color: Colors.grey[500]),
-        );
-      },
+      color: const Color(0xFFF4F2FA),
+      alignment: Alignment.center,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Logo al 60% del lado menor cuando el área es conocida;
+          // tamaño natural si el área no tiene cota.
+          double? lado;
+          if (constraints.maxWidth.isFinite &&
+              constraints.maxHeight.isFinite) {
+            final menor = constraints.maxWidth < constraints.maxHeight
+                ? constraints.maxWidth
+                : constraints.maxHeight;
+            if (menor > 0) lado = menor * 0.6;
+          } else if (width != null && width! > 0) {
+            lado = width! * 0.6;
+          }
+          return Image.asset(
+            'assets/images/flumi_logo.png',
+            width: lado,
+            height: lado,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Icon(
+              Icons.broken_image_outlined,
+              size: lado ?? 64,
+              color: Colors.grey[400],
+            ),
+          );
+        },
+      ),
     );
   }
 }

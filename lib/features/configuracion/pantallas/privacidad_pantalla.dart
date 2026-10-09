@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 
 import '../../../core/base_datos_local/database.dart';
@@ -65,15 +66,15 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
       _mostrarBloqueoPremium('Mostrarme en línea');
       return;
     }
-    final user = await (widget.db.select(widget.db.usuarios)
-          ..where((u) => u.esPerfilPropio.equals(true))
-          ..limit(1))
-        .getSingleOrNull();
-    if (user != null) {
-      await widget.db.update(widget.db.usuarios).replace(
-        user.copyWith(ocultarEnLinea: !valor, pendienteDeSincronizar: true),
-      );
-      widget.syncService.sincronizarPerfil();
+    // Por el repositorio (no escritura directa): actualiza Supabase, el
+    // espejo local Y avisa a perfilPropio para que la app lo refleje live.
+    final perfil = await widget.repositorio.obtenerPerfilPropio();
+    if (perfil != null) {
+      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+        uuid: Value(perfil.uuid),
+        ocultarEnLinea: Value(!valor),
+        pendienteDeSincronizar: const Value(true),
+      ));
     }
     if (mounted) setState(() => _mostrarEnLinea = valor);
   }
@@ -83,15 +84,13 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
       _mostrarBloqueoPlus('Mostrarme solo a personas dentro de mi rango de edad');
       return;
     }
-    final user = await (widget.db.select(widget.db.usuarios)
-          ..where((u) => u.esPerfilPropio.equals(true))
-          ..limit(1))
-        .getSingleOrNull();
-    if (user != null) {
-      await widget.db.update(widget.db.usuarios).replace(
-        user.copyWith(ocultarEdad: valor, pendienteDeSincronizar: true),
-      );
-      widget.syncService.sincronizarPerfil();
+    final perfil = await widget.repositorio.obtenerPerfilPropio();
+    if (perfil != null) {
+      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+        uuid: Value(perfil.uuid),
+        ocultarEdad: Value(valor),
+        pendienteDeSincronizar: const Value(true),
+      ));
     }
     if (mounted) setState(() => _soloRangoEdad = valor);
   }

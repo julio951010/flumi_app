@@ -189,8 +189,9 @@ class _ActualizarNombrePantallaState extends State<ActualizarNombrePantalla> {
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _guardando = true);
-    try {
+try {
       final perfil = await widget.repositorio.obtenerPerfilPropio();
+      if (!mounted) return;
       if (perfil == null) {
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;
@@ -456,6 +457,7 @@ class _ActualizarFechaPantallaState extends State<ActualizarFechaPantalla> {
     setState(() => _guardando = true);
     try {
       final perfil = await widget.repositorio.obtenerPerfilPropio();
+      if (!mounted) return;
       if (perfil == null) {
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;
@@ -743,6 +745,7 @@ class _ActualizarGeneroPantallaState extends State<ActualizarGeneroPantalla> {
     setState(() => _guardando = true);
     try {
       final perfil = await widget.repositorio.obtenerPerfilPropio();
+      if (!mounted) return;
       if (perfil == null) {
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;
@@ -1053,6 +1056,7 @@ class _ActualizarUbicacionPantallaState
     setState(() => _guardando = true);
     try {
       final perfil = await widget.repositorio.obtenerPerfilPropio();
+      if (!mounted) return;
       if (perfil == null) {
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;

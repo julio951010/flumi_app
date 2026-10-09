@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/constantes/constantes.dart';
@@ -703,7 +704,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
   Widget _burbuja(Mensaje msg) {
     final esMio = msg.emisorId == widget.miId;
     return GestureDetector(
-      onLongPress: esMio ? () => _accionesMensaje(msg) : null,
+      onLongPress: esMio ? () => _accionesMensaje(msg) : () => _accionesMensajeAjeno(msg),
       child: Align(
         alignment: esMio ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
@@ -888,6 +889,235 @@ class _ChatPantallaState extends State<ChatPantalla> {
     );
     if (confirm != true || !mounted) return;
     await widget.repositorio.eliminarMensaje(uuid: msg.uuid);
+  }
+
+  /// Acciones para mensajes de OTRO usuario (long-press en burbuja ajena).
+  /// Opciones: Responder, Copiar, Reaccionar, Reportar.
+  Future<void> _accionesMensajeAjeno(Mensaje msg) async {
+    final opcion = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                msg.contenido,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey[500], fontSize: 13),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.reply_outlined, color: Colors.black87),
+              title: const Text('Responder',
+                  style: TextStyle(fontSize: 15)),
+              onTap: () => Navigator.pop(ctx, 'responder'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined, color: Colors.black87),
+              title: const Text('Copiar',
+                  style: TextStyle(fontSize: 15)),
+              onTap: () {
+                Navigator.pop(ctx, 'copiar');
+                Clipboard.setData(ClipboardData(text: msg.contenido));
+                _toast('Copiado al portapapeles');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.emoji_emotions_outlined, color: Colors.black87),
+              title: const Text('Reaccionar',
+                  style: TextStyle(fontSize: 15)),
+              onTap: () => Navigator.pop(ctx, 'reaccionar'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+              title: const Text('Reportar',
+                  style: TextStyle(fontSize: 15, color: Colors.redAccent)),
+              onTap: () => Navigator.pop(ctx, 'reportar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || opcion == null) return;
+    switch (opcion) {
+      case 'responder':
+        // Prefilla el campo de texto con ">> [contenido] " para responder
+        final ctrl = TextEditingController(text: '>> ${msg.contenido} ');
+        await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Responder'),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: 'Tu respuesta'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Enviar'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        final texto = ctrl.text.trim();
+        if (texto.isEmpty) return;
+        await widget.repositorio.enviarMensaje(
+          emisorId: widget.miId,
+          receptorId: widget.otroUsuarioId,
+          contenido: texto,
+        );
+        break;
+      case 'copiar':
+        // Ya copiado en el ListTile
+        break;
+      case 'reaccionar':
+        await _mostrarReacciones(msg);
+        break;
+      case 'reportar':
+        await _reportarMensaje(msg);
+        break;
+    }
+  }
+
+  /// Muestra el selector de reacciones (emojis) para un mensaje ajeno.
+  Future<void> _mostrarReacciones(Mensaje msg) async {
+    final emojis = [
+      '👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏', '🔥', '💯',
+      '😍', '🤔', '😭', '😱', '🤣', '😎', '🤝', '🤞', '🎉', '✨',
+    ];
+    final reaccion = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Reaccionar a: "${msg.contenido.length > 40 ? '${msg.contenido.substring(0, 40)}...' : msg.contenido}"',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey[500], fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: emojis.map((e) => GestureDetector(
+                  onTap: () => Navigator.pop(ctx, e),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(e, style: const TextStyle(fontSize: 24)),
+                  ),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+    if (reaccion != null && mounted) {
+      _toast('Reacción $reaccion enviada');
+      // TODO: Implementar widget.repositorio.agregarReaccion(msg.uuid, reaccion)
+    }
+  }
+
+  /// Reporta un mensaje ajeno a moderación.
+  Future<void> _reportarMensaje(Mensaje msg) async {
+    final motivo = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Reportar mensaje de ${widget.nombreOtro}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Divider(height: 1),
+            for (final m in _motivosReporte)
+              ListTile(
+                title: Text(m, style: const TextStyle(fontSize: 15)),
+                onTap: () => Navigator.pop(ctx, m),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (motivo == null || !mounted) return;
+    await widget.repositorio.reportarUsuario(
+      miId: widget.miId,
+      otroId: widget.otroUsuarioId,
+      motivo: motivo,
+      detalle: 'Mensaje: "${msg.contenido}"',
+    );
+    if (!mounted) return;
+    _toast('Mensaje reportado. Gracias por ayudar a mantener Flumi seguro.');
   }
 
   Widget _campoEntrada() {

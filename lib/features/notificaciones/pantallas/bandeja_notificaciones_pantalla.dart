@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/preferencias_notificaciones_servicio.dart';
@@ -10,7 +12,7 @@ import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
 
-enum TipoNotificacion { meGusta, visita, match, mensaje }
+enum TipoNotificacion { meGusta, visita, match, mensaje, soporte }
 
 class BandejaNotificacionesPantalla extends StatefulWidget {
   final AppDatabase db;
@@ -27,6 +29,10 @@ class BandejaNotificacionesPantalla extends StatefulWidget {
   /// cuando la notificación no se puede abrir sin plan.
   final void Function(int tab, int subindice)? onNavegarA;
 
+  /// Abre el hilo de Ayuda y soporte (tickets + respuestas) al tocar una
+  /// notificación de tipo soporte.
+  final VoidCallback? onAbrirSoporte;
+
   const BandejaNotificacionesPantalla({
     super.key,
     required this.db,
@@ -37,6 +43,7 @@ class BandejaNotificacionesPantalla extends StatefulWidget {
     this.onAbierto,
     this.onMarcarTodas,
     this.onNavegarA,
+    this.onAbrirSoporte,
   });
 
   @override
@@ -166,6 +173,38 @@ class _BandejaNotificacionesPantallaState
         ));
       }
 
+      // Respuestas de soporte (transaccionales, siempre visibles): una por
+      // ticket respondido. El id sigue el esquema 'soporte:<ticket>:<ms>'
+      // para compartir el visto con la campana (main).
+      if (!kUsarServidorLocal) {
+        try {
+          final res = await Supabase.instance.client
+              .from('soporte_mensajes')
+              .select('id,respuesta,respondido_en,creado_en')
+              .eq('usuario_id', miId)
+              .eq('respondido', true)
+              .order('respondido_en', ascending: false)
+              .limit(20)
+              .timeout(const Duration(seconds: 8));
+          for (final f in (res as List).cast<Map<String, dynamic>>()) {
+            final respuesta = (f['respuesta'] as String?) ?? '';
+            if (respuesta.trim().isEmpty) continue;
+            final ts = DateTime.tryParse(
+                    (f['respondido_en'] as String?) ?? '') ??
+                DateTime.tryParse((f['creado_en'] as String?) ?? '') ??
+                DateTime.now();
+            items.add(_NotificacionInbox(
+              id: 'soporte:${f['id']}:${ts.millisecondsSinceEpoch}',
+              tipo: TipoNotificacion.soporte,
+              usuario: null,
+              nombre: 'Soporte',
+              timestamp: ts,
+              preview: respuesta,
+            ));
+          }
+        } catch (_) {}
+      }
+
       // Refresca el espejo local (el await sincroniza; el resultado no se
       // usa aquí: Mis gustas no se listan en la bandeja).
       await _historialLikesServicio.obtenerHistorial();
@@ -223,6 +262,9 @@ class _BandejaNotificacionesPantallaState
         return prefs.visitas;
       case TipoNotificacion.match:
         return prefs.matches;
+      case TipoNotificacion.soporte:
+        // Transaccional (respuesta esperada): siempre visible.
+        return true;
     }
   }
 
@@ -250,6 +292,8 @@ class _BandejaNotificacionesPantallaState
         return '\u00a1Hiciste match con ${n.nombre}!';
       case TipoNotificacion.mensaje:
         return 'Nuevo mensaje de ${n.nombre}';
+      case TipoNotificacion.soporte:
+        return 'Soporte respondió tu mensaje';
     }
   }
 
@@ -263,6 +307,8 @@ class _BandejaNotificacionesPantallaState
         return Icons.whatshot;
       case TipoNotificacion.mensaje:
         return Icons.chat_bubble;
+      case TipoNotificacion.soporte:
+        return Icons.support_agent;
     }
   }
 
@@ -275,6 +321,8 @@ class _BandejaNotificacionesPantallaState
       case TipoNotificacion.match:
         return Colors.orangeAccent;
       case TipoNotificacion.mensaje:
+        return FlumiTema.colorPrimario;
+      case TipoNotificacion.soporte:
         return FlumiTema.colorPrimario;
     }
   }
@@ -381,6 +429,13 @@ class _BandejaNotificacionesPantallaState
       _items.removeWhere(
           (item) => item.id == n.id && item.timestamp == n.timestamp);
     });
+    // Soporte: abre el hilo (no hay perfil/chat destino).
+    if (n.tipo == TipoNotificacion.soporte) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onAbrirSoporte?.call();
+      return;
+    }
     final usuario = n.usuario;
     if (usuario == null) return;
     // Destinos de tap (igual que push): mensaje→Chats; match→Actividad/
@@ -400,6 +455,9 @@ class _BandejaNotificacionesPantallaState
       case TipoNotificacion.visita:
         tab = 2;
         subindice = 1;
+      case TipoNotificacion.soporte:
+        // Ya manejado arriba (abre el hilo); inalcanzable.
+        return;
     }
     if (!mounted) return;
     Navigator.pop(context);
@@ -589,7 +647,7 @@ class _BandejaNotificacionesPantallaState
             ),
             const SizedBox(height: 8),
             Text(
-              'Cuando tengas matches, mensajes, likes o visitas te avisaremos aqu\u00ed.',
+              'Cuando tengas matches, mensajes, likes, visitas o respuestas de soporte te avisaremos aqu\u00ed.',
               textAlign: TextAlign.center,
               style: TextStyle(
                   fontSize: 14, color: Colors.grey[500], height: 1.4),

@@ -453,6 +453,67 @@ create policy "usuario_crea_reportes_como_si_mismo"
   on public.reports for insert
   with check (auth.uid() = reportante_id);
 
+-- Tope anti-abuso: más de 20 reportes/día por cuenta se descartan en
+-- silencio (RETURN NULL: el insert no ocurre y no da error, así el sync
+-- del cliente lo marca subido y no reintenta eternamente). El cliente ya
+-- frena en 10/día; esto es el backstop servidor.
+create or replace function public.limitar_reportes_diarios()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_n int;
+begin
+  select count(*) into v_n
+    from public.reports
+   where reportante_id = new.reportante_id
+     and ("timestamp"::date) = current_date;
+  if v_n >= 20 then
+    return null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_limitar_reportes on public.reports;
+create trigger trg_limitar_reportes
+  before insert on public.reports
+  for each row execute function public.limitar_reportes_diarios();
+
+-- Auto-moderación: con 5+ reportantes distintos pendientes de revisión,
+-- el perfil se oculta solo (ocultar_perfil) hasta revisión manual del
+-- admin. Un fallo aquí nunca rompe el insert del reporte.
+create or replace function public.autoocultar_por_reportes()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_n int;
+begin
+  begin
+    select count(distinct reportante_id) into v_n
+      from public.reports
+     where reportado_id = new.reportado_id
+       and coalesce(revisado, false) = false;
+    if v_n >= 5 then
+      update public.profiles
+         set ocultar_perfil = true
+       where id = new.reportado_id;
+    end if;
+  exception when others then
+    null;
+  end;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_autoocultar_reportes on public.reports;
+create trigger trg_autoocultar_reportes
+  after insert on public.reports
+  for each row execute function public.autoocultar_por_reportes();
+
 -- BLOCKS
 drop policy if exists "usuario_gestiona_sus_bloqueos" on public.blocks;
 create policy "usuario_gestiona_sus_bloqueos"
@@ -1004,9 +1065,14 @@ begin
         and p.ocultar_perfil = false
         and p.id not in (''00000000-0000-0000-0000-00000000000a'', ''00000000-0000-0000-0000-00000000000f'')
         %s
-        and not exists (select 1 from public.blocks b
-                        where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
-                           or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
+         and not exists (select 1 from public.blocks b
+                         where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
+                            or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
+         -- Reportado y pendiente de revisión: no sale en el feed del
+         -- reportante (si el admin lo desestima, vuelve a salir).
+         and not exists (select 1 from public.reports r
+                         where r.reportante_id = $1 and r.reportado_id = p.id
+                           and coalesce(r.revisado, false) = false)
         -- Sin veto permanente por nopes: el rechazo solo ordena/recicla en
         -- el cliente (VotosServicio.componerDeck) y el Deshacer borra la fila.
         -- El abuso por ciclado nope/deshacer ya lo frena el cupo de Deshacer.
@@ -1271,15 +1337,131 @@ create policy "contenidos_admin"
   using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true))
   with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
 
+-- Semilla de contenidos legales. Las filas terminos/privacidad traen el
+-- texto vigente (espejo de las pantallas de registro). El upsert solo
+-- reemplaza el placeholder 'Contenido en redacción.': nunca pisa ediciones
+-- reales hechas desde admin_flumi.
 insert into public.contenidos_legales (clave, titulo, cuerpo)
 values
-  ('terminos', 'Términos y condiciones de uso', 'Contenido en redacción.'),
-  ('privacidad', 'Políticas de privacidad', 'Contenido en redacción.'),
-  ('seguridad_infantil', 'Políticas de seguridad infantil', 'Contenido en redacción.'),
-  ('licencias', 'Licencias', 'Contenido en redacción.'),
+  ('terminos', 'Términos y condiciones de uso',
+   'Términos y Condiciones de Uso (Octubre 2026)
+
+1. Aceptación de los Términos
+Al registrarte y usar Flumi ("la Aplicación"), aceptas los presentes Términos y Condiciones. Si no estás de acuerdo con alguna parte, no debes usar la Aplicación.
+
+2. Elegibilidad
+Debes tener al menos 18 años para usar la Aplicación. Al registrarte, declaras y garantizas que cumples con este requisito.
+
+3. Registro y Cuenta
+Eres responsable de mantener la confidencialidad de tus credenciales de inicio de sesión. No debes compartir tu cuenta con terceros.
+
+4. Suscripciones y Pagos
+Flumi ofrece los planes Gratis, Plus y Premium por períodos de 7, 30 o 90 días. Los planes de pago se contratan con pago manual por Transfermóvil o EnZona: tras pagar, introduces el Nro. de transacción del SMS de confirmación. Si los datos coinciden, tu plan se activa automáticamente; si no, queda en verificación manual (menos de 24 horas). No hay renovación automática: cada período se paga por separado. Si un pago no se acredita, contáctanos desde Ayuda y soporte.
+
+5. Verificación de Cuenta
+Puedes verificar tu cuenta con una selfie tomada con tu cámara frontal. La revisión es manual y tienes 3 intentos cada 24 horas. Las cuentas verificadas reciben una insignia y más visibilidad. La verificación confirma que hay una persona real detrás del perfil, pero no garantiza la identidad ni la conducta de ningún usuario.
+
+6. Conducta del Usuario
+No está permitido: (a) acosar, abusar o dañar a otros usuarios; (b) publicar contenido falso, inapropiado o engañoso; (c) usar la Aplicación para fines ilegales o no autorizados; (d) crear perfiles falsos o suplantar a otros. Puedes reportar y bloquear perfiles desde la propia Aplicación.
+
+7. Moderación y Terminación
+Revisamos los reportes de la comunidad. Podemos ocultar perfiles, eliminar contenido o terminar cuentas que incumplan estos Términos, sin previo aviso en casos graves. Los perfiles con múltiples reportes pendientes pueden ocultarse automáticamente hasta su revisión.
+
+8. Contenido del Usuario
+Eres el único responsable de las fotos, información y contenido que publiques en tu perfil. Al subirlo, nos otorgas una licencia gratuita para mostrarlo dentro de la Aplicación. Nos reservamos el derecho de eliminar contenido inapropiado.
+
+9. Encuentros en Persona
+Flumi no verifica los antecedentes de sus usuarios ni supervisa los encuentros. Si decides conocer a alguien en persona, hazlo en lugares públicos y avisa a una persona de tu confianza.
+
+10. Privacidad
+El uso de tus datos personales se rige por nuestras Políticas de Privacidad, las cuales forman parte integral de estos Términos.
+
+11. Limitación de Responsabilidad
+Flumi no se hace responsable por daños directos o indirectos derivados del uso de la Aplicación, incluyendo pero no limitado a encuentros entre usuarios.
+
+12. Modificaciones
+Nos reservamos el derecho de modificar estos Términos en cualquier momento. Te notificaremos sobre cambios significativos a través de la Aplicación.
+
+13. Contacto
+Para preguntas sobre estos Términos, contáctanos a través de Ayuda y soporte en la Aplicación.'),
+  ('privacidad', 'Políticas de privacidad',
+   'Políticas de Privacidad (Octubre 2026)
+
+1. Información que Recopilamos
+Recopilamos la información que nos proporcionas directamente al registrarte y usar la Aplicación: nombre, correo electrónico, fecha de nacimiento, género, preferencias, fotos, biografía y ubicación (incluida su actualización cuando usas la app para mostrarte personas cerca de ti). Para verificar pagos, con tu permiso leemos los SMS de confirmación de PAGOxMOVIL y ENZONA (solo número, monto, remitente y fecha de la transacción) y guardamos el Nro. de transacción que introduces. Para verificar tu cuenta usamos la selfie que tomas con tu cámara frontal. También recogemos datos técnicos básicos (notificaciones, versión de la app) para su funcionamiento.
+
+2. Cómo Usamos tu Información
+Usamos tu información para: (a) crear y mantener tu perfil; (b) mostrarte perfiles compatibles según tus preferencias; (c) permitir la comunicación entre usuarios; (d) activar tus suscripciones y verificar tus pagos; (e) revisar reportes y garantizar la seguridad de la comunidad; (f) enviarte notificaciones sobre actividad relevante.
+
+3. Compartición de Datos
+No vendemos tu información personal a terceros. Tu perfil es visible para otros usuarios registrados según tus preferencias de privacidad. Los SMS leídos y las selfies de verificación solo se usan para el fin descrito y no se comparten.
+
+4. Seguridad
+Implementamos medidas de seguridad técnicas y organizativas para proteger tus datos personales contra acceso no autorizado, pérdida o alteración.
+
+5. Retención de Datos
+Conservamos tus datos mientras tengas una cuenta activa. Si eliminas tu cuenta, tus datos se eliminan en un plazo de 30 días, excepto cuando la ley requiera su retención.
+
+6. Tus Derechos
+Tienes derecho a acceder, rectificar o eliminar tus datos personales en cualquier momento desde la configuración de tu perfil. Puedes desactivar los permisos de ubicación, cámara, SMS y notificaciones desde los ajustes de tu teléfono (algunas funciones dejarán de estar disponibles).
+
+7. Menores de Edad
+Flumi es solo para mayores de 18 años. Si detectamos una cuenta de un menor, la eliminamos. Si eres padre o tutor y lo sospechas, repórtalo desde Ayuda y soporte.
+
+8. Cambios a esta Política
+Te notificaremos sobre cambios significativos a través de la Aplicación.
+
+9. Contacto
+Si tienes preguntas sobre esta Política de Privacidad, contáctanos a través de Ayuda y soporte en la Aplicación.'),
+  ('seguridad_infantil', 'Políticas de seguridad infantil',
+   'Políticas de Seguridad Infantil (Octubre 2026)
+
+1. Solo mayores de 18 años
+Flumi es exclusivamente para personas adultas. No permitimos cuentas de menores de 18 años bajo ninguna circunstancia.
+
+2. Verificación de edad
+Exigimos fecha de nacimiento al registrarse y la verificamos. Si detectamos la cuenta de un menor, la eliminamos de inmediato junto con su contenido.
+
+3. Tolerancia cero
+Está prohibido cualquier contenido o conducta que involucre o ponga en riesgo a menores: fotos, mensajes, solicitudes o insinuaciones. Quien lo haga será expulsado y su cuenta eliminada sin previo aviso.
+
+4. Reporte
+Si ves un perfil que sospechas es de un menor o cualquier contenido relacionado, repórtalo desde la propia app (menú de opciones > Reportar > Menor de edad) o desde Ayuda y soporte. Revisamos estos reportes con prioridad.
+
+5. Cooperación
+Colaboramos con las autoridades competentes en los casos que lo requieran, conservando la evidencia necesaria según la ley.'),
+  ('licencias', 'Licencias',
+   'Licencias (Octubre 2026)
+
+Flumi está construido con software de código abierto y servicios de terceros. Agradecemos a sus comunidades:
+
+- Flutter (BSD): framework de la aplicación. https://flutter.dev
+- Supabase (Apache-2.0): backend (base de datos, autenticación). https://supabase.com
+- Firebase (Google): notificaciones push. https://firebase.google.com
+- OpenStreetMap: datos de mapas. Colaboradores de OpenStreetMap. https://www.openstreetmap.org/copyright
+- Paquetes open source de pub.dev bajo licencias MIT/BSD/Apache-2.0 (ver sus repositorios).
+
+Las marcas y logos de terceros pertenecen a sus respectivos dueños. El nombre, logo e identidad visual de Flumi pertenecen a sus titulares.'),
   ('contactos', 'Contactos', 'Contenido en redacción.'),
-  ('sobre_flumi', 'Sobre Flumi', 'Contenido en redacción.')
-on conflict (clave) do nothing;
+  ('sobre_flumi', 'Sobre Flumi',
+   'Sobre Flumi (Octubre 2026)
+
+1. Qué es Flumi
+Flumi es la app cubana para conocer personas y dejarte llevar por la corriente: descubre perfiles cerca de ti, da Me Gusta, haz match y conversa.
+
+2. Nuestra misión
+Crear conexiones reales y seguras: perfiles verificados, moderación activa y herramientas para que siempre tengas el control (filtros, modo invisible, bloqueo y reporte).
+
+3. Cómo funciona
+Completa tu perfil, verifica tu cuenta, explora Encuentros y Cerca de ti, y chatea con tus matches. Con Plus y Premium desbloqueas más alcance: más Me Gustas, Superlikes, ver quién te visitó y navegar invisible.
+
+4. Contacto
+¿Dudas, ideas o reportes? Escríbenos desde Ayuda y soporte en la app o en nuestras redes oficiales.')
+on conflict (clave) do update
+  set titulo = excluded.titulo,
+      cuerpo = excluded.cuerpo,
+      actualizado_en = now()
+  where contenidos_legales.cuerpo = 'Contenido en redacción.';
 
 -- ============================================================
 -- PAGOS: configuración de datos de transferencia por método
@@ -1597,6 +1779,86 @@ drop trigger if exists notificar_push_match_trg on public.matches;
 create trigger notificar_push_match_trg
   after insert on public.matches
   for each row execute function public.notificar_push_match();
+
+-- ============================================================
+-- Bienvenida: mensaje del perfil oficial "Flumi" al registrarse.
+-- Lo llama la app tras el signUp/verificación (fire-and-forget).
+-- Idempotente: solo el primer mensaje de Flumi por usuario. Dispara el
+-- trigger de push de mensajes (si el dispositivo ya registró token).
+-- ============================================================
+create or replace function public.enviar_bienvenida_nuevo_usuario()
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+begin
+  if yo is null then
+    return;
+  end if;
+  if exists (
+    select 1 from public.messages
+     where emisor_id = '00000000-0000-0000-0000-00000000000f'
+       and receptor_id = yo
+  ) then
+    return;
+  end if;
+  begin
+    insert into public.messages (emisor_id, receptor_id, contenido)
+    values (
+      '00000000-0000-0000-0000-00000000000f',
+      yo,
+      '¡Te damos la bienvenida a Flumi! Completa tu perfil, verifica tu cuenta y deja que todo fluya.'
+    );
+  exception when others then
+    null;
+  end;
+end;
+$$;
+
+revoke all on function public.enviar_bienvenida_nuevo_usuario() from public;
+grant execute on function public.enviar_bienvenida_nuevo_usuario() to authenticated;
+
+-- Trigger: avisar al usuario cuando soporte responde su mensaje/ticket.
+-- La app también lo muestra en vivo por Realtime; el push cubre 2do plano
+-- y app cerrada. Categoría 'soporte': sin columna en notif_prefs, así que
+-- enviar_push_pg la permite siempre (rama else → true).
+create or replace function public.notificar_push_soporte()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  -- Solo al responder: ni al crear el ticket ni en ediciones sin respuesta.
+  if coalesce(new.respondido, false) = false then
+    return new;
+  end if;
+  if coalesce(new.respuesta, '') = '' then
+    return new;
+  end if;
+  if old.respondido is not distinct from new.respondido
+     and old.respuesta is not distinct from new.respuesta then
+    return new;
+  end if;
+  begin
+    perform public.enviar_push_pg(
+      new.usuario_id,
+      'Soporte Flumi'::text,
+      left(coalesce(new.respuesta, ''), 100)::text,
+      'soporte'::text
+    );
+  exception when others then
+    null;
+  end;
+  return new;
+end;
+$$;
+
+drop trigger if exists notificar_push_soporte_trg on public.soporte_mensajes;
+create trigger notificar_push_soporte_trg
+  after insert or update on public.soporte_mensajes
+  for each row execute function public.notificar_push_soporte();
 
 -- ============================================================
 -- PAGOS MANUALES (Transfermóvil / EnZona) — verificación segura
@@ -2045,3 +2307,105 @@ $$;
 
 revoke all on function public.limpiar_interacciones_pruebas() from public;
 grant execute on function public.limpiar_interacciones_pruebas() to authenticated;
+
+-- ============================================================
+-- Dashboard admin: estadísticas agregadas en una sola llamada.
+-- Solo admin (is_admin). SECURITY DEFINER: lee tablas con RLS
+-- restrictivo (messages, matches) sin exponer filas al cliente.
+-- ============================================================
+create or replace function public.estadisticas_admin()
+returns jsonb
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  yo uuid := auth.uid();
+  es_admin boolean := false;
+begin
+  if yo is null then
+    raise exception 'No autenticado';
+  end if;
+  select coalesce(is_admin, false) into es_admin
+    from public.profiles where id = yo;
+  if not es_admin then
+    raise exception 'No autorizado';
+  end if;
+
+  return jsonb_build_object(
+    'usuarios_total', (
+      select count(*) from public.profiles
+       where id not in ('00000000-0000-0000-0000-00000000000a',
+                        '00000000-0000-0000-0000-00000000000f')),
+    'usuarios_hoy', (
+      select count(*) from public.profiles
+       where creado_en::date = current_date
+         and id not in ('00000000-0000-0000-0000-00000000000a',
+                        '00000000-0000-0000-0000-00000000000f')),
+    'usuarios_7d', (
+      select count(*) from public.profiles
+       where creado_en::date >= current_date - 6
+         and id not in ('00000000-0000-0000-0000-00000000000a',
+                        '00000000-0000-0000-0000-00000000000f')),
+    'verificados', (
+      select count(*) from public.profiles
+       where coalesce(verificado_status, false) = true),
+    'perfiles_completados', (
+      select count(*) from public.profiles
+       where coalesce(perfil_completado, false) = true),
+    'ocultos', (
+      select count(*) from public.profiles
+       where coalesce(ocultar_perfil, false) = true),
+    'en_linea', (
+      select count(*) from public.profiles
+       where ultima_conexion > now() - interval '5 minutes'),
+    'matches_total', (select count(*) from public.matches),
+    'mensajes_total', (select count(*) from public.messages),
+    'mensajes_hoy', (
+      select count(*) from public.messages
+       where "timestamp"::date = current_date),
+    'likes_hoy', (
+      select count(*) from public.historial_likes
+       where "timestamp"::date = current_date),
+    'visitas_hoy', (
+      select count(*) from public.visitas
+       where "timestamp"::date = current_date),
+    'reportes_pendientes', (
+      select count(*) from public.reports
+       where coalesce(revisado, false) = false),
+    'soportes_pendientes', (
+      select count(*) from public.soporte_mensajes
+       where coalesce(respondido, false) = false),
+    'pagos_pendientes', (
+      select count(*) from public.pagos
+       where estado = 'pendiente'),
+'suscripciones', (
+      select jsonb_build_object(
+        'plus', (
+          select count(*) from public.suscripciones
+           where plan = 'plus' and coalesce(activa, true) = true
+             and (vence is null or vence > now())),
+        'premium', (
+          select count(*) from public.suscripciones
+           where plan = 'premium' and coalesce(activa, true) = true
+             and (vence is null or vence > now()))
+      )),
+    'serie_7d', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'fecha', d.dia::text,
+        'usuarios', (select count(*) from public.profiles p
+                      where p.creado_en::date = d.dia
+                        and p.id not in ('00000000-0000-0000-0000-00000000000a',
+                                         '00000000-0000-0000-0000-00000000000f')),
+        'mensajes', (select count(*) from public.messages m
+                      where m."timestamp"::date = d.dia),
+        'matches', (select count(*) from public.matches m
+                     where m.timestamp_match::date = d.dia)
+      ) order by d.dia), '[]'::jsonb)
+      from (select (current_date - s)::date as dia
+              from generate_series(6, 0, -1) as s) as d)
+  );
+end;
+$$;
+
+revoke all on function public.estadisticas_admin() from public;
+grant execute on function public.estadisticas_admin() to authenticated;

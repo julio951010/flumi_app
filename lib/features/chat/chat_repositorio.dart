@@ -56,6 +56,10 @@ class ResumenConversacion {
   });
 }
 
+/// Resultado de reportar: enviado (nuevo), duplicado (ya existía uno para
+/// el par: se actualiza motivo/detalle) o limite (tope diario alcanzado).
+enum ResultadoReporte { enviado, duplicado, limite }
+
 class ChatRepositorio {
   /// Ventana de frescura de `ultima_conexion` para considerar en línea.
   /// 5 min en toda la app (antes 2 aquí y 5 en encuentros/tarjetas: el mismo
@@ -892,31 +896,64 @@ class ChatRepositorio {
     unawaited(_sync?.sincronizarMensajesPendientes());
   }
 
-  Future<void> reportarUsuario({
+  /// Un reporte por pareja: si ya existe uno (pendiente o subido) se
+  /// actualiza en vez de duplicar. Tope: 10 reportes/día por cuenta.
+  Future<ResultadoReporte> reportarUsuario({
     required String miId,
     required String otroId,
     required String motivo,
+    String detalle = '',
   }) async {
-    await _db.into(_db.reportes).insert(ReportesCompanion.insert(
-      uuid: const Uuid().v4(),
-      reportanteId: miId,
-      reportadoId: otroId,
-      motivo: motivo,
-      timestamp: DateTime.now(),
-    ));
+    final ahora = DateTime.now();
+    final inicioDia = DateTime(ahora.year, ahora.month, ahora.day);
+    final deHoy = await (_db.select(_db.reportes)
+          ..where((r) =>
+              r.reportanteId.equals(miId) &
+              r.timestamp.isBiggerThanValue(inicioDia)))
+        .get();
+    if (deHoy.length >= 10) return ResultadoReporte.limite;
+    final existente = await (_db.select(_db.reportes)
+          ..where((r) =>
+              r.reportanteId.equals(miId) & r.reportadoId.equals(otroId))
+          ..limit(1))
+        .getSingleOrNull();
+    final uuid = existente?.uuid ?? const Uuid().v4();
+    await _db.into(_db.reportes).insertOnConflictUpdate(
+          ReportesCompanion.insert(
+            uuid: uuid,
+            reportanteId: miId,
+            reportadoId: otroId,
+            motivo: motivo,
+            detalle: Value(detalle),
+            timestamp: DateTime.now(),
+            pendienteDeSincronizar: const Value(true),
+          ),
+        );
     unawaited(_sync?.sincronizarReportesPendientes());
+    return existente == null
+        ? ResultadoReporte.enviado
+        : ResultadoReporte.duplicado;
   }
 
   Future<void> bloquearUsuario({
     required String miId,
     required String otroId,
   }) async {
-    await _db.into(_db.bloqueos).insert(BloqueosCompanion.insert(
-      uuid: const Uuid().v4(),
-      bloqueadorId: miId,
-      bloqueadoId: otroId,
-      timestamp: DateTime.now(),
-    ));
+    // Idempotente: el servidor tiene unique(bloqueador,bloqueado); un
+    // duplicado local quedaría pendiente eternamente por violación.
+    final existente = await (_db.select(_db.bloqueos)
+          ..where((b) =>
+              b.bloqueadorId.equals(miId) & b.bloqueadoId.equals(otroId))
+          ..limit(1))
+        .getSingleOrNull();
+    if (existente == null) {
+      await _db.into(_db.bloqueos).insert(BloqueosCompanion.insert(
+        uuid: const Uuid().v4(),
+        bloqueadorId: miId,
+        bloqueadoId: otroId,
+        timestamp: DateTime.now(),
+      ));
+    }
     await borrarConversacion(otroId, miId);
     unawaited(_sync?.sincronizarBloqueosPendientes());
   }
@@ -1106,7 +1143,7 @@ class ChatRepositorio {
       if (await _mensajeYaLeido(emisorId, timestamp)) return;
       // El otro me escribió de nuevo: la conversación vuelve a la lista
       // aunque yo la hubiera borrado solo para mí (estilo WhatsApp). No se
-      // reactiva si lo tengo bloqueado.
+      // reactiva si lo tengo bloqueado, y un bloqueado tampoco genera aviso.
       final bloqueado = await (_db.select(_db.bloqueos)
             ..where((b) =>
                 b.bloqueadorId.equals(miId) & b.bloqueadoId.equals(emisorId))
@@ -1114,9 +1151,9 @@ class ChatRepositorio {
           .getSingleOrNull();
       if (bloqueado == null) {
         await _reactivarConversacion(emisorId, miId);
+        unawaited(
+            _notificarMensajeNuevo(emisorId, cambio['contenido'] as String? ?? ''));
       }
-      unawaited(
-          _notificarMensajeNuevo(emisorId, cambio['contenido'] as String? ?? ''));
     }
   }
 

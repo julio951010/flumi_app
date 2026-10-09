@@ -124,7 +124,7 @@ class _PagoDatosTransferenciaPantallaState extends State<PagoDatosTransferenciaP
                 const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(color: Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(12)),
                   child: Row(
                     children: [
                       const Icon(Icons.lightbulb_outline, size: 18, color: Color(0xFF1565C0)),

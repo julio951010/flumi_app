@@ -81,7 +81,9 @@ class CuentaPantalla extends StatelessWidget {
     );
     if (confirmado != true) return;
 
-    final confirmadoFinal = await showDialog<bool>(
+    // ignore: use_build_context_synchronously
+    final confirmadoFinal = await showDialog(
+      // ignore: use_build_context_synchronously
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Última confirmación'),
@@ -103,8 +105,6 @@ class CuentaPantalla extends StatelessWidget {
         ],
       ),
     );
-    if (confirmadoFinal != true) return;
-
     if (!context.mounted) return;
     try {
       await authService.eliminarCuenta();

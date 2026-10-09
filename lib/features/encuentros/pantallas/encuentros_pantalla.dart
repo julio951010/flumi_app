@@ -69,6 +69,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
   Set<String> _idsSuperRecibidos = {};
+  final Set<String> _idsReportados = <String>{};
   bool _cargando = true;
   int _progresoFoto = 0;
   int _motorBase = 0;
@@ -85,6 +86,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
   late final VisitasServicio _visitas = widget.visitasServicio;
   late final HistorialLikesServicio _historialLikes = widget.historialLikesServicio;
+  StreamSubscription<Usuario?>? _propioSub;
+  Timer? _recargaTimer;
+  String? _huellaCriterios;
 
   @override
   void initState() {
@@ -99,10 +103,41 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
     // recomposición solo se invoca explícitamente tras cargar más (_cargarMas)
     // o al reinsertar en _undo.
     _cargar();
+    // Si el perfil propio cambia sus criterios de búsqueda (a quién quiero
+    // conocer, rango de edad, ubicación), el mazo se vuelve obsoleto: el
+    // servidor filtra con esos criterios. Se recarga (con debounce).
+    _propioSub = (widget.db.select(widget.db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true))
+          ..limit(1))
+        .watchSingleOrNull()
+        .listen(_alCambiarPropio);
+  }
+
+  /// Huella de los criterios que filtran el feed en el servidor.
+  String _huella(Usuario? p) =>
+      '${p?.buscaGenero}|${p?.preferenciaEdadMin}|${p?.preferenciaEdadMax}|${p?.ubicacionLat}|${p?.ubicacionLon}';
+
+  void _alCambiarPropio(Usuario? propio) {
+    final huella = _huella(propio);
+    if (_huellaCriterios == null) {
+      _huellaCriterios = huella; // Siembra: la carga inicial ya está en curso.
+      return;
+    }
+    if (huella == _huellaCriterios) return;
+    _huellaCriterios = huella;
+    if (!mounted || _cargando) return;
+    _recargaTimer?.cancel();
+    _recargaTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted || _cargando) return;
+      setState(() => _cargando = true);
+      unawaited(_cargar());
+    });
   }
 
   @override
   void dispose() {
+    _propioSub?.cancel();
+    _recargaTimer?.cancel();
     _timerBloqueo?.cancel();
     _matchEngine?.removeListener(_alCambiarCarta);
     widget.undoSignal.removeListener(_undo);
@@ -478,6 +513,13 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       _idsGustados = gustados;
       _idsRecibidos = recibidos;
       _idsSuperRecibidos = superRecibidos;
+      // Reportados por mí: excluidos del feed (ver _filtrar).
+      _idsReportados
+        ..clear()
+        ..addAll((await (widget.db.select(widget.db.reportes)
+              ..where((r) => r.reportanteId.equals(widget.miId)))
+            .get())
+          .map((r) => r.reportadoId));
 
       // Criterios base del perfil propio: "interesado en" y "rango de edad".
       final propio = await (widget.db.select(widget.db.usuarios)
@@ -704,8 +746,39 @@ return widget.syncService.consultarFeedRemoto(
     }
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
+    // Reportados por mí: no resurgen (ni por reciclaje de nopes).
+    lista.removeWhere((u) => _idsReportados.contains(u.uuid));
 
     return lista;
+  }
+
+  /// Reporta y oculta de inmediato: avanza el motor sin registrar nope
+  /// (el reporte ya excluye vía _idsReportados).
+  Future<ResultadoReporte> _reportarYOcultar(
+      Usuario usuario, String codigo) async {
+    final resultado = await widget.chatRepo.reportarUsuario(
+      miId: widget.miId,
+      otroId: usuario.uuid,
+      motivo: codigo,
+      detalle: 'desde: encuentros',
+    );
+    _idsReportados.add(usuario.uuid);
+    if (!mounted) return resultado;
+    final engine = _matchEngine;
+    final actual = engine?.currentItem?.content as Usuario?;
+    if (actual != null && actual.uuid == usuario.uuid) {
+      final item = engine!.currentItem!;
+      if (item.decision == Decision.undecided) {
+        item.decision = Decision.nope;
+        engine.cycleMatch();
+      }
+    } else {
+      setState(() {
+        _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
+        _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+      });
+    }
+    return resultado;
   }
 
   void _aplicarFiltros() {
@@ -863,6 +936,17 @@ return widget.syncService.consultarFeedRemoto(
       esMatch: gustado && _idsRecibidos.contains(usuario.uuid),
       esMeGusta: gustado,
       esSuperRecibido: _idsSuperRecibidos.contains(usuario.uuid),
+      onReportar: (codigo) => _reportarYOcultar(usuario, codigo),
+      onBloquear: () async {
+        await widget.chatRepo.bloquearUsuario(
+          miId: widget.miId,
+          otroId: usuario.uuid,
+        );
+        if (!mounted) return;
+        setState(() {
+          _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+        });
+      },
     );
   }
 

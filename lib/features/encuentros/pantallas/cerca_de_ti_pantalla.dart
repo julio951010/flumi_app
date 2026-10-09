@@ -60,6 +60,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   Set<String> _idsGustados = {};
   Set<String> _idsRecibidos = {};
   Set<String> _idsSuperRecibidos = {};
+  final Set<String> _idsReportados = <String>{};
   double _miLat = 0;
   double _miLon = 0;
   bool _cargando = true;
@@ -68,6 +69,9 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   bool _cargandoMas = false;
   bool _amplitudAplicada = false;
   final ScrollController _scrollCtrl = ScrollController();
+  StreamSubscription<Usuario?>? _propioSub;
+  Timer? _recargaTimer;
+  String? _huellaCriterios;
   late final ChatRepositorio _chatRepo = ChatRepositorio(widget.db);
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
   late final VisitasServicio _visitas = widget.visitasServicio;
@@ -80,10 +84,39 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     widget.votosServicio.addListener(_aplicarFiltros);
     _scrollCtrl.addListener(_alHacerScroll);
     _cargar();
+    // Si cambian los criterios del perfil propio (a quién quiero conocer,
+    // edad, ubicación), la grilla se recarga con debounce.
+    _propioSub = (widget.db.select(widget.db.usuarios)
+          ..where((u) => u.esPerfilPropio.equals(true))
+          ..limit(1))
+        .watchSingleOrNull()
+        .listen(_alCambiarPropio);
+  }
+
+  String _huella(Usuario? p) =>
+      '${p?.buscaGenero}|${p?.preferenciaEdadMin}|${p?.preferenciaEdadMax}|${p?.ubicacionLat}|${p?.ubicacionLon}';
+
+  void _alCambiarPropio(Usuario? propio) {
+    final huella = _huella(propio);
+    if (_huellaCriterios == null) {
+      _huellaCriterios = huella;
+      return;
+    }
+    if (huella == _huellaCriterios) return;
+    _huellaCriterios = huella;
+    if (!mounted || _cargando) return;
+    _recargaTimer?.cancel();
+    _recargaTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted || _cargando) return;
+      setState(() => _cargando = true);
+      unawaited(_cargar());
+    });
   }
 
   @override
   void dispose() {
+    _propioSub?.cancel();
+    _recargaTimer?.cancel();
     widget.votosServicio.removeListener(_aplicarFiltros);
     _scrollCtrl
       ..removeListener(_alHacerScroll)
@@ -119,6 +152,12 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       _idsGustados = gustados;
       _idsRecibidos = recibidos;
       _idsSuperRecibidos = superRecibidos;
+      _idsReportados
+        ..clear()
+        ..addAll((await (widget.db.select(widget.db.reportes)
+              ..where((r) => r.reportanteId.equals(widget.miId)))
+            .get())
+          .map((r) => r.reportadoId));
 
       // Fase 1: primer lote del RPC + llenado mínimo para mostrar la grilla
       // pronto. Fase 2: si el RPC vuelve vacío con los filtros actuales, se
@@ -282,6 +321,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     }
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
+    lista.removeWhere((u) => _idsReportados.contains(u.uuid));
 
     return lista;
   }
@@ -495,15 +535,35 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
           esMatch: esMatch,
           onChat: () => _abrirChat(usuario),
           onMeGusta: () => _meGusta(usuario),
-          onRechazar: esMatch
-        ? () async {
-            await _chatRepo.romperMatch(usuario.uuid, widget.miId);
-            if (mounted) Navigator.pop(context);
-          }
-        : () {
-            // El "No me gusta" en Cerca de ti no registra rechazo: el perfil
-            // se mantiene en el feed (los rechazos solo aplican al mazo).
-            Navigator.pop(context);
+          onRechazar: () => Navigator.pop(context),
+          onReportar: (codigo) async {
+            final resultado = await _chatRepo.reportarUsuario(
+              miId: widget.miId,
+              otroId: usuario.uuid,
+              motivo: codigo,
+              detalle: 'desde: cerca_de_ti',
+            );
+            _idsReportados.add(usuario.uuid);
+            if (mounted) {
+              setState(() {
+                _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
+                _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+              });
+            }
+            return resultado;
+          },
+          onBloquear: () async {
+            await _chatRepo.bloquearUsuario(
+              miId: widget.miId,
+              otroId: usuario.uuid,
+            );
+            if (mounted) {
+              setState(() {
+                _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
+                _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+              });
+              Navigator.pop(context);
+            }
           },
         ),
       ),
@@ -745,6 +805,8 @@ class PerfilDetallePage extends StatefulWidget {
   final VoidCallback? onChat;
   final VoidCallback? onRechazar;
   final Future<bool> Function()? onMeGusta;
+  final Future<ResultadoReporte> Function(String motivoCodigo)? onReportar;
+  final Future<void> Function()? onBloquear;
 
   const PerfilDetallePage({
     super.key,
@@ -757,6 +819,8 @@ class PerfilDetallePage extends StatefulWidget {
     this.onChat,
     this.onRechazar,
     this.onMeGusta,
+    this.onReportar,
+    this.onBloquear,
   });
 
   @override
@@ -797,6 +861,8 @@ class _PerfilDetallePageState extends State<PerfilDetallePage> {
                   onRechazar: widget.onRechazar ??
                       () => Navigator.pop(context),
                   onChat: widget.onChat,
+                  onReportar: widget.onReportar,
+                  onBloquear: widget.onBloquear,
                   gusta: _gusta,
                   soloVista: widget.soloVista,
                   onMeGusta: widget.soloVista ? null : _manejarMeGusta,

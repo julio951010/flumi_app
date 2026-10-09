@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -6,7 +8,10 @@ import '../../../core/estilos/tema.dart';
 import '../../../core/servicios/notificacion_servicio.dart';
 
 class ContactarSoportePantalla extends StatefulWidget {
-  const ContactarSoportePantalla({super.key});
+  /// Se llama cuando el hilo muestra respuestas (para darlas por vistas).
+  final VoidCallback? onRespuestasVistas;
+
+  const ContactarSoportePantalla({super.key, this.onRespuestasVistas});
 
   @override
   State<ContactarSoportePantalla> createState() =>
@@ -43,21 +48,42 @@ class _ContactarSoportePantallaState extends State<ContactarSoportePantalla> {
   List<_TicketSoporte> _tickets = [];
   bool _cargando = true;
   bool _enviando = false;
+  StreamSubscription? _sub;
+  final Set<String> _vistosNotificados = {};
 
   @override
   void initState() {
     super.initState();
     _cargar();
+    _suscribirse();
   }
 
   @override
   void dispose() {
+    _sub?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
 
-  Future<void> _cargar() async {
-    setState(() => _cargando = true);
+  /// Refresca la lista cuando llega una respuesta con la pantalla abierta
+  /// (el aviso push/local lo maneja la navegación principal).
+  void _suscribirse() {
+    if (kUsarServidorLocal) return;
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      _sub = Supabase.instance.client
+          .from('soporte_mensajes')
+          .stream(primaryKey: ['id'])
+          .eq('usuario_id', uid)
+          .listen((_) {
+        if (mounted && !_cargando) _cargar(silencioso: true);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _cargar({bool silencioso = false}) async {
+    if (!silencioso) setState(() => _cargando = true);
     try {
       if (kUsarServidorLocal) {
         if (mounted) setState(() => _cargando = false);
@@ -81,6 +107,15 @@ class _ContactarSoportePantallaState extends State<ContactarSoportePantalla> {
             (res as List).map((e) => _TicketSoporte.fromMap(e as Map<String, dynamic>)).toList();
         _cargando = false;
       });
+      // Las respuestas a la vista se dan por vistas (apaga badges/campana).
+      final nuevos = _tickets
+          .where((t) => t.respondido && !_vistosNotificados.contains(t.id))
+          .map((t) => t.id)
+          .toList();
+      if (nuevos.isNotEmpty) {
+        _vistosNotificados.addAll(nuevos);
+        widget.onRespuestasVistas?.call();
+      }
     } catch (_) {
       if (mounted) setState(() => _cargando = false);
     }

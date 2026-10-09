@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/base_datos_local/database.dart';
@@ -24,6 +25,10 @@ class ConfiguracionPantalla extends StatelessWidget {
   final SuscripcionServicio suscripcionServicio;
   final SyncService syncService;
   final Future<void> Function()? onCerrarSesion;
+  /// Respuestas de soporte sin leer (punto en "Ayuda y soporte").
+  final ValueListenable<int>? soporteNoLeidas;
+  /// Se llama cuando el hilo muestra respuestas (para darlas por vistas).
+  final VoidCallback? onRespuestasVistas;
 
   const ConfiguracionPantalla({
     super.key,
@@ -32,6 +37,8 @@ class ConfiguracionPantalla extends StatelessWidget {
     required this.db,
     required this.suscripcionServicio,
     required this.syncService,
+    this.soporteNoLeidas,
+    this.onRespuestasVistas,
     this.onCerrarSesion,
   });
 
@@ -116,13 +123,7 @@ class ConfiguracionPantalla extends StatelessWidget {
                       )),
             ],
             const Divider(height: 1),
-            _item(context, Icons.help_outline, 'Ayuda y soporte',
-                onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AyudaSoportePantalla(),
-                      ),
-                    )),
+            _filaAyuda(context),
             const Divider(height: 1),
             _item(context, Icons.info_outline, 'Sobre nosotros',
                 onTap: () => Navigator.push(
@@ -160,7 +161,7 @@ class ConfiguracionPantalla extends StatelessWidget {
                       ],
                     ),
                   );
-                  if (confirmado != true) return;
+                  if (confirmado != true || !context.mounted) return;
                   // Feedback mientras el signOut (red) se completa.
                   showDialog<void>(
                     context: context,
@@ -179,8 +180,10 @@ class ConfiguracionPantalla extends StatelessWidget {
                   } finally {
                     // Cierra el diálogo de progreso y luego esta pantalla para
                     // revelar el login que ya mostró el router vía el listener.
-                    if (context.mounted) Navigator.of(context).pop();
-                    nav.pop();
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                      nav.pop();
+                    }
                   }
                 },
                 icon: const Icon(Icons.logout, size: 20),
@@ -249,7 +252,8 @@ class ConfiguracionPantalla extends StatelessWidget {
       PaintingBinding.instance.imageCache.clearLiveImages();
     } catch (_) {}
 
-    if (context.mounted) nav.pop();
+    if (!context.mounted) return;
+    nav.pop();
     if (!context.mounted) return;
 
     final texto = liberados > 0
@@ -265,13 +269,51 @@ class ConfiguracionPantalla extends StatelessWidget {
   }
 
   Widget _item(BuildContext context, IconData icono, String titulo,
-      {VoidCallback? onTap}) {
+      {VoidCallback? onTap, bool punto = false}) {
     final secundario = Theme.of(context).colorScheme.secondary;
     return ListTile(
       leading: Icon(icono, color: secundario),
       title: Text(titulo),
-      trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (punto)
+            Container(
+              width: 10,
+              height: 10,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+          Icon(Icons.chevron_right, color: Colors.grey[400]),
+        ],
+      ),
       onTap: onTap,
+    );
+  }
+
+  /// Fila de Ayuda y soporte con punto rojo si hay respuestas sin leer.
+  Widget _filaAyuda(BuildContext context) {
+    void abrir() => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AyudaSoportePantalla(
+              onRespuestasVistas: onRespuestasVistas,
+            ),
+          ),
+        );
+    final escucha = soporteNoLeidas;
+    if (escucha == null) {
+      return _item(context, Icons.help_outline, 'Ayuda y soporte',
+          onTap: abrir);
+    }
+    return ValueListenableBuilder<int>(
+      valueListenable: escucha,
+      builder: (context, n, _) => _item(
+          context, Icons.help_outline, 'Ayuda y soporte',
+          onTap: abrir, punto: n > 0),
     );
   }
 }

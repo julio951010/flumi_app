@@ -2,12 +2,24 @@ import 'package:flutter/material.dart';
 import '../core/utilidades/fotos_perfil.dart';
 import '../core/base_datos_local/database.dart';
 import '../core/estilos/tema.dart';
+import '../features/chat/chat_repositorio.dart';
 import '../features/perfiles/perfil_etiquetas.dart';
 import 'barra_progreso_rio.dart';
 import 'foto_perfil.dart';
 import 'visor_fotos_pantalla.dart';
 
 class TarjetaDetalleUsuario extends StatefulWidget {
+  /// Motivos de reporte (etiqueta visible → código del CHECK `reports.motivo`
+  /// en Supabase). Enviar otro texto rompe el insert en el sync en silencio.
+  static const motivosReporte = <({String etiqueta, String codigo})>[
+    (etiqueta: 'Foto inapropiada', codigo: 'foto_inapropiada'),
+    (etiqueta: 'Acoso o abuso', codigo: 'acoso_o_abuso'),
+    (etiqueta: 'Perfil falso', codigo: 'perfil_falso'),
+    (etiqueta: 'Spam', codigo: 'spam'),
+    (etiqueta: 'Menor de edad', codigo: 'menor_de_edad'),
+    (etiqueta: 'Otro', codigo: 'otro'),
+  ];
+
   final Usuario usuario;
   final VoidCallback? onRechazar;
   final VoidCallback? onChat;
@@ -20,6 +32,11 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   final bool esMeGusta;
   final bool soloVista;
   final bool esSuperRecibido;
+  /// Reporte real (recibe el código y devuelve el resultado). Sin handler
+  /// no se muestra la opción.
+  final Future<ResultadoReporte> Function(String motivoCodigo)? onReportar;
+  /// Bloqueo real. Sin handler no se muestra la opción.
+  final Future<void> Function()? onBloquear;
   const TarjetaDetalleUsuario({
     super.key,
     required this.usuario,
@@ -34,6 +51,8 @@ class TarjetaDetalleUsuario extends StatefulWidget {
     this.esMeGusta = false,
     this.soloVista = false,
     this.esSuperRecibido = false,
+    this.onReportar,
+    this.onBloquear,
   });
 
   @override
@@ -118,6 +137,9 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
   }
 
   Future<void> _abrirMenu() async {
+    final puedeReportar = widget.onReportar != null;
+    final puedeBloquear = widget.onBloquear != null;
+    if (!puedeReportar && !puedeBloquear) return;
     final opcion = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
@@ -137,30 +159,149 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.black87),
-              title: const Text('Reportar este perfil',
-                  style: TextStyle(fontSize: 15)),
-              onTap: () => Navigator.pop(ctx, 'reportar'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.block, color: Colors.redAccent),
-              title: const Text('Bloquear Usuario',
-                  style: TextStyle(fontSize: 15, color: Colors.redAccent)),
-              onTap: () => Navigator.pop(ctx, 'bloquear'),
-            ),
+            if (puedeReportar)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.black87),
+                title: const Text('Reportar este perfil',
+                    style: TextStyle(fontSize: 15)),
+                onTap: () => Navigator.pop(ctx, 'reportar'),
+              ),
+            if (puedeBloquear)
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.redAccent),
+                title: const Text('Bloquear Usuario',
+                    style: TextStyle(fontSize: 15, color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'bloquear'),
+              ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
     if (!mounted || opcion == null) return;
-    final mensaje = opcion == 'reportar'
-        ? 'Reporte enviado. \u00a1Gracias por ayudarnos!'
-        : 'Usuario bloqueado';
+    if (opcion == 'reportar') {
+      await _reportar();
+    } else if (opcion == 'bloquear') {
+      await _bloquear();
+    }
+  }
+
+  Future<void> _reportar() async {
+    final codigo = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                '¿Por qué reportas a ${widget.usuario.nombre}?',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+              ),
+            ),
+            for (final m in TarjetaDetalleUsuario.motivosReporte)
+              ListTile(
+                title: Text(m.etiqueta, style: const TextStyle(fontSize: 15)),
+                onTap: () => Navigator.pop(ctx, m.codigo),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (codigo == null || !mounted) return;
+    final repo = widget.onReportar;
+    if (repo == null) return;
+    final resultado = await repo(codigo);
+    if (!mounted) return;
+    switch (resultado) {
+      case ResultadoReporte.limite:
+        _toast('Llegaste al límite de reportes por hoy.');
+        return;
+      case ResultadoReporte.duplicado:
+        _toast('Ya habías reportado este perfil.');
+        break;
+      case ResultadoReporte.enviado:
+        _toast('Reporte enviado. ¡Gracias por ayudarnos!');
+        break;
+    }
+    // Ofrece bloquear también (estándar tras reportar).
+    if (widget.onBloquear == null || !mounted) return;
+    final bloquear = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Bloquear también?'),
+        content: Text(
+            '${widget.usuario.nombre} no podrá volver a aparecer en tus resultados.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Solo reportar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reportar y bloquear',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (bloquear != true || !mounted) return;
+    await _bloquear(confirmar: false);
+  }
+
+  Future<void> _bloquear({bool confirmar = true}) async {
+    if (confirmar) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Bloquear usuario'),
+          content: Text(
+              '¿Seguro que quieres bloquear a ${widget.usuario.nombre}? No podrá volver a aparecer en tus resultados.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Bloquear',
+                  style: TextStyle(color: Colors.redAccent)),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+    }
+    try {
+      await widget.onBloquear?.call();
+      if (!mounted) return;
+      _toast('Usuario bloqueado');
+    } catch (_) {
+      if (!mounted) return;
+      _toast('No se pudo bloquear.');
+    }
+  }
+
+  void _toast(String texto) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(mensaje),
+        content: Text(texto),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),
@@ -265,16 +406,21 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
                         child: _buildInfoOverlay(),
                       ),
                     ),
-                    Positioned(
-                      top: 16,
-                      right: 16,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: widget.soloVista ? null : _abrirMenu,
-                        child: const Icon(Icons.more_horiz,
-                            color: Colors.white, size: 40),
+                    // Menú reportar/bloquear: solo si hay handlers reales
+                    // (en vista previa propia se oculta).
+                    if (!widget.soloVista &&
+                        (widget.onReportar != null ||
+                            widget.onBloquear != null))
+                      Positioned(
+                        top: 16,
+                        right: 16,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _abrirMenu,
+                          child: const Icon(Icons.more_horiz,
+                              color: Colors.white, size: 40),
+                        ),
                       ),
-                    ),
                     _buildBarraAcciones(),
                   ],
                 ),

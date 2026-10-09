@@ -68,7 +68,7 @@ class _PagoMetodoPantallaState extends State<PagoMetodoPantalla> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-                        child: Icon(Icons.verified, color: FlumiTema.colorPrimario),
+                        child: const Icon(Icons.verified, color: FlumiTema.colorPrimario),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -76,8 +76,8 @@ class _PagoMetodoPantallaState extends State<PagoMetodoPantalla> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(widget.datos.nombrePlan, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text('${widget.datos.dias} días · ${widget.datos.precio} CUP',
-                                style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+Text('${widget.datos.dias} días · ${widget.datos.precio} CUP',
+                            style: TextStyle(color: Colors.grey[600], fontSize: 13)),
                           ],
                         ),
                       ),

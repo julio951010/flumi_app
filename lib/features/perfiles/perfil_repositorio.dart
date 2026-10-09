@@ -55,7 +55,10 @@ class PerfilRepositorio {
             .from('profiles')
             .select()
             .eq('id', id)
-            .maybeSingle();
+            .maybeSingle()
+            // Tope: con red lenta esta lectura bloqueaba la apertura de
+            // pantallas; al vencer se usa la caché local.
+            .timeout(const Duration(seconds: 8));
         if (remoto != null) {
           await _db.into(_db.usuarios).insertOnConflictUpdate(
                 PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true),
