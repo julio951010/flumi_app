@@ -17,7 +17,7 @@ class SinConexionException implements Exception {
 
 class ErrorServidorException implements Exception {
   @override
-  String toString() => 'No se pudo conectar con el servidor. Intenta de nuevo más tarde.';
+  String toString() => 'No se pudo conectar. Intenta de nuevo más tarde.';
 }
 
 class CredencialesInvalidasException implements Exception {

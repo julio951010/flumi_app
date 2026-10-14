@@ -51,6 +51,7 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
           .getSingleOrNull();
       if (user != null) {
         setState(() {
+          _mostrarUbicacion = !user.ocultarUbicacion;
           _mostrarEnLinea = !user.ocultarEnLinea;
           _soloRangoEdad = user.ocultarEdad;
           _cargando = false;
@@ -59,6 +60,24 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
     } catch (_) {
       setState(() => _cargando = false);
     }
+  }
+
+  Future<void> _guardarOcultarUbicacion(bool valor) async {
+    if (!widget.suscripcionServicio.tienePremium) {
+      _mostrarBloqueoPremium('Mostrar mi ubicación');
+      return;
+    }
+    // Por el repositorio (no escritura directa): actualiza Supabase, el
+    // espejo local Y avisa a perfilPropio para que la app lo refleje live.
+    final perfil = await widget.repositorio.obtenerPerfilPropio();
+    if (perfil != null) {
+      await widget.repositorio.guardarOCambiarPerfil(UsuariosCompanion(
+        uuid: Value(perfil.uuid),
+        ocultarUbicacion: Value(!valor),
+        pendienteDeSincronizar: const Value(true),
+      ));
+    }
+    if (mounted) setState(() => _mostrarUbicacion = valor);
   }
 
   Future<void> _guardarOcultarEnLinea(bool valor) async {
@@ -178,7 +197,7 @@ class _PrivacidadPantallaState extends State<PrivacidadPantalla> {
               'Mostrar mi ubicación',
               'Permite que otras personas vean tu ubicación',
               _mostrarUbicacion,
-              (v) => setState(() => _mostrarUbicacion = v),
+              (v) => _guardarOcultarUbicacion(v),
               requierePremium: true,
             ),
             const Divider(height: 1),

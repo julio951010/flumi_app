@@ -51,6 +51,7 @@ void main() {
       ocultarEdad: false,
       ocultarPerfil: false,
       ocultarVisitas: false,
+      ocultarUbicacion: false,
       creadoEn: DateTime(2025),
     );
   }

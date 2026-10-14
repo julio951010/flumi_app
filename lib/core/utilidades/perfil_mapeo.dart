@@ -42,6 +42,7 @@ class PerfilMapeo {
       ocultarEdad: Value(aBool(p['ocultar_edad'], false)),
       ocultarPerfil: Value(aBool(p['ocultar_perfil'], false)),
       ocultarVisitas: Value(aBool(p['ocultar_visitas'], false)),
+      ocultarUbicacion: Value(aBool(p['ocultar_ubicacion'], false)),
       verificadoStatus: Value(aBool(p['verificado_status'], false)),
       scorePopularidad: Value(aInt(p['score_popularidad'], 0)),
       perfilCompletado: Value(aBool(p['perfil_completado'], false)),
@@ -108,6 +109,7 @@ class PerfilMapeo {
       ocultarEdad: aBool(p['ocultar_edad'], false),
       ocultarPerfil: aBool(p['ocultar_perfil'], false),
       ocultarVisitas: aBool(p['ocultar_visitas'], false),
+      ocultarUbicacion: aBool(p['ocultar_ubicacion'], false),
       verificadoStatus: aBool(p['verificado_status'], false),
       scorePopularidad: aInt(p['score_popularidad'], 0),
       pendienteDeSincronizar: false,
@@ -160,6 +162,7 @@ class PerfilMapeo {
       'ocultar_edad': perfil.ocultarEdad,
       'ocultar_perfil': perfil.ocultarPerfil,
       'ocultar_visitas': perfil.ocultarVisitas,
+      'ocultar_ubicacion': perfil.ocultarUbicacion,
       'perfil_completado': perfil.perfilCompletado,
       'orientacion_sexual': perfil.orientacionSexual,
       'situacion_sentimental': perfil.situacionSentimental,
@@ -221,6 +224,8 @@ class PerfilMapeo {
       'ocultar_edad': o(c.ocultarEdad, base?.ocultarEdad ?? false),
       'ocultar_perfil': o(c.ocultarPerfil, base?.ocultarPerfil ?? false),
       'ocultar_visitas': o(c.ocultarVisitas, base?.ocultarVisitas ?? false),
+      'ocultar_ubicacion':
+          o(c.ocultarUbicacion, base?.ocultarUbicacion ?? false),
       'perfil_completado':
           o(c.perfilCompletado, base?.perfilCompletado ?? false),
       'orientacion_sexual':

@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
-import 'package:flutter/foundation.dart';
 
 import '../base_datos_local/database.dart';
+import '../utilidades/app_log.dart';
 import '../utilidades/ubicacion_util.dart';
 import '../../features/perfiles/perfil_repositorio.dart';
 
@@ -68,11 +68,11 @@ class UbicacionAutoServicio {
       final movido = distancia > _umbralKm;
 
       if (!ciudadCambio && !movido) {
-        debugPrint('[UbicacionAuto] sin cambio: $ciudadReal @ ${pos.lat},${pos.lon}');
+        appLog('[UbicacionAuto] sin cambio: $ciudadReal @ ${pos.lat},${pos.lon}');
         return;
       }
 
-      debugPrint('[UbicacionAuto] actualizando $ciudad0 -> $ciudadReal @ ${pos.lat},${pos.lon} (dist ${distancia.toStringAsFixed(2)}km)');
+      appLog('[UbicacionAuto] actualizando $ciudad0 -> $ciudadReal @ ${pos.lat},${pos.lon} (dist ${distancia.toStringAsFixed(2)}km)');
 
       await repo.guardarOCambiarPerfil(
         UsuariosCompanion(
@@ -83,7 +83,7 @@ class UbicacionAutoServicio {
         ),
       );
     } catch (e) {
-      debugPrint('[UbicacionAuto] no actualizado: $e');
+      appLog('[UbicacionAuto] no actualizado: $e');
     }
   }
 

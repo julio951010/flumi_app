@@ -36,3 +36,12 @@ ios/Pods/
 # Secretos — claves de Supabase, APIs, etc.
 .env
 lib/core/constantes/config.dart
+# Firebase / Google Services (contienen api keys del proyecto)
+lib/firebase_options.dart
+**/google-services.json
+**/GoogleService-Info.plist
+# Firma Android release (nunca subir; perderlas impide actualizar la app)
+key.properties
+android/key.properties
+**/*.jks
+**/*.keystore

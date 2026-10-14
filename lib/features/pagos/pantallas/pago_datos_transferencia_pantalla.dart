@@ -18,7 +18,6 @@ class _PagoDatosTransferenciaPantallaState extends State<PagoDatosTransferenciaP
   bool _cargando = true;
 
   PagoDatos get datos => widget.datos;
-  bool get _esEnZona => datos.metodo == MetodoPago.enzona;
 
   @override
   void initState() {
@@ -221,39 +220,38 @@ class _PagoDatosTransferenciaPantallaState extends State<PagoDatosTransferenciaP
       );
 
   Widget _qrWidget() {
-    // QR gestionado desde flumi_admin → Supabase Storage (bucket pagos_qr).
-    // Si hay URL, se muestra para ambos métodos. Si no, fallback:
-    // - EnZona: qr_enzona.png de prueba
-    // - Transfermóvil: placeholder
-    if (_qrUrl.isNotEmpty && _qrUrl.startsWith('http')) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(_qrUrl, fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => _esEnZona
-                ? Image.asset('assets/images/qr_enzona.png', fit: BoxFit.contain)
-                : _qrPlaceholder()),
-      );
-    }
-    if (_esEnZona) return Image.asset('assets/images/qr_enzona.png', fit: BoxFit.contain);
-    return _qrPlaceholder();
+    // QR gestionado desde admin_flumi → Supabase Storage (bucket pagos_qr).
+    // La sección solo se muestra si hay URL (ver `if (_qrUrl.isNotEmpty)`).
+    // Si la imagen falla: estado explícito, nunca una imagen falsa
+    // (el asset qr_enzona.png no existe y el grid decorativo parecía un
+    // QR real escaneable).
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(_qrUrl, fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _qrNoDisponible()),
+    );
   }
 
-  Widget _qrPlaceholder() {
-    return GridView.builder(
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 3, crossAxisSpacing: 3),
-      itemCount: 49,
-      itemBuilder: (_, i) {
-        final isCorner = (i < 7 && i % 7 < 3) || (i % 7 < 3 && i ~/ 7 < 3) || (i % 7 >= 4 && i ~/ 7 < 3 && i % 7 < 7);
-        final fill = isCorner ? true : (i * 7 + i % 3) % 5 < 2;
-        return Container(
-          decoration: BoxDecoration(
-            color: fill ? Colors.black87 : Colors.white,
-            borderRadius: BorderRadius.circular(2),
-            border: Border.all(color: Colors.grey[300]!),
+  Widget _qrNoDisponible() {
+    return Container(
+      color: Colors.grey[100],
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.qr_code_2_outlined,
+                  size: 40, color: Colors.grey[400]),
+              const SizedBox(height: 8),
+              Text('QR no disponible.\nUsa los datos de arriba.',
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

@@ -322,6 +322,11 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
 
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
     lista.removeWhere((u) => _idsReportados.contains(u.uuid));
+    // Perfiles ocultos (ocultar_perfil): el servidor ya los excluye de las
+    // descargas nuevas, pero las copias en caché local persistirían
+    // (el sync es solo-merge). Se filtran aquí para que el efecto sea
+    // inmediato sin esperar purga.
+    lista.removeWhere((u) => u.ocultarPerfil);
 
     return lista;
   }
@@ -464,6 +469,8 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
   /// Badge de distancia ("850 m" / "1.2 km"), mismo estilo que el tiempo
   /// en Le gustas. Null si no hay coordenadas para calcularla.
   Widget? _distanciaBadge(Usuario u) {
+    // Ubicación oculta: no se muestra la distancia a otros.
+    if (u.ocultarUbicacion) return null;
     if ((_miLat == 0 && _miLon == 0) ||
         (u.ubicacionLat == 0 && u.ubicacionLon == 0)) {
       return null;
@@ -537,20 +544,33 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
           onMeGusta: () => _meGusta(usuario),
           onRechazar: () => Navigator.pop(context),
           onReportar: (codigo) async {
-            final resultado = await _chatRepo.reportarUsuario(
+            // Solo reporte: NO oculta el perfil, solo envía el reporte
+            return await _chatRepo.reportarUsuario(
+              miId: widget.miId,
+              otroId: usuario.uuid,
+              motivo: codigo,
+              detalle: 'desde: cerca_de_ti',
+            );
+          },
+          onReportarYBloquear: (codigo) async {
+            // Reportar y bloquear: reporte + bloqueo + oculta de la vista
+            await _chatRepo.reportarUsuario(
               miId: widget.miId,
               otroId: usuario.uuid,
               motivo: codigo,
               detalle: 'desde: cerca_de_ti',
             );
             _idsReportados.add(usuario.uuid);
+            await _chatRepo.bloquearUsuario(
+              miId: widget.miId,
+              otroId: usuario.uuid,
+            );
             if (mounted) {
               setState(() {
                 _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
                 _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
               });
             }
-            return resultado;
           },
           onBloquear: () async {
             await _chatRepo.bloquearUsuario(
@@ -806,7 +826,10 @@ class PerfilDetallePage extends StatefulWidget {
   final VoidCallback? onRechazar;
   final Future<bool> Function()? onMeGusta;
   final Future<ResultadoReporte> Function(String motivoCodigo)? onReportar;
+  /// Bloqueo real. Sin handler no se muestra la opción.
   final Future<void> Function()? onBloquear;
+  /// Reporte + bloqueo combinado. Sin handler no se muestra la opción.
+  final Future<void> Function(String motivoCodigo)? onReportarYBloquear;
 
   const PerfilDetallePage({
     super.key,
@@ -821,6 +844,7 @@ class PerfilDetallePage extends StatefulWidget {
     this.onMeGusta,
     this.onReportar,
     this.onBloquear,
+    this.onReportarYBloquear,
   });
 
   @override
@@ -863,6 +887,7 @@ class _PerfilDetallePageState extends State<PerfilDetallePage> {
                   onChat: widget.onChat,
                   onReportar: widget.onReportar,
                   onBloquear: widget.onBloquear,
+                  onReportarYBloquear: widget.onReportarYBloquear,
                   gusta: _gusta,
                   soloVista: widget.soloVista,
                   onMeGusta: widget.soloVista ? null : _manejarMeGusta,

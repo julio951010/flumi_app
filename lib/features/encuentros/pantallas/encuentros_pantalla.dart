@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' hide Column;
+import '../../../core/utilidades/app_log.dart';
 import '../../../core/utilidades/fotos_perfil.dart';
 import 'package:swipe_cards/draggable_card.dart';
 import 'package:swipe_cards/swipe_cards.dart';
@@ -188,9 +189,9 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         .getSingleOrNull();
     if (matchLocal != null) {
       leDioLike = true;
-      debugPrint('[MatchPerdido] ${usuario.nombre}: matchLocal=true');
+      appLog('[MatchPerdido] ${usuario.nombre}: matchLocal=true');
     }
-    debugPrint('[MatchPerdido] ${usuario.nombre}: enIdsRecibidos=$leDioLike');
+    appLog('[MatchPerdido] ${usuario.nombre}: enIdsRecibidos=$leDioLike');
     if (!leDioLike) {
       try {
         final miId = widget.miId;
@@ -211,10 +212,10 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
                   .get();
         }
         leDioLike = filas.isNotEmpty;
-        debugPrint(
+        appLog(
             '[MatchPerdido] rechequeo BD -> $leDioLike (${filas.length} filas)');
       } catch (e) {
-        debugPrint('[MatchPerdido] error al rechequear: $e');
+        appLog('[MatchPerdido] error al rechequear: $e');
         leDioLike = false;
       }
     }
@@ -326,11 +327,11 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
 
   Future<void> _undo() async {
     if (_deshaciendo) {
-      debugPrint('[Deshacer] bloqueado: ya en curso');
+      appLog('[Deshacer] bloqueado: ya en curso');
       return;
     }
     final revividoId = widget.votosServicio.tomarUltimoNope();
-    debugPrint('[Deshacer] tomarUltimoNope -> $revividoId');
+    appLog('[Deshacer] tomarUltimoNope -> $revividoId');
     if (revividoId == null) {
       if (mounted) {
         NotificacionServicio.alerta(
@@ -345,14 +346,14 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       // Pequeño haptic si está disponible en el dispositivo.
       try {
         // ignore: avoid_print
-        debugPrint('[Deshacer] iniciando para $revividoId');
+        appLog('[Deshacer] iniciando para $revividoId');
       } catch (_) {}
     }
     try {
       final concedido = await widget.votosServicio
           .quitarRechazo(revividoId)
           .timeout(const Duration(seconds: 7), onTimeout: () {
-        debugPrint('[Deshacer] timeout quitarRechazo, fallback local');
+        appLog('[Deshacer] timeout quitarRechazo, fallback local');
         return true;
       });
       if (!concedido) {
@@ -368,7 +369,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
             unawaited(_suscripcion.cargarSuscripcion());
             NotificacionServicio.advertencia(
               context,
-              'No se pudo validar tu plan con el servidor. '
+              'No se pudo validar tu plan. '
               'Revisa tu conexión e inténtalo de nuevo.',
             );
           } else {
@@ -400,10 +401,10 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
       try {
         await _suscripcion.registrarDeshacer().timeout(
             const Duration(seconds: 5), onTimeout: () {
-          debugPrint('[Deshacer] timeout registrarDeshacer local');
+          appLog('[Deshacer] timeout registrarDeshacer local');
         });
       } catch (e) {
-        debugPrint('[Deshacer] registrarDeshacer error $e (ignorado)');
+        appLog('[Deshacer] registrarDeshacer error $e (ignorado)');
       }
 
       // Busca el perfil revivido: primero en la fuente completa (_usuarios),
@@ -430,7 +431,7 @@ class _EncuentrosPantallaState extends State<EncuentrosPantalla> {
         } catch (_) {}
       }
       if (revivido == null) {
-        debugPrint('[Deshacer] no se encontró perfil $revividoId, reponiendo');
+        appLog('[Deshacer] no se encontró perfil $revividoId, reponiendo');
         widget.votosServicio.reponerNope(revividoId);
         if (mounted) {
           NotificacionServicio.advertencia(
@@ -748,37 +749,13 @@ return widget.syncService.consultarFeedRemoto(
     lista.removeWhere((u) => _idsGustados.contains(u.uuid));
     // Reportados por mí: no resurgen (ni por reciclaje de nopes).
     lista.removeWhere((u) => _idsReportados.contains(u.uuid));
+    // Perfiles ocultos (ocultar_perfil): el servidor ya los excluye de las
+    // descargas nuevas, pero las copias en caché local persistirían
+    // (el sync es solo-merge). Se filtran aquí para que el efecto sea
+    // inmediato sin esperar purga.
+    lista.removeWhere((u) => u.ocultarPerfil);
 
     return lista;
-  }
-
-  /// Reporta y oculta de inmediato: avanza el motor sin registrar nope
-  /// (el reporte ya excluye vía _idsReportados).
-  Future<ResultadoReporte> _reportarYOcultar(
-      Usuario usuario, String codigo) async {
-    final resultado = await widget.chatRepo.reportarUsuario(
-      miId: widget.miId,
-      otroId: usuario.uuid,
-      motivo: codigo,
-      detalle: 'desde: encuentros',
-    );
-    _idsReportados.add(usuario.uuid);
-    if (!mounted) return resultado;
-    final engine = _matchEngine;
-    final actual = engine?.currentItem?.content as Usuario?;
-    if (actual != null && actual.uuid == usuario.uuid) {
-      final item = engine!.currentItem!;
-      if (item.decision == Decision.undecided) {
-        item.decision = Decision.nope;
-        engine.cycleMatch();
-      }
-    } else {
-      setState(() {
-        _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
-        _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
-      });
-    }
-    return resultado;
   }
 
   void _aplicarFiltros() {
@@ -936,7 +913,41 @@ return widget.syncService.consultarFeedRemoto(
       esMatch: gustado && _idsRecibidos.contains(usuario.uuid),
       esMeGusta: gustado,
       esSuperRecibido: _idsSuperRecibidos.contains(usuario.uuid),
-      onReportar: (codigo) => _reportarYOcultar(usuario, codigo),
+      onReportar: (codigo) async {
+        // Solo reporte: NO oculta el perfil, solo envía el reporte
+        return await widget.chatRepo.reportarUsuario(
+          miId: widget.miId,
+          otroId: usuario.uuid,
+          motivo: codigo,
+          detalle: 'desde: encuentros',
+        );
+      },
+      onReportarYBloquear: (codigo) async {
+        // Reportar y bloquear: reporte + bloqueo + oculta de la vista
+        await widget.chatRepo.reportarUsuario(
+          miId: widget.miId,
+          otroId: usuario.uuid,
+          motivo: codigo,
+          detalle: 'desde: encuentros',
+        );
+        _idsReportados.add(usuario.uuid);
+        await widget.chatRepo.bloquearUsuario(
+          miId: widget.miId,
+          otroId: usuario.uuid,
+        );
+        if (!mounted) return;
+        final engine = _matchEngine;
+        final actual = engine?.currentItem?.content as Usuario?;
+        if (actual != null && actual.uuid == usuario.uuid) {
+          engine!.currentItem!.nope();
+          engine.cycleMatch();
+        } else {
+          setState(() {
+            _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
+            _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+          });
+        }
+      },
       onBloquear: () async {
         await widget.chatRepo.bloquearUsuario(
           miId: widget.miId,

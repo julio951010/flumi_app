@@ -37,6 +37,8 @@ class TarjetaDetalleUsuario extends StatefulWidget {
   final Future<ResultadoReporte> Function(String motivoCodigo)? onReportar;
   /// Bloqueo real. Sin handler no se muestra la opción.
   final Future<void> Function()? onBloquear;
+  /// Reporte + bloqueo combinado. Sin handler no se muestra la opción.
+  final Future<void> Function(String motivoCodigo)? onReportarYBloquear;
   const TarjetaDetalleUsuario({
     super.key,
     required this.usuario,
@@ -53,6 +55,7 @@ class TarjetaDetalleUsuario extends StatefulWidget {
     this.esSuperRecibido = false,
     this.onReportar,
     this.onBloquear,
+    this.onReportarYBloquear,
   });
 
   @override
@@ -139,7 +142,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
   Future<void> _abrirMenu() async {
     final puedeReportar = widget.onReportar != null;
     final puedeBloquear = widget.onBloquear != null;
-    if (!puedeReportar && !puedeBloquear) return;
+    final puedeReportarYBloquear = widget.onReportarYBloquear != null;
+    if (!puedeReportar && !puedeBloquear && !puedeReportarYBloquear) return;
     final opcion = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
@@ -166,6 +170,13 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
                     style: TextStyle(fontSize: 15)),
                 onTap: () => Navigator.pop(ctx, 'reportar'),
               ),
+            if (puedeReportarYBloquear)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+                title: const Text('Reportar y bloquear',
+                    style: TextStyle(fontSize: 15, color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'reportar_bloquear'),
+              ),
             if (puedeBloquear)
               ListTile(
                 leading: const Icon(Icons.block, color: Colors.redAccent),
@@ -181,13 +192,15 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     if (!mounted || opcion == null) return;
     if (opcion == 'reportar') {
       await _reportar();
+    } else if (opcion == 'reportar_bloquear') {
+      await _reportarYBloquear();
     } else if (opcion == 'bloquear') {
       await _bloquear();
     }
   }
 
   Future<void> _reportar() async {
-    final codigo = await showModalBottomSheet<String>(
+    await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -217,14 +230,45 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
             for (final m in TarjetaDetalleUsuario.motivosReporte)
               ListTile(
                 title: Text(m.etiqueta, style: const TextStyle(fontSize: 15)),
-                onTap: () => Navigator.pop(ctx, m.codigo),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final confirmar = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text('Reportar por: ${m.etiqueta}?'),
+                      content: Text(
+                          'Se enviará el reporte a moderación. ¿Confirmas?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancelar'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Reportar',
+                              style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmar == true && mounted) {
+                    await _enviarReporte(m.codigo);
+                  }
+                },
               ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
-    if (codigo == null || !mounted) return;
+    // El envío ahora se hace en _enviarReporte (llamado desde el onTap
+    // de cada motivo, tras la confirmación).
+  }
+
+  /// Envía el reporte (solo reporte, sin ocultar). Tras confirmar,
+  /// da la opción de bloquear también.
+  Future<void> _enviarReporte(String codigo) async {
+    if (!mounted) return;
     final repo = widget.onReportar;
     if (repo == null) return;
     final resultado = await repo(codigo);
@@ -263,6 +307,74 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     );
     if (bloquear != true || !mounted) return;
     await _bloquear(confirmar: false);
+  }
+
+  Future<void> _reportarYBloquear() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                '¿Por qué reportas a ${widget.usuario.nombre}?',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+              ),
+            ),
+            for (final m in TarjetaDetalleUsuario.motivosReporte)
+              ListTile(
+                title: Text(m.etiqueta, style: const TextStyle(fontSize: 15)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final confirmar = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text('Reportar por: ${m.etiqueta}?'),
+                      content: Text(
+                          '${widget.usuario.nombre} será reportado y bloqueado. No volverá a aparecer en tus resultados. ¿Confirmas?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancelar'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Reportar y bloquear',
+                              style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmar != true || !mounted) return;
+                  final repo = widget.onReportarYBloquear;
+                  if (repo == null) return;
+                  await repo(m.codigo);
+                  if (!mounted) return;
+                  _toast('Reporte enviado y usuario bloqueado');
+                  Navigator.pop(context);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _bloquear({bool confirmar = true}) async {
@@ -664,7 +776,7 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
               children: [
                 const SizedBox(height: 6),
                 _buildQueBuscaBadge(u),
-                if (u.ciudad.trim().isNotEmpty) ...[
+                if (!u.ocultarUbicacion && u.ciudad.trim().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Container(
                     padding:
@@ -727,7 +839,8 @@ class _TarjetaDetalleUsuarioState extends State<TarjetaDetalleUsuario>
     final secciones = <Widget>[
       _seccionDetalle('Informaci\u00f3n b\u00e1sica', [
         _pillIconoValor(Icons.face, valorTexto(capitalizar(u.genero))),
-        _pillIconoValor(Icons.location_on, valorTexto(u.ciudad)),
+        _pillIconoValor(
+            Icons.location_on, u.ocultarUbicacion ? '' : valorTexto(u.ciudad)),
       ]),
       if (u.biografia.trim().isNotEmpty) ...[
         const _SeccionTitulo('Sobre m\u00ed'),

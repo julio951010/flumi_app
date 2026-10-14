@@ -1,5 +1,4 @@
 ﻿import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +10,7 @@ import '../utilidades/perfil_mapeo.dart';
 import '../utilidades/notificacion_navegador.dart';
 import 'connectivity_service.dart';
 import 'estado_servidor_servicio.dart';
+import '../utilidades/app_log.dart';
 import 'preferencias_notificaciones_servicio.dart';
 
 class SyncService {
@@ -51,7 +51,7 @@ class SyncService {
       ]);
     } catch (e) {
       // Un fallo de red no debe bloquear el resto de la app.
-      print('[sync] Error en sincronizarTodo: $e');
+      appLog('[sync] Error en sincronizarTodo: $e');
       EstadoServidorServicio.instancia.marcarFallo(e);
     } finally {
       _sincronizando = false;
@@ -160,7 +160,7 @@ class SyncService {
       // La subida fallÃ³ (RLS, CHECK, tipos de columna, red...). No borramos
       // la marca pendiente para reintentar mÃ¡s tarde, pero lo registramos
       // para poder diagnosticar por quÃ© el perfil no llega a Supabase.
-      print('[sync] Error al subir el perfil propio: $e');
+      appLog('[sync] Error al subir el perfil propio: $e');
     }
       }
     }
@@ -288,7 +288,7 @@ class SyncService {
   /// Realtime pudo perder mientras estuvo caído/cerrado).
   Future<void> sincronizarMensajesPendientes() async {
     if (_sincronizandoMensajes) {
-      debugPrint('[Sync] sincronizarMensajesPendientes: omitido (ya en curso)');
+      appLog('[Sync] sincronizarMensajesPendientes: omitido (ya en curso)');
       return;
     }
     _sincronizandoMensajes = true;
@@ -307,11 +307,11 @@ class SyncService {
           ..where((m) => m.pendienteDeSincronizar.equals(true))
           ..orderBy([(m) => OrderingTerm.asc(m.timestamp)]))
         .get();
-    debugPrint('[Sync] _subirMensajesPendientes: ${pendientes.length} pendientes');
+    appLog('[Sync] _subirMensajesPendientes: ${pendientes.length} pendientes');
 
     for (final mensaje in pendientes) {
       try {
-        debugPrint('[Sync] subiendo mensaje: uuid=${mensaje.uuid}');
+        appLog('[Sync] subiendo mensaje: uuid=${mensaje.uuid}');
         await _subirMensaje(mensaje);
         await (_db.update(_db.mensajes)
               ..where((m) => m.uuid.equals(mensaje.uuid)))
@@ -321,7 +321,7 @@ class SyncService {
         ));
         EstadoServidorServicio.instancia.marcarExito();
       } catch (e, st) {
-        debugPrint('[Sync] ERROR subiendo mensaje uuid=${mensaje.uuid}: $e\n$st');
+        appLog('[Sync] ERROR subiendo mensaje uuid=${mensaje.uuid}: $e\n$st');
         final intentos = mensaje.intentosDeSincronizacion + 1;
         await (_db.update(_db.mensajes)
               ..where((m) => m.uuid.equals(mensaje.uuid)))
@@ -404,6 +404,8 @@ class SyncService {
           timestamp: timestamp,
           pendienteDeSincronizar: const Value(false),
           estadoEnvio: Value(emisor == userId ? 'enviado' : 'entregado'),
+          intentosDeSincronizacion: 0,
+          replyTo: Value(f['reply_to'] as String?),
         ));
         final receptor = f['receptor_id'] as String? ?? '';
         if (receptor == userId &&
@@ -1594,8 +1596,9 @@ class SyncService {
       // (desordena la conversación y rompe el cálculo de "visto").
       'timestamp': mensaje.timestamp.toUtc().toIso8601String(),
       'estado_envio': 'enviado',
+      'reply_to': mensaje.replyTo,
     };
-    debugPrint('[Sync] _subirMensaje upsert: ${jsonEncode(body)}');
+    appLog('[Sync] _subirMensaje upsert: ${jsonEncode(body)}');
 
     if (kUsarServidorLocal) {
       final token = await LocalTokenStore.obtenerToken();

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
+import '../utilidades/app_log.dart';
+
 enum EstadoConexion { conectado, desconectado }
 
 /// Igual patrón que en Closi: expone un stream para que la UI reaccione
@@ -32,7 +34,7 @@ class ConnectivityService {
       _suscripcion = Connectivity()
           .onConnectivityChanged
           .listen(_actualizarEstado);
-      debugPrint('[Connectivity] Web: asumimos conexión inicial');
+      appLog('[Connectivity] Web: asumimos conexión inicial');
       return;
     }
     final resultado = await Connectivity().checkConnectivity();
@@ -54,7 +56,7 @@ class ConnectivityService {
     if (nuevoEstado != _estadoActual) {
       _estadoActual = nuevoEstado;
       _controlador.add(_estadoActual);
-      debugPrint('[Connectivity] estado cambiado: $nuevoEstado (raw: $resultados)');
+      appLog('[Connectivity] estado cambiado: $nuevoEstado (raw: $resultados)');
     }
   }
 

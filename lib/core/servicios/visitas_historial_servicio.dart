@@ -94,6 +94,33 @@ class VisitasServicio with ChangeNotifier {
     unawaited(_sync.sincronizarVisitas());
   }
 
+  /// Borra TODAS mis visitas salientes (las que yo hice a otros perfiles).
+  /// Se usa al activar "Ocultar visitas": las visitas pasadas seguirían
+  /// visibles en "¿Quién te vio?" del otro si no se eliminan.
+  /// Borra en local y en Supabase (best-effort; requiere la policy
+  /// `usuario_borra_sus_visitas` en la tabla `visitas`).
+  Future<void> borrarMisVisitasSalientes() async {
+    final miId = await _obtenerUsuarioPropioId(_db);
+    if (miId == null) return;
+    // Local: desaparecen de inmediato de mis espejos/cachés.
+    await (_db.delete(_db.visitas)
+          ..where((v) => v.visitanteId.equals(miId)))
+        .go();
+    notifyListeners();
+    // Servidor: para que el otro deje de verme en su lista.
+    if (!kUsarServidorLocal && ConnectivityService.instancia.hayConexion) {
+      try {
+        await sb.Supabase.instance.client
+            .from('visitas')
+            .delete()
+            .eq('visitante_id', miId)
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        EstadoServidorServicio.instancia.marcarFallo(e);
+      }
+    }
+  }
+
   Future<List<Visita>> obtenerVisitas({int? limite, bool sincronizar = true}) async {
     final visitadoId = await _obtenerUsuarioPropioId(_db);
     if (visitadoId == null) return [];

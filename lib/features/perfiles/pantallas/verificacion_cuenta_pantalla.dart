@@ -231,6 +231,15 @@ class _VerificacionCuentaPantallaState extends State<VerificacionCuentaPantalla>
     if (_intentos >= _maxIntentos) return;
     setState(() => _enviando = true);
     try {
+      // Borra la foto de verificación anterior en Supabase (si existe)
+      // para no acumular archivos huérfanos en profile-photos/verificacion/
+      if (widget.perfil.fotoVerificacion.isNotEmpty) {
+        await PerfilFotoServicio.eliminarFotoPerfil(
+          usuarioId: widget.perfil.uuid,
+          urlOFoto: widget.perfil.fotoVerificacion,
+        );
+      }
+
       final urlSubida = await PerfilFotoServicio.subirFotoVerificacion(
         usuarioId: widget.perfil.uuid,
         archivoRuta: ruta,

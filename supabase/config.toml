@@ -423,9 +423,18 @@ enabled = true
 # Postgres la invoca solo con x-flumi-secret (sin Authorization: Bearer),
 # así que el gateway NO debe exigir JWT (si no, 401 antes de ejecutar nada).
 verify_jwt = false
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/send-email/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/send-email/*.html" ]
+# Sin entrypoint explícito: usa ./functions/enviar-push/index.ts por defecto.
+# (OJO: aquí hubo un entrypoint apuntando a send-email/index.ts que
+# desplegaba el código EQUIVOCADO bajo este nombre y rompía todos los push.)
+
+[functions.eliminar-cuenta]
+enabled = true
+# La app la invoca con el JWT del usuario (functions.invoke lo adjunta),
+# así que verify_jwt = true (defecto) es lo correcto: solo el dueño borra
+# su propia cuenta.
+
+[functions.verificar-rostro]
+enabled = true
+# Igual que eliminar-cuenta: la invoca la app con JWT de usuario.
+# Requiere el secreto FACE_MODEL_URL (carpeta con los pesos face-api.js)
+# y validación en despliegue (ver cabecera de index.ts).

@@ -6,6 +6,7 @@ import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../perfiles/perfil_repositorio.dart';
 import '../../perfiles/pantallas/detalle_plan_pantalla.dart';
+import '../../../main.dart'; // visitasServicio global
 import '../../../widgets_comunes/bloqueo_suscripcion_sheet.dart';
 
 class ModoInvisiblePantalla extends StatefulWidget {
@@ -66,6 +67,14 @@ class _ModoInvisiblePantallaState extends State<ModoInvisiblePantalla> {
           ? UsuariosCompanion(uuid: Value(uuid), ocultarPerfil: Value(valor))
           : UsuariosCompanion(uuid: Value(uuid), ocultarVisitas: Value(valor));
       await widget.repositorio.guardarOCambiarPerfil(cambios);
+      // Al ACTIVAR ocultar visitas: borra mis visitas pasadas para que
+      // nadie me siga viendo en su "¿Quién te vio?" (las futuras ya se
+      // frenan en registrarVisita + RPC registrar_visita).
+      if (!guardarOcultarPerfil && valor) {
+        try {
+          await visitasServicio.borrarMisVisitasSalientes();
+        } catch (_) {}
+      }
     } catch (_) {
       if (mounted) {
         NotificacionServicio.alerta(

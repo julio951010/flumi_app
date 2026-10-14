@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../config/env.dart';
 import 'contenidos_servicio.dart';
 
 /// Visor genérico de contenidos legales (términos, privacidad, contactos...).
@@ -22,21 +24,59 @@ class ContenidoLegalPantalla extends StatefulWidget {
 class _ContenidoLegalPantallaState extends State<ContenidoLegalPantalla> {
   String? _cuerpo;
   String? _error;
+  RealtimeChannel? _canal;
 
   @override
   void initState() {
     super.initState();
     _cargar();
+    _suscribir();
   }
 
-  Future<void> _cargar() async {
+  @override
+  void dispose() {
+    try {
+      final canal = _canal;
+      if (canal != null) {
+        Supabase.instance.client.removeChannel(canal);
+      }
+    } catch (_) {}
+    super.dispose();
+  }
+
+  /// Ediciones desde admin_flumi recargan el texto solo, sin salir
+  /// de la pantalla (filtrado por clave para no recargar de más).
+  void _suscribir() {
+    if (kUsarServidorLocal) return;
+    try {
+      final clave = widget.clave;
+      _canal = Supabase.instance.client
+          .channel('contenido_$clave')
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'contenidos_legales',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'clave',
+            value: clave,
+          ),
+          callback: (_) {
+            if (mounted) _cargar(forzar: true);
+          },
+        )
+        ..subscribe();
+    } catch (_) {}
+  }
+
+  Future<void> _cargar({bool forzar = false}) async {
     setState(() {
       _cuerpo = null;
       _error = null;
     });
     try {
-      final cuerpo =
-          await ContenidosServicio.instancia.obtenerCuerpo(widget.clave);
+      final cuerpo = await ContenidosServicio.instancia
+          .obtenerCuerpo(widget.clave, forzarRefresh: forzar);
       if (mounted) setState(() => _cuerpo = cuerpo);
     } catch (_) {
       if (mounted) setState(() => _error = 'No se pudo cargar el contenido.');
@@ -60,7 +100,7 @@ class _ContenidoLegalPantallaState extends State<ContenidoLegalPantalla> {
         actions: [
           if (_cuerpo != null || _error != null)
             IconButton(
-              onPressed: _cargar,
+              onPressed: () => _cargar(forzar: true),
               icon: const Icon(Icons.refresh, size: 22),
               tooltip: 'Recargar',
             ),
@@ -96,7 +136,7 @@ class _ContenidoLegalPantallaState extends State<ContenidoLegalPantalla> {
                     ),
                   )
                 : RefreshIndicator(
-                    onRefresh: _cargar,
+                    onRefresh: () => _cargar(forzar: true),
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
                       children: [

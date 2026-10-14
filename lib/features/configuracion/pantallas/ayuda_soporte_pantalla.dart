@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/base_datos_local/database.dart';
 import '../../../core/estilos/tema.dart';
 import 'contactar_soporte_pantalla.dart';
 import '../../../main.dart'; // database global

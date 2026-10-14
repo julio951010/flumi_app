@@ -74,6 +74,9 @@ class _ChatPantallaState extends State<ChatPantalla> {
   bool _enviandoEscribiendo = false;
   bool _panelEmojisAbierto = false;
 
+  /// Mensaje al que se está respondiendo (para respuesta estilo WhatsApp/Telegram).
+  Mensaje? _respondiendoA;
+
   // Paginación: la lista llega completa por el watch; se renderizan los
   // últimos [_visibles] mensajes (lista invertida) y se amplían al hacer
   // scroll hasta arriba.
@@ -383,12 +386,15 @@ class _ChatPantallaState extends State<ChatPantalla> {
     if (!suscripcion.esGratis) {
       final texto = _mensajeCtrl.text.trim();
       if (texto.isEmpty) return;
+      final replyTo = _respondiendoA?.uuid;
       _mensajeCtrl.clear();
+      _cancelarRespuesta();
       _apagarEscribiendo();
       await widget.repositorio.enviarMensaje(
         emisorId: widget.miId,
         receptorId: widget.otroUsuarioId,
         contenido: texto,
+        replyTo: replyTo,
       );
     } else {
       // Usuario en plan gratis: mostrar mensaje de upgrade
@@ -399,6 +405,14 @@ class _ChatPantallaState extends State<ChatPantalla> {
         );
       }
     }
+  }
+
+  void _responder(Mensaje msg) {
+    setState(() => _respondiendoA = msg);
+  }
+
+  void _cancelarRespuesta() {
+    setState(() => _respondiendoA = null);
   }
 
   void _alCambiarTexto(String texto) {
@@ -475,6 +489,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
             ),
             if (_otroEscribiendo) _indicadorEscribiendo(),
             if (_panelEmojisAbierto) _panelEmojis(),
+            if (_respondiendoA != null) _barraRespuesta(),
             _campoEntrada(),
           ],
         ),
@@ -513,7 +528,8 @@ class _ChatPantallaState extends State<ChatPantalla> {
       itemCount: visibles + (_visibles < mensajes.length ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == visibles) return _cargarMasCabecera();
-        return _burbuja(mensajes[mensajes.length - 1 - index]);
+        final msg = mensajes[mensajes.length - 1 - index];
+        return _burbuja(msg, mensajes);
       },
     );
   }
@@ -701,8 +717,12 @@ class _ChatPantallaState extends State<ChatPantalla> {
     );
   }
 
-  Widget _burbuja(Mensaje msg) {
+  Widget _burbuja(Mensaje msg, List<Mensaje> todosMensajes) {
     final esMio = msg.emisorId == widget.miId;
+    final Mensaje? mensajeRespondido = msg.replyTo != null
+        ? todosMensajes.where((m) => m.uuid == msg.replyTo).firstOrNull
+        : null;
+
     return GestureDetector(
       onLongPress: esMio ? () => _accionesMensaje(msg) : () => _accionesMensajeAjeno(msg),
       child: Align(
@@ -726,6 +746,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (mensajeRespondido != null) _vistaPreviaRespuesta(mensajeRespondido, esMio),
               Text(
                 msg.contenido,
                 style: TextStyle(
@@ -756,6 +777,53 @@ class _ChatPantallaState extends State<ChatPantalla> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Vista previa del mensaje respondido (estilo WhatsApp/Telegram).
+  Widget _vistaPreviaRespuesta(Mensaje msgRespondido, bool esMio) {
+    final nombre = msgRespondido.emisorId == widget.miId ? 'Tú' : widget.nombreOtro;
+    final contenido = msgRespondido.contenido.length > 40
+        ? '${msgRespondido.contenido.substring(0, 40)}...'
+        : msgRespondido.contenido;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      decoration: BoxDecoration(
+        color: esMio ? Colors.white.withValues(alpha: 0.15) : Colors.grey[200],
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+          left: BorderSide(
+            color: FlumiTema.colorPrimario,
+            width: 3,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            nombre,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: esMio ? Colors.white.withValues(alpha: 0.8) : FlumiTema.colorPrimario,
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            contenido,
+            style: TextStyle(
+              fontSize: 12,
+              color: esMio ? Colors.white.withValues(alpha: 0.9) : Colors.grey[700],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }
@@ -892,7 +960,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
   }
 
   /// Acciones para mensajes de OTRO usuario (long-press en burbuja ajena).
-  /// Opciones: Responder, Copiar, Reaccionar, Reportar.
+  /// Opciones: Responder, Copiar, Reportar.
   Future<void> _accionesMensajeAjeno(Mensaje msg) async {
     final opcion = await showModalBottomSheet<String>(
       context: context,
@@ -940,12 +1008,6 @@ class _ChatPantallaState extends State<ChatPantalla> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.emoji_emotions_outlined, color: Colors.black87),
-              title: const Text('Reaccionar',
-                  style: TextStyle(fontSize: 15)),
-              onTap: () => Navigator.pop(ctx, 'reaccionar'),
-            ),
-            ListTile(
               leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
               title: const Text('Reportar',
                   style: TextStyle(fontSize: 15, color: Colors.redAccent)),
@@ -959,113 +1021,14 @@ class _ChatPantallaState extends State<ChatPantalla> {
     if (!mounted || opcion == null) return;
     switch (opcion) {
       case 'responder':
-        // Prefilla el campo de texto con ">> [contenido] " para responder
-        final ctrl = TextEditingController(text: '>> ${msg.contenido} ');
-        await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Responder'),
-            content: TextField(
-              controller: ctrl,
-              autofocus: true,
-              maxLines: 3,
-              decoration: const InputDecoration(hintText: 'Tu respuesta'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                child: const Text('Enviar'),
-              ),
-            ],
-          ),
-        );
-        if (!mounted) return;
-        final texto = ctrl.text.trim();
-        if (texto.isEmpty) return;
-        await widget.repositorio.enviarMensaje(
-          emisorId: widget.miId,
-          receptorId: widget.otroUsuarioId,
-          contenido: texto,
-        );
+        _responder(msg);
         break;
       case 'copiar':
         // Ya copiado en el ListTile
         break;
-      case 'reaccionar':
-        await _mostrarReacciones(msg);
-        break;
       case 'reportar':
         await _reportarMensaje(msg);
         break;
-    }
-  }
-
-  /// Muestra el selector de reacciones (emojis) para un mensaje ajeno.
-  Future<void> _mostrarReacciones(Mensaje msg) async {
-    final emojis = [
-      '👍', '❤️', '😂', '😮', '😢', '😡', '👏', '🙏', '🔥', '💯',
-      '😍', '🤔', '😭', '😱', '🤣', '😎', '🤝', '🤞', '🎉', '✨',
-    ];
-    final reaccion = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Reaccionar a: "${msg.contenido.length > 40 ? '${msg.contenido.substring(0, 40)}...' : msg.contenido}"',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.grey[500], fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: emojis.map((e) => GestureDetector(
-                  onTap: () => Navigator.pop(ctx, e),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(e, style: const TextStyle(fontSize: 24)),
-                  ),
-                )).toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-    if (reaccion != null && mounted) {
-      _toast('Reacción $reaccion enviada');
-      // TODO: Implementar widget.repositorio.agregarReaccion(msg.uuid, reaccion)
     }
   }
 
@@ -1118,6 +1081,76 @@ class _ChatPantallaState extends State<ChatPantalla> {
     );
     if (!mounted) return;
     _toast('Mensaje reportado. Gracias por ayudar a mantener Flumi seguro.');
+  }
+
+  /// Barra de respuesta estilo WhatsApp/Telegram que aparece sobre el campo de texto.
+  Widget _barraRespuesta() {
+    final msg = _respondiendoA!;
+    final esMio = msg.emisorId == widget.miId;
+    final nombre = esMio ? 'Tú' : widget.nombreOtro;
+    final contenido = msg.contenido.length > 50
+        ? '${msg.contenido.substring(0, 50)}...'
+        : msg.contenido;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        border: Border(
+          top: BorderSide(color: Colors.grey[300]!, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 40,
+            decoration: BoxDecoration(
+              color: FlumiTema.colorPrimario,
+              borderRadius: BorderRadius.circular(1.5),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Respondiendo a $nombre',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: FlumiTema.colorPrimario,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  contenido,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[700],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: _cancelarRespuesta,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.close,
+                size: 18,
+                color: Colors.grey[500],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _campoEntrada() {

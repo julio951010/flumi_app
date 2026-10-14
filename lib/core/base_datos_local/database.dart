@@ -10,7 +10,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 24;
+  int get schemaVersion => 26;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -173,6 +173,14 @@ class AppDatabase extends _$AppDatabase {
           FROM notificaciones_abiertas
         ''');
         // La tabla vieja se queda como respaldo (no la borramos por si acaso).
+      }
+      if (from < 25) {
+        // Columna replyTo para respuestas estilo WhatsApp/Telegram.
+        await m.addColumn(mensajes, mensajes.replyTo);
+      }
+      if (from < 26) {
+        // Columna ocultarUbicacion ("Mostrar mi ubicación" en Privacidad).
+        await m.addColumn(usuarios, usuarios.ocultarUbicacion);
       }
     },
   );

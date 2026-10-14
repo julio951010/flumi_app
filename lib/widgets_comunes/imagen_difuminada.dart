@@ -9,12 +9,14 @@ class ImagenDifuminada extends StatefulWidget {
   final String ruta;
   final double sigma;
   final BoxFit fit;
+  final VoidCallback? onError;
 
   const ImagenDifuminada({
     super.key,
     required this.ruta,
     this.sigma = 4,
     this.fit = BoxFit.cover,
+    this.onError,
   });
 
   @override
@@ -68,6 +70,7 @@ class _ImagenDifuminadaState extends State<ImagenDifuminada> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _fallo = true);
+      widget.onError?.call();
     }
   }
 

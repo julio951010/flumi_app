@@ -57,7 +57,6 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   late final SuscripcionServicio _suscripcion = widget.suscripcionServicio;
   late final VisitasServicio _visitasServicio = widget.visitasServicio;
   late final HistorialLikesServicio _historialLikesServicio = widget.historialLikesServicio;
-  late final VotosServicio _votosServicio = widget.votosServicio;
   late final SyncService _syncService = widget.syncService;
   List<_ItemInteraccion> _likes = [];
   List<_ItemInteraccion> _visitas = [];

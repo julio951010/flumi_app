@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:telephony/telephony.dart';
+
+import '../utilidades/app_log.dart';
 
 /// Datos extraídos del SMS de confirmación de PAGOxMOVIL / ENZONA.
 /// No autorrellena el campo: solo se usa para comparar con lo que el usuario
@@ -56,7 +57,7 @@ class SmsVerificacionServicio {
     try {
       final perm = await Permission.sms.request();
       if (!perm.isGranted) {
-        debugPrint('[SmsVerificacion] permiso SMS denegado');
+        appLog('[SmsVerificacion] permiso SMS denegado');
         return;
       }
       await _telephony.requestPhoneAndSmsPermissions;
@@ -70,9 +71,9 @@ class SmsVerificacionServicio {
         listenInBackground: true,
       );
       _escuchando = true;
-      debugPrint('[SmsVerificacion] escucha SMS iniciada');
+      appLog('[SmsVerificacion] escucha SMS iniciada');
     } catch (e) {
-      debugPrint('[SmsVerificacion] error iniciar: $e');
+      appLog('[SmsVerificacion] error iniciar: $e');
     }
   }
 
@@ -147,7 +148,7 @@ class SmsVerificacionServicio {
       timestamp: DateTime.now(),
     );
     _ultimo = data;
-    debugPrint('[SmsVerificacion] SMS $remitenteRaw -> nro=${data.nro} monto=$monto');
+    appLog('[SmsVerificacion] SMS $remitenteRaw -> nro=${data.nro} monto=$monto');
   }
 
   /// Para testing / inyección manual sin SMS real.

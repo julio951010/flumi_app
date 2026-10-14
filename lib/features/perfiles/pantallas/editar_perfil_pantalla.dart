@@ -949,7 +949,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
       if (!mounted) return;
       setState(() =>
           _perfil = actual.copyWith(fotosUrls: nuevasUrls, pendienteDeSincronizar: true));
-      NotificacionServicio.exito(context, 'Foto subida al servidor.');
+      NotificacionServicio.exito(context, 'Foto subida.');
     });
   }
 
@@ -1012,7 +1012,7 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
         if (!mounted) return;
         setState(() =>
             _perfil = actual.copyWith(fotosUrls: nuevasUrls, pendienteDeSincronizar: true));
-        NotificacionServicio.exito(context, 'Foto subida al servidor.');
+        NotificacionServicio.exito(context, 'Foto subida.');
       });
     } catch (_) {
       if (!mounted) return;

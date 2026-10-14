@@ -80,6 +80,8 @@ class Usuarios extends Table {
   BoolColumn get ocultarEdad => boolean().withDefault(const Constant(false))();
   BoolColumn get ocultarPerfil => boolean().withDefault(const Constant(false))();
   BoolColumn get ocultarVisitas => boolean().withDefault(const Constant(false))();
+  /// true = otros no ven mi ciudad ni mi distancia ("Mostrar mi ubicación").
+  BoolColumn get ocultarUbicacion => boolean().withDefault(const Constant(false))();
 
   BoolColumn get verificadoStatus => boolean().withDefault(const Constant(false))();
   IntColumn get scorePopularidad => integer().withDefault(const Constant(0))();
@@ -133,7 +135,10 @@ class Mensajes extends Table {
   TextColumn get estadoEnvio => text().withDefault(const Constant('enviando'))();
 
   BoolColumn get pendienteDeSincronizar => boolean().withDefault(const Constant(true))();
-  IntColumn get intentosDeSincronizacion => integer().withDefault(const Constant(0))();
+  IntColumn get intentosDeSincronizacion => integer()();
+
+  /// UUID del mensaje al que se responde (para respuestas estilo WhatsApp/Telegram).
+  TextColumn get replyTo => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {uuid};

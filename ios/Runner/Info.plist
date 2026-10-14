@@ -37,6 +37,10 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Flumi usa la cámara frontal para verificar tu identidad con un gesto en vivo.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Flumi usa tu ubicación para mostrarte personas cerca de ti.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Flumi necesita acceso a tus fotos para que puedas elegir tu foto de perfil.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

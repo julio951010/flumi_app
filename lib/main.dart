@@ -19,6 +19,7 @@ import 'core/servicios/notificacion_servicio.dart';
 import 'core/servicios/preferencias_notificaciones_servicio.dart';
 import 'core/servicios/sync_service.dart';
 import 'core/servicios/ubicacion_auto_servicio.dart';
+import 'core/utilidades/app_log.dart';
 import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/shimmer_caja.dart';
 import 'features/auth/auth_service.dart';
@@ -108,9 +109,9 @@ void main() async {
       inicializarPushCritico(),
     ]).timeout(const Duration(seconds: 10));
   } on TimeoutException {
-    debugPrint('[Arranque] timeout general: sigo offline por ahora');
+    appLog('[Arranque] timeout general: sigo offline por ahora');
   } catch (e) {
-    debugPrint('[Arranque] falló: $e — sigo offline');
+    appLog('[Arranque] falló: $e — sigo offline');
   }
   // Connectivity debe quedar iniciado aunque el grupo falle.
   unawaited(ConnectivityService.instancia.iniciar());
@@ -171,16 +172,16 @@ void main() async {
   votosServicio = VotosServicio(database, syncService);
   // Una sola carga (el constructor ya no auto-carga): con tope para no
   // bloquear el arranque si la red está lenta; al terminar avisa solo.
-  debugPrint('[Main] Iniciando carga de suscripción...');
+  appLog('[Main] Iniciando carga de suscripción...');
   try {
     await suscripcionServicio.cargarSuscripcion().timeout(
       const Duration(seconds: 6),
     );
-    debugPrint('[Main] Suscripción cargada OK, cargando=${suscripcionServicio.cargando}, plan=${suscripcionServicio.planActual}');
+    appLog('[Main] Suscripción cargada OK, cargando=${suscripcionServicio.cargando}, plan=${suscripcionServicio.planActual}');
   } on TimeoutException {
-    debugPrint('[Arranque] suscripción con tope: sigo con caché local');
+    appLog('[Arranque] suscripción con tope: sigo con caché local');
   } catch (e) {
-    debugPrint('[Main] Error cargando suscripción: $e');
+    appLog('[Main] Error cargando suscripción: $e');
   }
 
   runApp(const FlumiApp());
@@ -577,7 +578,7 @@ bool _esperandoSincronizacion = false;
           .sincronizarTodo(userId: userId, alIniciarSesion: true)
           .timeout(const Duration(seconds: 12));
     } on TimeoutException {
-      debugPrint('[Arranque] sync inicial con tope: entro con caché local');
+      appLog('[Arranque] sync inicial con tope: entro con caché local');
     } catch (_) {}
   }
 
@@ -600,7 +601,7 @@ bool _esperandoSincronizacion = false;
       // caché local, así que se consulta ese caché (sin red) antes de
       // rendirse. Solo un usuario genuinamente nuevo (sin fila local
       // propia aún) cae de verdad en "incompleto".
-      debugPrint('[Main] asegurarPerfilPropio falló/timeout: $e — uso caché local');
+      appLog('[Main] asegurarPerfilPropio falló/timeout: $e — uso caché local');
       try {
         final propio = await perfilRepositorio.obtenerPerfilPropio();
         if (mounted) {
@@ -949,14 +950,14 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       if (_servidorAvisoRestaurado) {
         _servidorAvisoRestaurado = false;
         NotificacionServicio.exito(
-            context, 'Conexión con el servidor restablecida');
+            context, 'Conexión restablecida');
       }
     } else {
       if (!_servidorAvisoRestaurado) {
         _servidorAvisoRestaurado = true;
         NotificacionServicio.advertencia(
           context,
-          'Fallo de conexión con el servidor. '
+          'Fallo de conexión. '
           'Los cambios se guardarán cuando se recupere.',
         );
       }
@@ -1729,7 +1730,7 @@ final visitas = await (database.select(database.visitas)
   /// potencial con alguien que te dio Me Gusta. Burbuja flotante anclada
   /// debajo del botón Deshacer con flechita apuntando al botón.
   void _avisarMatchPerdidoEnDeshacer() {
-    debugPrint('[MatchPerdido] disparando aviso');
+    appLog('[MatchPerdido] disparando aviso');
     // Follower anclado al LayerLink del botón Deshacer: nunca se sale de
     // pantalla (usa coordenadas del Overlay, no cálculos manuales).
     NotificacionServicio.mostrarBurbujaConLink(

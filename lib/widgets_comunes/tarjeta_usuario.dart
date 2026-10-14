@@ -4,7 +4,7 @@ import '../core/base_datos_local/database.dart';
 import 'foto_perfil.dart';
 import 'imagen_difuminada.dart';
 
-class TarjetaUsuario extends StatelessWidget {
+class TarjetaUsuario extends StatefulWidget {
   final Usuario usuario;
   final Widget? imagenOverlay;
   final Widget? badge;
@@ -29,12 +29,25 @@ class TarjetaUsuario extends StatelessWidget {
   });
 
   @override
+  State<TarjetaUsuario> createState() => _TarjetaUsuarioState();
+}
+
+class _TarjetaUsuarioState extends State<TarjetaUsuario> {
+  bool _imagenError = false;
+
+  void _manejarTap() {
+    if (!_imagenError && widget.onTap != null) {
+      widget.onTap!();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final inicial =
-        usuario.nombre.isNotEmpty ? usuario.nombre[0].toUpperCase() : '?';
-    final enLinea = _estaEnLinea(usuario);
+        widget.usuario.nombre.isNotEmpty ? widget.usuario.nombre[0].toUpperCase() : '?';
+    final enLinea = _estaEnLinea(widget.usuario);
     return GestureDetector(
-      onTap: onTap,
+      onTap: _manejarTap,
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -49,7 +62,7 @@ class TarjetaUsuario extends StatelessWidget {
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(20),
-                      border: esSuperRecibido
+                      border: widget.esSuperRecibido
                           ? Border.all(
                               color: Theme.of(context).colorScheme.primary,
                               width: 3,
@@ -57,13 +70,13 @@ class TarjetaUsuario extends StatelessWidget {
                           : null,
                       boxShadow: [
                         BoxShadow(
-                          color: esSuperRecibido
+                          color: widget.esSuperRecibido
                               ? Theme.of(context)
                                   .colorScheme
                                   .primary
                                   .withValues(alpha: 0.55)
                               : Colors.black.withValues(alpha: 0.12),
-                          blurRadius: esSuperRecibido ? 16 : 14,
+                          blurRadius: widget.esSuperRecibido ? 16 : 14,
                           offset: const Offset(0, 6),
                         ),
                       ],
@@ -88,24 +101,36 @@ class TarjetaUsuario extends StatelessWidget {
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold)),
                             ),
-                            if (fotosParaMostrar(usuario).isNotEmpty)
-                              imagenBorrosa
+                            if (fotosParaMostrar(widget.usuario).isNotEmpty)
+                              widget.imagenBorrosa
                                   ? ImagenDifuminada(
-                                      ruta: fotosParaMostrar(usuario).first,
+                                      ruta: fotosParaMostrar(widget.usuario).first,
                                       sigma: 20,
                                       fit: BoxFit.cover,
+                                      onError: () {
+                                        if (mounted) {
+                                          setState(() => _imagenError = true);
+                                        }
+                                      },
                                     )
-                                  : imagenFoto(fotosParaMostrar(usuario).first,
-                                      fit: BoxFit.cover),
-                            if (imagenOverlay != null) imagenOverlay!,
+                                  : imagenFoto(
+                                      fotosParaMostrar(widget.usuario).first,
+                                      fit: BoxFit.cover,
+                                      onError: () {
+                                        if (mounted) {
+                                          setState(() => _imagenError = true);
+                                        }
+                                      },
+                                    ),
+                            if (widget.imagenOverlay != null) widget.imagenOverlay!,
                           ],
                         ),
                       ),
                     ),
                   ),
-                  if (badge != null)
-                    Positioned(top: 6, right: 6, child: badge!),
-                  if (nuevo)
+                  if (widget.badge != null)
+                    Positioned(top: 6, right: 6, child: widget.badge!),
+                  if (widget.nuevo)
                     Positioned(
                       top: 6,
                       left: 6,
@@ -134,14 +159,14 @@ class TarjetaUsuario extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
               child: Stack(
                 children: [
-                  Padding(
-                    padding:
-                        EdgeInsets.only(right: esquinaDerecha != null ? 26 : 0),
+Padding(
+                      padding:
+                          EdgeInsets.only(right: widget.esquinaDerecha != null ? 26 : 0),
                     child: Center(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (usuario.verificadoStatus)
+                          if (widget.usuario.verificadoStatus)
                             const Padding(
                               padding: EdgeInsets.only(right: 4),
                               child: Icon(Icons.verified,
@@ -149,10 +174,10 @@ class TarjetaUsuario extends StatelessWidget {
                             ),
                           Flexible(
                             child: Text(
-                              nombreMostrado ??
-                                  (usuario.ocultarEdad
-                                      ? usuario.nombre
-                                      : '${usuario.nombre}, ${usuario.edad}'),
+                              widget.nombreMostrado ??
+                                  (widget.usuario.ocultarEdad
+                                      ? widget.usuario.nombre
+                                      : '${widget.usuario.nombre}, ${widget.usuario.edad}'),
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                   fontSize: 17,
@@ -175,12 +200,12 @@ class TarjetaUsuario extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (esquinaDerecha != null)
+                  if (widget.esquinaDerecha != null)
                     Positioned(
                       right: 4,
                       top: 0,
                       bottom: 0,
-                      child: Center(child: esquinaDerecha!),
+                      child: Center(child: widget.esquinaDerecha!),
                     ),
                 ],
               ),

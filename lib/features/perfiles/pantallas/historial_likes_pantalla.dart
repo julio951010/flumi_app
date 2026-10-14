@@ -157,10 +157,6 @@ class _HistorialTile extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Text('Te gustó $tiempo'),
-        trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-        onTap: () {
-          // TODO: navegar a perfil cuando se tenga el UUID completo
-        },
       ),
     );
   }

@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
-
 import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -10,6 +8,7 @@ import '../../core/constantes/constantes.dart';
 import '../../core/servicios/connectivity_service.dart';
 import '../../core/servicios/sync_service.dart';
 import '../../core/utilidades/notificacion_navegador.dart';
+import '../../core/utilidades/app_log.dart';
 import '../../core/utilidades/perfil_mapeo.dart';
 
 class PerfilChat {
@@ -615,9 +614,10 @@ class ChatRepositorio {
     required String emisorId,
     required String receptorId,
     required String contenido,
+    String? replyTo,
   }) async {
     final uuid = const Uuid().v4();
-    debugPrint('[ChatRepo] enviarMensaje: uuid=$uuid emisor=$emisorId receptor=$receptorId');
+    appLog('[ChatRepo] enviarMensaje: uuid=$uuid emisor=$emisorId receptor=$receptorId replyTo=$replyTo');
     // Reloj local atrasado respecto al otro dispositivo: si el mensaje
     // llevara una hora anterior al último recibido, se pintaría ANTES que
     // él. Se fija como mínimo 1ms después del último de la conversación
@@ -641,8 +641,10 @@ class ChatRepositorio {
       receptorId: receptorId,
       contenido: contenido,
       timestamp: ts,
+      replyTo: Value(replyTo),
+      intentosDeSincronizacion: 0,
     ));
-    debugPrint('[ChatRepo] mensaje insertado localmente');
+    appLog('[ChatRepo] mensaje insertado localmente');
     // Escribir yo reactiva la conversación si la había borrado solo para mí.
     await _reactivarConversacion(receptorId, emisorId);
     // Write-through: intenta subir el mensaje a Supabase de inmediato;
@@ -1094,7 +1096,7 @@ class ChatRepositorio {
 
   Future<void> _aplicarMensajeRemoto(Map<String, dynamic> cambio) async {
     final dbId = cambio['id'] as String?;
-    debugPrint('[ChatRepo] _aplicarMensajeRemoto: id=$dbId cambio=$cambio');
+    appLog('[ChatRepo] _aplicarMensajeRemoto: id=$dbId cambio=$cambio');
     if (dbId == null) return;
     final emisorId = cambio['emisor_id'] as String?;
     final receptorId = cambio['receptor_id'] as String?;
@@ -1122,6 +1124,8 @@ class ChatRepositorio {
             timestamp: DateTime.parse(cambio['timestamp'] as String),
             pendienteDeSincronizar: const Value(false),
             estadoEnvio: Value(emisorId == miId ? 'enviado' : 'entregado'),
+            intentosDeSincronizacion: 0,
+            replyTo: Value(cambio['reply_to'] as String?),
           ),
         );
     // Aviso del navegador solo cuando el mensaje es NUEVO para mí y el
@@ -1328,8 +1332,11 @@ class ChatRepositorio {
     }
   }
 
-  /// Actualiza `ultima_conexion`/`ocultar_en_linea` de mis matches y likes
-  /// desde el servidor (solo esas columnas, sin tocar el resto del perfil).
+  /// Actualiza `ultima_conexion`/`ocultar_en_linea` de TODOS los perfiles en
+  /// caché local (matches, likes y feed) desde el servidor (solo esas
+  /// columnas, sin tocar el resto del perfil). Antes solo cubría matches y
+  /// likes: un usuario en modo invisible seguía viéndose en línea en las
+  /// tarjetas del feed con datos viejos.
   Future<void> _refrescarPresenciaDeConversaciones(String miId) async {
     try {
       final matches = await (_db.select(_db.matches)
@@ -1339,32 +1346,46 @@ class ChatRepositorio {
       final likes = await (_db.select(_db.historialLikes)
             ..where((h) => h.usuarioLikeadoId.equals(miId)))
           .get();
+      // Todos los perfiles ajenos en caché (feed incluido), no solo
+      // conversaciones: así el modo invisible se refleja en todas las
+      // superficies que muestran el punto verde.
+      final cacheados = await (_db.select(_db.usuarios)
+            ..where((u) => u.esPerfilPropio.equals(false)))
+          .get();
       final ids = <String>{
         for (final m in matches)
           m.usuarioAId == miId ? m.usuarioBId : m.usuarioAId,
         for (final l in likes) l.usuarioId,
+        for (final u in cacheados) u.uuid,
       }..remove(miId);
       if (ids.isEmpty) return;
 
-      final remoto = await Supabase.instance.client
-          .from(tablaProfiles)
-          .select('id,ultima_conexion,ocultar_en_linea')
-          .inFilter('id', ids.toList())
-          .timeout(const Duration(seconds: 8));
-      final filas = (remoto as List).map((f) => f as Map<String, dynamic>);
-      await _db.batch((batch) {
-        for (final f in filas) {
-          final id = f['id'] as String?;
-          if (id == null) continue;
-          batch.update(_db.usuarios, UsuariosCompanion(
-            uuid: Value(id),
-            ultimaConexion:
-                Value(PerfilMapeo.parsearFecha(f['ultima_conexion'])),
-            ocultarEnLinea:
-                Value(PerfilMapeo.aBool(f['ocultar_en_linea'], false)),
-          ));
-        }
-      });
+      // En lotes (el inFilter con cientos de UUIDs excedería la URL).
+      const tamLote = 100;
+      final lista = ids.toList();
+      for (var i = 0; i < lista.length; i += tamLote) {
+        final lote = lista.sublist(
+            i, (i + tamLote).clamp(0, lista.length));
+        final remoto = await Supabase.instance.client
+            .from(tablaProfiles)
+            .select('id,ultima_conexion,ocultar_en_linea')
+            .inFilter('id', lote)
+            .timeout(const Duration(seconds: 8));
+        final filas = (remoto as List).map((f) => f as Map<String, dynamic>);
+        await _db.batch((batch) {
+          for (final f in filas) {
+            final id = f['id'] as String?;
+            if (id == null) continue;
+            batch.update(_db.usuarios, UsuariosCompanion(
+              uuid: Value(id),
+              ultimaConexion:
+                  Value(PerfilMapeo.parsearFecha(f['ultima_conexion'])),
+              ocultarEnLinea:
+                  Value(PerfilMapeo.aBool(f['ocultar_en_linea'], false)),
+            ));
+          }
+        });
+      }
     } catch (_) {}
   }
 

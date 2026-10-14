@@ -58,6 +58,26 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Red con proxy limitado: dl.google.com y mavenCentral devuelven 404 para
+// artefactos que no están en el caché local de Gradle. share_plus 13.3.1
+// pide core:1.16.0 (su aar NO está cacheado; solo core-ktx:1.16.0) y
+// annotation:1.9.1 (tampoco cacheado). Se fuerzan a versiones SÍ cacheadas:
+// core y core-ktx a 1.13.1 (FileProvider, lo único que usa share_plus,
+// existe desde 1.0), annotation a 1.6.0 y annotation-jvm a 1.9.1 (esta
+// última la arrastra la resolución y la 1.6.0 correspondiente no existe;
+// son solo anotaciones, el skew es inocuo). Si otro artefacto nuevo falla
+// igual, se añade su force aquí.
+subprojects {
+    configurations.all {
+        resolutionStrategy {
+            force("androidx.core:core:1.13.1")
+            force("androidx.core:core-ktx:1.13.1")
+            force("androidx.annotation:annotation:1.6.0")
+            force("androidx.annotation:annotation-jvm:1.9.1")
+        }
+    }
+}
+
 // Parche: algunos plugins viejos (isar_flutter_libs 3.1.0+1 entre ellos)
 // no declaran `namespace` en su build.gradle, y el AGP moderno lo exige.
 // Además, isar_flutter_libs trae compileSdkVersion fijado en 30, muy por
@@ -73,11 +93,15 @@ subprojects {
         if (androidExtension.namespace == null) {
             androidExtension.namespace = "com.flumi.${project.name.replace("-", "_")}"
         }
-        if (androidExtension.compileSdkVersion == "android-30" ||
-            androidExtension.compileSdk == 30 ||
-            androidExtension.compileSdk == 33) {
-            androidExtension.compileSdk = 36
-        }
+        // Todas las libs compilan contra 36 (igual que la app): las
+        // dependencias transitivas modernas (androidx.core 1.18.0 vía
+        // share_plus y otras) exigen compileSdk 36 a sus consumidores y
+        // el chequeo de metadatos AAR en release falla en caso contrario.
+        // Subir compileSdk no cambia minSdk ni targetSdk de cada lib.
+        // NOTA: algunos plugins (connectivity_plus, etc.) fijan su
+        // compileSdk en su propio afterEvaluate, pisando esto; el refuerzo
+        // definitivo está en gradle.projectsEvaluated más abajo.
+        androidExtension.compileSdk = 36
         // El lint vital de release falla al resolver artefactos transitivos
         // (p.ej. datastore-jvm de shared_preferences_android) en redes con
         // proxy limitado. No es un problema del código: se desactiva solo el

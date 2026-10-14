@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
 import '../../firebase_options.dart';
+import 'app_log.dart';
 
 /// Handler de segundo plano (top-level, requerido por FCM en Android).
 /// Se ejecuta en un isolate separado cuando llega un push con la app
@@ -20,9 +21,9 @@ Future<void> _fcmBackgroundHandler(RemoteMessage mensaje) async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    debugPrint('[Push] background mensaje recibido: categoria=${mensaje.data['categoria']} titulo=${mensaje.notification?.title ?? mensaje.data['titulo']}');
+    appLog('[Push] background mensaje recibido: categoria=${mensaje.data['categoria']} titulo=${mensaje.notification?.title ?? mensaje.data['titulo']}');
   } catch (e) {
-    debugPrint('[Push] background Firebase.init falló: $e');
+    appLog('[Push] background Firebase.init falló: $e');
   }
 }
 
@@ -91,7 +92,7 @@ class _PushMovil {
       } catch (_) {}
       _criticoOk = true;
     } catch (e) {
-      debugPrint('[Push] Firebase.init falló (revisa firebase_options.dart): $e');
+      appLog('[Push] Firebase.init falló (revisa firebase_options.dart): $e');
     }
   }
 
@@ -137,7 +138,7 @@ class _PushMovil {
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
-      debugPrint('[Push] permiso POST_NOTIFICATIONS (flutter_local_notifications): $permisoLocal');
+      appLog('[Push] permiso POST_NOTIFICATIONS (flutter_local_notifications): $permisoLocal');
       _mostrarLocales = true;
       _permisoConcedido = permisoLocal;
 
@@ -146,9 +147,9 @@ class _PushMovil {
         badge: true,
         sound: true,
       );
-      debugPrint('[Push] permiso FCM: ${ajustesFcm.authorizationStatus}');
+      appLog('[Push] permiso FCM: ${ajustesFcm.authorizationStatus}');
       if (permisoLocal == false) {
-        debugPrint(
+        appLog(
             '[Push] AVISO: notificaciones denegadas por el usuario/sistema. '
             'No se mostrará nada hasta que se habiliten desde Ajustes del '
             'sistema > Apps > Flumi > Notificaciones.');
@@ -177,7 +178,7 @@ class _PushMovil {
       _disponible = true;
       _completoOk = true;
     } catch (e) {
-      debugPrint('[Push] inicializar falló: $e');
+      appLog('[Push] inicializar falló: $e');
       _disponible = false;
     }
   }
@@ -199,7 +200,7 @@ class _PushMovil {
     final categoria =
         (mensaje.data['categoria'] ?? mensaje.data['category'] ?? 'bandeja')
             .toString();
-    debugPrint('[Push] onMessage foreground: categoria=$categoria titulo=$titulo');
+    appLog('[Push] onMessage foreground: categoria=$categoria titulo=$titulo');
     return notificarNavegador(titulo, cuerpo, categoria: categoria);
   }
 
@@ -208,7 +209,7 @@ class _PushMovil {
       final fcm = _fcm ?? FirebaseMessaging.instance;
       return await fcm.getToken();
     } catch (e) {
-      debugPrint('[Push] getToken falló: $e');
+      appLog('[Push] getToken falló: $e');
       return null;
     }
   }
@@ -233,14 +234,14 @@ class _PushMovil {
     if (kUsarServidorLocal) return;
     final token = await _obtenerToken();
     if (token == null) {
-      debugPrint('[Push] sin token FCM: no se registra nada');
+      appLog('[Push] sin token FCM: no se registra nada');
       return;
     }
     for (var intento = 0; intento <= reintentos; intento++) {
       try {
         final miId = sb.Supabase.instance.client.auth.currentUser?.id;
         if (miId == null) {
-          debugPrint(
+          appLog(
               '[Push] sin sesión todavía (intento $intento/$reintentos): reintento luego');
         } else {
           // Evita spam si ya quedó registrado este token PARA ESTE usuario.
@@ -256,11 +257,11 @@ class _PushMovil {
           );
           _token = token;
           _tokenUsuarioId = miId;
-          debugPrint('[Push] token registrado en device_tokens');
+          appLog('[Push] token registrado en device_tokens');
           return;
         }
       } catch (e) {
-        debugPrint(
+        appLog(
             '[Push] registrar_device_token falló (intento $intento/$reintentos): $e');
       }
       if (intento < reintentos) {
@@ -287,9 +288,9 @@ class _PushMovil {
         'eliminar_device_token',
         params: {'p_token': token},
       );
-      debugPrint('[Push] token eliminado de device_tokens');
+      appLog('[Push] token eliminado de device_tokens');
     } catch (e) {
-      debugPrint('[Push] eliminar_device_token falló: $e');
+      appLog('[Push] eliminar_device_token falló: $e');
     }
     _token = null;
     _tokenUsuarioId = null;

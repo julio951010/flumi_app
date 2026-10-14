@@ -8,6 +8,7 @@ import '../../config/env.dart';
 import '../../core/base_datos_local/database.dart';
 import '../../core/servicios/connectivity_service.dart';
 import '../../core/servicios/sync_service.dart';
+import '../../core/utilidades/app_log.dart';
 import '../../core/utilidades/perfil_mapeo.dart';
 
 class PerfilRepositorio {
@@ -60,10 +61,23 @@ class PerfilRepositorio {
             // pantallas; al vencer se usa la caché local.
             .timeout(const Duration(seconds: 8));
         if (remoto != null) {
-          await _db.into(_db.usuarios).insertOnConflictUpdate(
-                PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true),
-              );
-          await _limpiarPerfilesDeOtrasCuentas(id);
+          // No pisar cambios locales pendientes (p. ej. interruptores de
+          // privacidad recién movidos cuyo write-through falló): el remoto
+          // trae valores viejos y el companion remoto además pone
+          // pendienteDeSincronizar=false, lo que borraría la marca de
+          // reintento y el cambio se perdería para siempre. El sync
+          // (_sincronizarPerfilPropio) sube lo pendiente y resuelve.
+          final conPendientes = await (_db.select(_db.usuarios)
+                ..where((u) =>
+                    u.esPerfilPropio.equals(true) &
+                    u.pendienteDeSincronizar.equals(true)))
+              .getSingleOrNull();
+          if (conPendientes == null) {
+            await _db.into(_db.usuarios).insertOnConflictUpdate(
+                  PerfilMapeo.perfilRemotoACompanion(remoto, esPropio: true),
+                );
+            await _limpiarPerfilesDeOtrasCuentas(id);
+          }
           final perfil = await _leerPerfilLocal(id);
           if (perfil != null) {
             _ultimoRefrescoRemoto = DateTime.now();
@@ -126,7 +140,7 @@ class PerfilRepositorio {
         await sb.Supabase.instance.client.from('profiles').upsert(remoto);
       } catch (e) {
         // Sin red (o RLS/CHECK): se queda marcado pendiente de sincronizar.
-        print('[perfil] Error al subir el perfil: $e');
+        appLog('[perfil] Error al subir el perfil: $e');
         pendiente = true;
       }
     } else {

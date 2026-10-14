@@ -1,7 +1,7 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../config/env.dart';
+import '../../../core/utilidades/app_log.dart';
 import '../modelos/pago_datos.dart';
 
 class PagosConfig {
@@ -46,7 +46,7 @@ class PagosConfigServicio {
       if (row == null) return true;
       return (row['activo'] as bool?) ?? true;
     } catch (e) {
-      debugPrint('[PagosConfig] error activo $key: $e');
+      appLog('[PagosConfig] error activo $key: $e');
       return true;
     }
   }
@@ -62,10 +62,16 @@ class PagosConfigServicio {
           .eq('activo', true)
           .maybeSingle()
           .timeout(const Duration(seconds: 5));
-      if (row == null) return null;
-      return PagosConfig.fromMap(row);
+      if (row == null) {
+        appLog('[PagosConfig] sin fila activa $key: revisa admin_flumi → '
+            'Método de pago (fila ausente o inactiva)');
+        return null;
+      }
+      final cfg = PagosConfig.fromMap(row);
+      appLog('[PagosConfig] $key ok, qr=${cfg.qrUrl.isEmpty ? "vacío" : "configurado"}');
+      return cfg;
     } catch (e) {
-      debugPrint('[PagosConfig] error fetch $key: $e');
+      appLog('[PagosConfig] error fetch $key: $e');
       return null;
     }
   }

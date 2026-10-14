@@ -106,6 +106,7 @@ class CuentaPantalla extends StatelessWidget {
       ),
     );
     if (!context.mounted) return;
+    if (confirmadoFinal != true) return;
     try {
       await authService.eliminarCuenta();
       if (!context.mounted) return;
