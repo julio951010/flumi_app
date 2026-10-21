@@ -64,6 +64,7 @@ alter table public.profiles add column if not exists creado_en             times
 alter table public.profiles add column if not exists ocultar_perfil        boolean default false;
 alter table public.profiles add column if not exists ocultar_visitas       boolean default false;
 alter table public.profiles add column if not exists is_admin              boolean default false;
+alter table public.profiles add column if not exists suspendido            boolean not null default false;
 
 -- Restricción de edad mínima (solo se añade si no existe)
 do $$
@@ -338,18 +339,27 @@ create policy "usuario_edita_su_propio_perfil"
   on public.profiles for update
   using (auth.uid() = id);
 
--- Blindaje is_admin: ningún usuario puede auto-otorgarse admin. Solo
--- service_role/postgres o un admin existente pueden cambiar esa columna.
--- (Sin esto, UPDATE propio + is_admin=true daba premium + poderes de admin.)
-create or replace function public.proteger_is_admin()
+-- Blindaje de columnas sensibles de profiles: is_admin, suspendido,
+-- verificado_status y score_popularidad solo las cambian admins, service_role
+-- o funciones SECURITY DEFINER del servidor. Para cualquier otro cliente se
+-- CONSERVA el valor anterior (sin lanzar error: así el upsert del perfil que
+-- hace la app, que reenvía verificado_status/score_popularidad, no se rompe).
+--
+-- IMPORTANTE: la función es SECURITY INVOKER a propósito. Con SECURITY DEFINER
+-- current_user sería siempre el dueño (postgres) y el trigger no protegería
+-- nada (bug de la versión anterior, proteger_is_admin). Con INVOKER,
+-- current_user es el rol que ejecuta el UPDATE: 'authenticated' si viene del
+-- cliente y 'postgres' si lo hace una función SECURITY DEFINER o el SQL Editor.
+create or replace function public.proteger_columnas_sensibles()
 returns trigger
 language plpgsql
-security definer set search_path = public
+security invoker
+set search_path = public
 as $$
 declare
   v_admin boolean := false;
 begin
-  if current_user in ('service_role', 'postgres', 'supabase_admin') then
+  if current_user in ('postgres', 'supabase_admin', 'service_role', 'supabase_auth_admin') then
     return new;
   end if;
   select coalesce(is_admin, false) into v_admin
@@ -359,17 +369,27 @@ begin
   end if;
   if TG_OP = 'INSERT' then
     new.is_admin := false;
+    new.suspendido := false;
+    new.verificado_status := false;
+    new.score_popularidad := 0;
   else
     new.is_admin := old.is_admin;
+    new.suspendido := old.suspendido;
+    new.verificado_status := old.verificado_status;
+    new.score_popularidad := old.score_popularidad;
   end if;
   return new;
 end;
 $$;
 
 drop trigger if exists proteger_is_admin_trg on public.profiles;
-create trigger proteger_is_admin_trg
+drop trigger if exists proteger_columnas_admin_trg on public.profiles;
+drop trigger if exists proteger_columnas_admin on public.profiles;
+drop trigger if exists proteger_suspendido_trg on public.profiles;
+drop trigger if exists proteger_columnas_sensibles_trg on public.profiles;
+create trigger proteger_columnas_sensibles_trg
   before insert or update on public.profiles
-  for each row execute function public.proteger_is_admin();
+  for each row execute function public.proteger_columnas_sensibles();
 
 drop policy if exists "usuario_crea_su_propio_perfil" on public.profiles;
 create policy "usuario_crea_su_propio_perfil"
@@ -377,7 +397,7 @@ create policy "usuario_crea_su_propio_perfil"
   with check (auth.uid() = id);
 
 -- Admin (verificación manual de cuentas, moderación): puede actualizar
--- cualquier perfil. El trigger proteger_is_admin sigue permitiendo el cambio
+-- cualquier perfil. El trigger proteger_columnas_sensibles sigue permitiendo el cambio
 -- de is_admin/verificado_status solo a admins y service_role.
 drop policy if exists "admin_actualiza_perfiles" on public.profiles;
 create policy "admin_actualiza_perfiles"
@@ -1063,6 +1083,7 @@ begin
       where p.ubicacion is not null
         and p.id <> $1
         and p.ocultar_perfil = false
+        and coalesce(p.suspendido, false) = false
         and p.id not in (''00000000-0000-0000-0000-00000000000a'', ''00000000-0000-0000-0000-00000000000f'')
         %s
          and not exists (select 1 from public.blocks b
@@ -2015,7 +2036,15 @@ begin
   -- Auto-verificación por SMS: FAIL-CLOSED. Cada chequeo debe pasar con datos
   -- presentes y coincidentes; la ausencia de cualquier dato cae al flujo
   -- manual (pendiente) en vez de auto-aprobar.
-  if p_sms_nro is not null and p_sms_remitente is not null then
+  -- ADVERTENCIA: estos datos "SMS" los envía el CLIENTE y por tanto son
+  -- falsificables. La auto-aprobación queda APAGADA por defecto
+  -- (app_config.pagos_auto_aprobacion = 'false'): todo pago pasa a revisión
+  -- manual en admin_flumi. Actívala solo si la evidencia del pago llega al
+  -- servidor por un canal que el pagador no controla (p. ej. el SMS recibido
+  -- en TU teléfono receptor, enviado por una edge function con secreto).
+  if coalesce((select valor from public.app_config
+                where clave = 'pagos_auto_aprobacion'), 'false') = 'true'
+     and p_sms_nro is not null and p_sms_remitente is not null then
     v_sms_nro_norm := upper(regexp_replace(trim(p_sms_nro), '[^A-Za-z0-9]', '', 'g'));
     v_sms_rem_norm := upper(trim(p_sms_remitente));
     if v_sms_nro_norm = p_nro then
@@ -2409,3 +2438,92 @@ $$;
 
 revoke all on function public.estadisticas_admin() from public;
 grant execute on function public.estadisticas_admin() to authenticated;
+
+-- ============================================================
+-- SEGURIDAD FASE 1
+-- ============================================================
+
+-- Flag de auto-aprobación de pagos (APAGADA). Ver nota en solicitar_pago.
+insert into public.app_config (clave, valor, tipo)
+values ('pagos_auto_aprobacion', 'false', 'feature')
+on conflict (clave) do nothing;
+
+-- Bloqueos y suspensión también en el SERVIDOR (antes solo se respetaban en
+-- el cliente / el feed). SECURITY DEFINER para poder leer `blocks` completa.
+create or replace function public.validar_envio_mensaje()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if exists (select 1 from public.profiles
+              where id = new.emisor_id and coalesce(suspendido, false)) then
+    raise exception 'Cuenta suspendida';
+  end if;
+  if exists (select 1 from public.blocks b
+              where (b.bloqueador_id = new.receptor_id and b.bloqueado_id = new.emisor_id)
+                 or (b.bloqueador_id = new.emisor_id and b.bloqueado_id = new.receptor_id)) then
+    raise exception 'No puedes enviar mensajes a este usuario';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists validar_envio_mensaje_trg on public.messages;
+create trigger validar_envio_mensaje_trg
+  before insert on public.messages
+  for each row execute function public.validar_envio_mensaje();
+
+create or replace function public.validar_like_suspendido()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if exists (select 1 from public.profiles
+              where id = new.usuario_id and coalesce(suspendido, false)) then
+    raise exception 'Cuenta suspendida';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists validar_like_suspendido_trg on public.historial_likes;
+create trigger validar_like_suspendido_trg
+  before insert on public.historial_likes
+  for each row execute function public.validar_like_suspendido();
+
+-- Permisos de ejecución de RPC. En Supabase, `revoke ... from public` NO quita
+-- el acceso de `anon` (lo concede default privileges), hay que revocarlo
+-- explícitamente. email_existe se deja a propósito accesible a anon: la app la
+-- llama antes de iniciar sesión.
+do $$
+declare
+  r record;
+begin
+  -- Solo las usan triggers / otras funciones SECURITY DEFINER: nadie por RPC.
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('enviar_push_pg', 'registrar_push_log')
+  loop
+    execute format('revoke execute on function %s from public, anon, authenticated', r.sig);
+  end loop;
+
+  -- Solo usuarios con sesión.
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('plan_efectivo', 'registrar_me_gusta', 'registrar_visita',
+                         'registrar_deshacer', 'enviar_bienvenida_nuevo_usuario',
+                         'solicitar_pago', 'verificar_pago', 'cancelar_suscripcion',
+                         'promover_reserva', 'limpiar_interacciones_pruebas',
+                         'estadisticas_admin', 'perfiles_cercanos',
+                         'registrar_device_token', 'eliminar_device_token')
+  loop
+    execute format('revoke execute on function %s from public, anon', r.sig);
+    execute format('grant execute on function %s to authenticated', r.sig);
+  end loop;
+end $$;

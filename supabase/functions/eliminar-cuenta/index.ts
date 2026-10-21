@@ -38,43 +38,57 @@ Deno.serve(async (req) => {
   );
 
   try {
-    // 1. Borrar archivos de storage del usuario.
-    // Las fotos se guardan como '{usuarioId}_{timestamp}.jpg' en la RAÍZ
-    // del bucket (ver perfil_foto_servicio.dart), no dentro de una carpeta
-    // '{usuarioId}/' — por eso se busca con `search`, filtrando por
-    // prefijo exacto para no atrapar nada de otro usuario por accidente.
-    try {
-      const { data: files, error: listError } = await supabase.storage
-        .from('profile-photos')
-        .list('', { limit: 100, search: usuarioId });
-
-      const propios = (files ?? []).filter(f =>
-        f.name.startsWith(`${usuarioId}_`)
-      );
-      if (!listError && propios.length > 0) {
-        await supabase.storage.from('profile-photos').remove(
-          propios.map(f => f.name)
-        );
-      }
-    } catch (e) {
-      console.error('Error borrando storage:', e);
-    }
-
-    // 2. Borrar datos de la app (cascada elimina matches, likes, mensajes, etc)
-    // El trigger ON DELETE CASCADE en profiles se encarga de casi todo
-    await supabase.from('profiles').delete().eq('id', usuarioId);
-
-    // 3. Borrar usuario de Auth (requiere service_role)
+    // 1. Borrar el usuario de Auth PRIMERO. profiles.id referencia
+    // auth.users(id) ON DELETE CASCADE, así que esto elimina también el
+    // perfil, matches, likes, mensajes, etc. Si falla, NO se toca nada más y
+    // se informa el error (antes se borraba el perfil y se respondía
+    // success: true aunque la cuenta de Auth siguiera viva).
     const { error: deleteError } = await supabase.auth.admin.deleteUser(usuarioId);
     if (deleteError) {
       console.error('Error borrando usuario auth:', deleteError);
-      // No lanzar error, intentamos continuar
+      return new Response(
+        JSON.stringify({ success: false, error: 'No se pudo eliminar la cuenta' }),
+        { status: 500, headers: { "content-type": "application/json" } }
+      );
     }
 
-    // 4. Borrar tokens de dispositivo
-    await supabase.from('device_tokens').delete().eq('usuario_id', usuarioId);
+    // 2. Tokens de dispositivo (por si la tabla no tuviera cascada).
+    const { error: tokensError } = await supabase
+      .from('device_tokens').delete().eq('usuario_id', usuarioId);
+    if (tokensError) console.error('Error borrando device_tokens:', tokensError);
 
-    return new Response(JSON.stringify({ success: true }), {
+    // 3. Archivos de storage. La cuenta ya no existe: si algo falla aquí se
+    // registra y se avisa en la respuesta, pero no se revierte nada.
+    // - fotos de perfil:      '{usuarioId}_{timestamp}.jpg' en la RAÍZ
+    // - selfies verificación: 'verificacion/{usuarioId}_{timestamp}.jpg'
+    //   (dato sensible: antes NO se borraban)
+    // `search` + prefijo exacto para no atrapar archivos de otro usuario.
+    let almacenamientoOk = true;
+    try {
+      const bucket = supabase.storage.from('profile-photos');
+      const rutas: string[] = [];
+      for (const carpeta of ['', 'verificacion']) {
+        const { data: files, error: listError } = await bucket.list(carpeta, {
+          limit: 1000,
+          search: usuarioId,
+        });
+        if (listError) throw listError;
+        for (const f of files ?? []) {
+          if (f.name.startsWith(`${usuarioId}_`)) {
+            rutas.push(carpeta ? `${carpeta}/${f.name}` : f.name);
+          }
+        }
+      }
+      if (rutas.length > 0) {
+        const { error: removeError } = await bucket.remove(rutas);
+        if (removeError) throw removeError;
+      }
+    } catch (e) {
+      almacenamientoOk = false;
+      console.error('Error borrando storage:', e);
+    }
+
+    return new Response(JSON.stringify({ success: true, almacenamiento_ok: almacenamientoOk }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });

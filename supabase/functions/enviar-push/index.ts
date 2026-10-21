@@ -50,11 +50,24 @@ async function firmarJwtOauth(
     .replace(/=+$/, "")}`;
 }
 
+// Comparación sin cortocircuito: no filtra por tiempo cuántos caracteres del
+// secreto coinciden. Si falta PUSH_SECRET (cadena vacía) siempre rechaza.
+function igualesEnTiempoConstante(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  const n = Math.max(ea.length, eb.length);
+  for (let i = 0; i < n; i++) diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Método no permitido", { status: 405 });
   }
-  if (req.headers.get("x-flumi-secret") !== Deno.env.get("PUSH_SECRET")) {
+  const esperado = Deno.env.get("PUSH_SECRET") ?? "";
+  const recibido = req.headers.get("x-flumi-secret") ?? "";
+  if (esperado.length === 0 || !igualesEnTiempoConstante(recibido, esperado)) {
     return new Response("No autorizado", { status: 401 });
   }
 
