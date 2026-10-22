@@ -104,12 +104,22 @@ class _PerfilPantallaState extends State<PerfilPantalla> {
       }
 
       if (remoto == null && !kUsarServidorLocal) {
-        final data = await sb.Supabase.instance.client
-            .from('profiles')
-            .select()
-            .eq('id', userId)
-            .maybeSingle();
-        if (data != null) remoto = data;
+        final yo = sb.Supabase.instance.client.auth.currentUser?.id;
+        if (yo != null && yo == userId) {
+          final rpc = await sb.Supabase.instance.client
+              .rpc('obtener_mi_perfil')
+              .timeout(const Duration(seconds: 8));
+          if (rpc is List && rpc.isNotEmpty) {
+            remoto = Map<String, dynamic>.from(rpc.first as Map);
+          }
+        } else {
+          final data = await sb.Supabase.instance.client
+              .from('profiles')
+              .select('id,nombre,edad,biografia,fotos_urls,preferencia_edad_min,preferencia_edad_max,genero,busca_genero,que_busca,ciudad,verificado_status,ocultar_en_linea,ocultar_edad,ocultar_perfil,ocultar_visitas,ocultar_ubicacion,perfil_completado,situacion_sentimental,intereses,altura,educacion,trabajo,profesion,preferencia_relacion,bebe,fuma,hijos,personalidad,signo_zodiaco,mascotas,idiomas,tatuajes,preguntas_perfil,gesto_verificacion,creado_en,ultima_conexion')
+              .eq('id', userId)
+              .maybeSingle();
+          if (data != null) remoto = data;
+        }
       }
 
       if (remoto == null) return;

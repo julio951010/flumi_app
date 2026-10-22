@@ -433,8 +433,3 @@ enabled = true
 # así que verify_jwt = true (defecto) es lo correcto: solo el dueño borra
 # su propia cuenta.
 
-[functions.verificar-rostro]
-enabled = true
-# Igual que eliminar-cuenta: la invoca la app con JWT de usuario.
-# Requiere el secreto FACE_MODEL_URL (carpeta con los pesos face-api.js)
-# y validación en despliegue (ver cabecera de index.ts).

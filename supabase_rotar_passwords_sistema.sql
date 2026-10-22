@@ -11,6 +11,7 @@ create extension if not exists pgcrypto;
 
 update auth.users
 set encrypted_password = crypt(encode(gen_random_bytes(48), 'hex'), gen_salt('bf')),
+    banned_until = '9999-12-31 23:59:59+00'::timestamptz,
     updated_at = now()
 where email in ('sistema-administrador@flumi.local', 'sistema-flumi@flumi.local');
 

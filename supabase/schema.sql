@@ -378,6 +378,10 @@ begin
     new.verificado_status := old.verificado_status;
     new.score_popularidad := old.score_popularidad;
   end if;
+  -- Edad derivada de fecha_nacimiento (no confiar en el cliente).
+  if new.fecha_nacimiento is not null then
+    new.edad := extract(year from age(current_date, new.fecha_nacimiento))::int;
+  end if;
   return new;
 end;
 $$;
@@ -570,11 +574,18 @@ create policy "usuario_registra_sus_visitas"
   with check (auth.uid() = visitante_id);
 
 -- HISTORIAL LIKES
+-- Lectura propia de los likes que yo di (escritura solo por RPC
+-- registrar_me_gusta; el cliente ya no inserta/actualiza directo).
 drop policy if exists "usuario_gestiona_sus_likes" on public.historial_likes;
-create policy "usuario_gestiona_sus_likes"
-  on public.historial_likes for all
-  using (auth.uid() = usuario_id)
-  with check (auth.uid() = usuario_id);
+create policy "usuario_lee_sus_likes"
+  on public.historial_likes for select
+  using (auth.uid() = usuario_id);
+
+-- Borrado de un like propio (unlike) sigue permitido al dueño.
+drop policy if exists "usuario_borra_sus_likes" on public.historial_likes;
+create policy "usuario_borra_sus_likes"
+  on public.historial_likes for delete
+  using (auth.uid() = usuario_id);
 
 -- Fase 5: el likeado ve quién le dio like (necesario para "Le gustas",
 -- el badge y que Realtime le entregue el evento bajo RLS).
@@ -1079,7 +1090,7 @@ begin
   end if;
 
    return query execute format(
-     'select p.* from public.profiles p
+     'select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion from public.profiles p
       where p.ubicacion is not null
         and p.id <> $1
         and p.ocultar_perfil = false
@@ -2305,38 +2316,6 @@ $$;
 revoke all on function public.promover_reserva() from public;
 grant execute on function public.promover_reserva() to authenticated;
 
--- Herramienta admin: limpiar interacciones de pruebas (solo admin)
-create or replace function public.limpiar_interacciones_pruebas()
-returns jsonb
-language plpgsql
-security definer set search_path = public
-as $$
-declare
-  yo uuid := auth.uid();
-  es_admin boolean := false;
-begin
-  if yo is null then return jsonb_build_object('ok', false, 'error', 'no_autenticado'); end if;
-  select coalesce(is_admin,false) into es_admin from public.profiles where id = yo;
-  if not es_admin then return jsonb_build_object('ok', false, 'error', 'no_admin'); end if;
-
-  delete from public.rechazos;
-  delete from public.historial_likes;
-  delete from public.visitas;
-  delete from public.matches;
-  delete from public.messages;
-  delete from public.blocks;
-  delete from public.reports;
-  delete from public.usos_diarios;
-  delete from public.pagos where estado = 'pendiente';
-  delete from public.conversaciones_borradas;
-  -- No borra profiles ni suscripciones ni pagos aprobados/rechazados (auditoría)
-  return jsonb_build_object('ok', true);
-end;
-$$;
-
-revoke all on function public.limpiar_interacciones_pruebas() from public;
-grant execute on function public.limpiar_interacciones_pruebas() to authenticated;
-
 -- ============================================================
 -- Dashboard admin: estadísticas agregadas en una sola llamada.
 -- Solo admin (is_admin). SECURITY DEFINER: lee tablas con RLS
@@ -2465,6 +2444,21 @@ begin
                  or (b.bloqueador_id = new.emisor_id and b.bloqueado_id = new.receptor_id)) then
     raise exception 'No puedes enviar mensajes a este usuario';
   end if;
+  -- Solo Plus/Premium envian mensajes (gratis no).
+  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
+    if public.plan_efectivo(new.emisor_id) = 'gratis' then
+      raise exception 'Plan insuficiente para enviar mensajes';
+    end if;
+  end if;
+  -- Entre usuarios regulares se requiere match previo.
+  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f')
+     and new.receptor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
+    if not exists (select 1 from public.matches m
+                    where (m.usuario_a_id = new.emisor_id and m.usuario_b_id = new.receptor_id)
+                       or (m.usuario_a_id = new.receptor_id and m.usuario_b_id = new.emisor_id)) then
+      raise exception 'No hay match';
+    end if;
+  end if;
   return new;
 end;
 $$;
@@ -2519,7 +2513,7 @@ begin
        and p.proname in ('plan_efectivo', 'registrar_me_gusta', 'registrar_visita',
                          'registrar_deshacer', 'enviar_bienvenida_nuevo_usuario',
                          'solicitar_pago', 'verificar_pago', 'cancelar_suscripcion',
-                         'promover_reserva', 'limpiar_interacciones_pruebas',
+                         'promover_reserva',
                          'estadisticas_admin', 'perfiles_cercanos',
                          'registrar_device_token', 'eliminar_device_token')
   loop
@@ -2527,3 +2521,21 @@ begin
     execute format('grant execute on function %s to authenticated', r.sig);
   end loop;
 end $$;
+
+-- ============================================================
+-- SEGURIDAD: columnas sensibles de profiles no legibles por clientes.
+-- Solo postgres/service_role (y RPC SECURITY DEFINER) las leen.
+-- ============================================================
+create or replace function public.obtener_mi_perfil()
+returns setof public.profiles
+language sql
+stable
+security definer set search_path = public
+as 
+  select * from public.profiles where id = auth.uid();
+;
+
+revoke all on function public.obtener_mi_perfil() from public;
+grant execute on function public.obtener_mi_perfil() to authenticated;
+
+revoke select (fecha_nacimiento, ubicacion_lat, ubicacion_lon, ubicacion, orientacion_sexual, religion, foto_verificacion, is_admin, score_popularidad, suspendido) on public.profiles from anon, authenticated;

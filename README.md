@@ -1,7 +1,7 @@
 # Flumi
 **Déjate llevar por la corriente**
 
-App de citas offline-first para el mercado cubano. Flutter + Isar (local) + Supabase (nube).
+App de citas offline-first para el mercado cubano. Flutter + Drift (local) + Supabase (nube).
 
 Ver `ARCHITECTURE.md` para el detalle completo de decisiones de arquitectura.
 

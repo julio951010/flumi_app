@@ -52,14 +52,12 @@ class PerfilRepositorio {
 
     if (ConnectivityService.instancia.hayConexion) {
       try {
-        final remoto = await sb.Supabase.instance.client
-            .from('profiles')
-            .select()
-            .eq('id', id)
-            .maybeSingle()
-            // Tope: con red lenta esta lectura bloqueaba la apertura de
-            // pantallas; al vencer se usa la caché local.
+        final remotoRpc = await sb.Supabase.instance.client
+            .rpc('obtener_mi_perfil')
             .timeout(const Duration(seconds: 8));
+        final remoto = (remotoRpc is List && remotoRpc.isNotEmpty)
+            ? Map<String, dynamic>.from(remotoRpc.first as Map)
+            : null;
         if (remoto != null) {
           // No pisar cambios locales pendientes (p. ej. interruptores de
           // privacidad recién movidos cuyo write-through falló): el remoto

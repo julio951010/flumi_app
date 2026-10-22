@@ -1483,9 +1483,19 @@ class SyncService {
       return null;
     }
 
+    final yo = sb.Supabase.instance.client.auth.currentUser?.id;
+    if (yo != null && yo == userId) {
+      final rpc = await sb.Supabase.instance.client
+          .rpc('obtener_mi_perfil')
+          .timeout(const Duration(seconds: 8));
+      if (rpc is List && rpc.isNotEmpty) {
+        return Map<String, dynamic>.from(rpc.first as Map);
+      }
+      return null;
+    }
     final remoto = await sb.Supabase.instance.client
         .from('profiles')
-        .select()
+        .select('id,nombre,edad,biografia,fotos_urls,preferencia_edad_min,preferencia_edad_max,genero,busca_genero,que_busca,ciudad,verificado_status,ocultar_en_linea,ocultar_edad,ocultar_perfil,ocultar_visitas,ocultar_ubicacion,perfil_completado,situacion_sentimental,intereses,altura,educacion,trabajo,profesion,preferencia_relacion,bebe,fuma,hijos,personalidad,signo_zodiaco,mascotas,idiomas,tatuajes,preguntas_perfil,gesto_verificacion,creado_en,ultima_conexion')
         .eq('id', userId)
         .maybeSingle();
     return remoto;
@@ -1746,7 +1756,15 @@ class SyncService {
       return;
     }
 
-    await sb.Supabase.instance.client.from('historial_likes').upsert(body);
+    // El like se registra vía RPC para que el servidor valide plan/cupo
+    // (no se permite insert directo en historial_likes).
+    await sb.Supabase.instance.client.rpc(
+      'registrar_me_gusta',
+      params: {
+        'perfil_id': like.usuarioLikeadoId,
+        'es_super': like.esSuper,
+      },
+    );
   }
 
   Future<void> _subirRechazo(Rechazo rechazo) async {
