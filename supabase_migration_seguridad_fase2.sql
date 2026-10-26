@@ -82,6 +82,12 @@ begin
 end;
 $$;
 
--- 3. Quitar funcion de limpieza de produccion.
-revoke all on function public.limpiar_interacciones_pruebas() from public, anon, authenticated;
-drop function if exists public.limpiar_interacciones_pruebas();
+-- 3. Quitar funcion de limpieza de produccion (idempotente).
+do $$
+begin
+  if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public' and p.proname = 'limpiar_interacciones_pruebas') then
+    revoke all on function public.limpiar_interacciones_pruebas() from public, anon, authenticated;
+    drop function public.limpiar_interacciones_pruebas();
+  end if;
+end $$;
