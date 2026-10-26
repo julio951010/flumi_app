@@ -15,4 +15,8 @@ $$;
 revoke all on function public.obtener_mi_perfil() from public;
 grant execute on function public.obtener_mi_perfil() to authenticated;
 
-revoke select (fecha_nacimiento, ubicacion_lat, ubicacion_lon, ubicacion, orientacion_sexual, religion, foto_verificacion, is_admin, score_popularidad, suspendido) on public.profiles from anon, authenticated;
+-- NOTA: el revoke por columnas NO tiene efecto cuando authenticated ya tiene
+-- SELECT a nivel de tabla (caso por defecto en Supabase). Además, si llegara
+-- a aplicarse, rompería updates de perfil y lecturas admin. Se deja la
+-- privacidad real de profiles para una fase posterior (servir perfiles
+-- ajenos por RPC / cerrar la política de SELECT).

@@ -2,7 +2,7 @@ name: Flutter CI
 
 on:
   push:
-    branches: [main, fix/seguridad-fase1]
+    branches: [master, fix/seguridad-fase1]
   pull_request:
 
 jobs:
@@ -15,6 +15,35 @@ jobs:
           flutter-version: '3.44.4'
       - name: Install deps
         run: flutter pub get
+      - name: Create config files
+        run: |
+          cp lib/core/constantes/config.example.dart lib/core/constantes/config.dart
+          cat > lib/firebase_options.dart <<'EOF'
+          import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+          import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
+
+          class DefaultFirebaseOptions {
+            static FirebaseOptions get currentPlatform {
+              if (kIsWeb) {
+                throw UnsupportedError('Firebase web no configurado en CI');
+              }
+              switch (defaultTargetPlatform) {
+                case TargetPlatform.android:
+                  return android;
+                default:
+                  throw UnsupportedError('Plataforma no soportada en CI');
+              }
+            }
+
+            static const FirebaseOptions android = FirebaseOptions(
+              apiKey: 'ci-placeholder',
+              appId: '1:000000000000:android:0000000000000000',
+              messagingSenderId: '000000000000',
+              projectId: 'ci-placeholder',
+              storageBucket: 'ci-placeholder.appspot.com',
+            );
+          }
+          EOF
       - name: Analyze
         run: flutter analyze --no-fatal-infos
       - name: Test

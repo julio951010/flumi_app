@@ -587,6 +587,15 @@ create policy "usuario_borra_sus_likes"
   on public.historial_likes for delete
   using (auth.uid() = usuario_id);
 
+-- Marcador de lectura (leido_hasta) actualizable en ambos lados.
+grant update (leido_hasta) on public.historial_likes to authenticated;
+drop policy if exists "usuario_actualiza_leido_hasta" on public.historial_likes;
+create policy "usuario_actualiza_leido_hasta"
+  on public.historial_likes for update
+  to authenticated
+  using (auth.uid() = usuario_id or auth.uid() = usuario_likeado_id)
+  with check (auth.uid() = usuario_id or auth.uid() = usuario_likeado_id);
+
 -- Fase 5: el likeado ve quién le dio like (necesario para "Le gustas",
 -- el badge y que Realtime le entregue el evento bajo RLS).
 drop policy if exists "usuario_ve_likes_recibidos" on public.historial_likes;
@@ -1007,7 +1016,55 @@ create or replace function public.perfiles_cercanos(
   desde int default 0,
   cuantos int default 10
 )
-returns setof public.profiles
+returns table (
+  id uuid,
+  nombre text,
+  edad int,
+  fecha_nacimiento date,
+  biografia text,
+  fotos_urls text[],
+  preferencia_edad_min int,
+  preferencia_edad_max int,
+  genero text,
+  busca_genero text,
+  que_busca text,
+  ciudad text,
+  ubicacion_lat double precision,
+  ubicacion_lon double precision,
+  ubicacion geography,
+  verificado_status boolean,
+  score_popularidad int,
+  ocultar_en_linea boolean,
+  ocultar_edad boolean,
+  perfil_completado boolean,
+  orientacion_sexual text,
+  situacion_sentimental text,
+  intereses text[],
+  altura text,
+  educacion text,
+  trabajo text,
+  profesion text,
+  preferencia_relacion text,
+  bebe text,
+  fuma text,
+  hijos text,
+  personalidad text,
+  signo_zodiaco text,
+  mascotas text,
+  religion text,
+  idiomas text,
+  tatuajes text,
+  preguntas_perfil jsonb,
+  foto_verificacion text,
+  gesto_verificacion text,
+  ultima_conexion timestamptz,
+  creado_en timestamptz,
+  ocultar_perfil boolean,
+  ocultar_visitas boolean,
+  is_admin boolean,
+  suspendido boolean,
+  ocultar_ubicacion boolean
+)
 language plpgsql
 stable
 security definer set search_path = public
@@ -2444,8 +2501,10 @@ begin
                  or (b.bloqueador_id = new.emisor_id and b.bloqueado_id = new.receptor_id)) then
     raise exception 'No puedes enviar mensajes a este usuario';
   end if;
-  -- Solo Plus/Premium envian mensajes (gratis no).
-  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
+  -- Solo Plus/Premium envian mensajes a otros usuarios regulares (gratis no).
+  -- Responder a cuentas oficiales/sistema queda permitido para cualquier plan.
+  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f')
+     and new.receptor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
     if public.plan_efectivo(new.emisor_id) = 'gratis' then
       raise exception 'Plan insuficiente para enviar mensajes';
     end if;

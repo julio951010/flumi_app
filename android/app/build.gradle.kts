@@ -60,13 +60,16 @@ android {
 
     buildTypes {
         release {
-            // Firma release con keystore propio. Si falta key.properties, el
-            // build falla a propósito: nunca firmar un release con la llave
-            // de debug (sería imposible actualizar la app en Play Store).
-            if (!hasReleaseKeystore) {
+            // Firma release con keystore propio. Solo falla si se pide
+            // explícitamente un build release y falta key.properties: así
+            // `flutter run` (debug) y otras tareas no se rompen.
+            if (!hasReleaseKeystore &&
+                gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
                 throw GradleException("Falta android/key.properties: no se puede firmar el release")
             }
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             // Reduce tamaño del APK: elimina código y recursos sin usar.
             isMinifyEnabled = true
             isShrinkResources = true

@@ -19,7 +19,8 @@ begin
                  or (b.bloqueador_id = new.emisor_id and b.bloqueado_id = new.receptor_id)) then
     raise exception 'No puedes enviar mensajes a este usuario';
   end if;
-  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
+  if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f')
+     and new.receptor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
     if public.plan_efectivo(new.emisor_id) = 'gratis' then
       raise exception 'Plan insuficiente para enviar mensajes';
     end if;

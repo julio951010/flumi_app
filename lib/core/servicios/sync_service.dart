@@ -1757,14 +1757,20 @@ class SyncService {
     }
 
     // El like se registra vía RPC para que el servidor valide plan/cupo
-    // (no se permite insert directo en historial_likes).
-    await sb.Supabase.instance.client.rpc(
+    // (no se permite insert directo en historial_likes). Si el servidor
+    // rechaza por cupo (limite=true) se lanza para NO marcar el like como
+    // sincronizado y reintentarlo más tarde.
+    final res = await sb.Supabase.instance.client.rpc(
       'registrar_me_gusta',
       params: {
         'perfil_id': like.usuarioLikeadoId,
         'es_super': like.esSuper,
       },
     );
+    final data = res is Map<String, dynamic> ? res : null;
+    if (data?['limite'] == true) {
+      throw Exception('limite diario de likes alcanzado');
+    }
   }
 
   Future<void> _subirRechazo(Rechazo rechazo) async {
