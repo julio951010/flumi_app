@@ -330,9 +330,10 @@ alter table public.rechazos        enable row level security;
 
 -- PROFILES
 drop policy if exists "perfiles_visibles_para_autenticados" on public.profiles;
-create policy "perfiles_visibles_para_autenticados"
+drop policy if exists "usuario_lee_su_propio_perfil" on public.profiles;
+create policy "usuario_lee_su_propio_perfil"
   on public.profiles for select
-  using (auth.role() = 'authenticated');
+  using (auth.uid() = id);
 
 drop policy if exists "usuario_edita_su_propio_perfil" on public.profiles;
 create policy "usuario_edita_su_propio_perfil"
@@ -361,6 +362,11 @@ declare
 begin
   if current_user in ('postgres', 'supabase_admin', 'service_role', 'supabase_auth_admin') then
     return new;
+  end if;
+  -- Menores: no se puede marcar el perfil como completo sin fecha de
+  -- nacimiento; así la edad no queda al arbitrio del cliente.
+  if coalesce(new.perfil_completado, false) and new.fecha_nacimiento is null then
+    raise exception 'fecha_nacimiento requerida para completar el perfil';
   end if;
   select coalesce(is_admin, false) into v_admin
     from public.profiles where id = auth.uid();

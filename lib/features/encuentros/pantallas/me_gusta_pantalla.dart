@@ -85,9 +85,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
     }
     try {
       final remoto = await Supabase.instance.client
-          .from('profiles')
-          .select('id,nombre,edad,biografia,fotos_urls,preferencia_edad_min,preferencia_edad_max,genero,busca_genero,que_busca,ciudad,verificado_status,ocultar_en_linea,ocultar_edad,ocultar_perfil,ocultar_visitas,ocultar_ubicacion,perfil_completado,situacion_sentimental,intereses,altura,educacion,trabajo,profesion,preferencia_relacion,bebe,fuma,hijos,personalidad,signo_zodiaco,mascotas,idiomas,tatuajes,preguntas_perfil,gesto_verificacion,creado_en,ultima_conexion')
-          .inFilter('id', faltantes);
+          .rpc('obtener_perfiles_publicos', params: {'p_ids': faltantes});
       for (final r in remoto as List) {
         final m = Map<String, dynamic>.from(r as Map);
         final id = m['id'] as String?;

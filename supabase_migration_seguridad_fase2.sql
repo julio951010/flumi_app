@@ -55,6 +55,9 @@ begin
   if current_user in ('postgres', 'supabase_admin', 'service_role', 'supabase_auth_admin') then
     return new;
   end if;
+  if coalesce(new.perfil_completado, false) and new.fecha_nacimiento is null then
+    raise exception 'fecha_nacimiento requerida para completar el perfil';
+  end if;
   select coalesce(is_admin, false) into v_admin
     from public.profiles where id = auth.uid();
   if v_admin then

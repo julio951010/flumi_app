@@ -113,12 +113,13 @@ class _PerfilPantallaState extends State<PerfilPantalla> {
             remoto = Map<String, dynamic>.from(rpc.first as Map);
           }
         } else {
-          final data = await sb.Supabase.instance.client
-              .from('profiles')
-              .select('id,nombre,edad,biografia,fotos_urls,preferencia_edad_min,preferencia_edad_max,genero,busca_genero,que_busca,ciudad,verificado_status,ocultar_en_linea,ocultar_edad,ocultar_perfil,ocultar_visitas,ocultar_ubicacion,perfil_completado,situacion_sentimental,intereses,altura,educacion,trabajo,profesion,preferencia_relacion,bebe,fuma,hijos,personalidad,signo_zodiaco,mascotas,idiomas,tatuajes,preguntas_perfil,gesto_verificacion,creado_en,ultima_conexion')
-              .eq('id', userId)
-              .maybeSingle();
-          if (data != null) remoto = data;
+          final rpc = await sb.Supabase.instance.client
+              .rpc('obtener_perfil_publico', params: {'p_user_id': userId});
+          if (rpc is List && rpc.isNotEmpty) {
+            remoto = Map<String, dynamic>.from(rpc.first);
+          } else if (rpc is Map) {
+            remoto = Map<String, dynamic>.from(rpc);
+          }
         }
       }
 

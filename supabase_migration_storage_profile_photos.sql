@@ -13,11 +13,21 @@
 --   drop policy "<nombre_permisiva>" on storage.objects;  -- repetir por cada una
 -- ============================================================
 
--- Lectura pública (las URLs de getPublicUrl deben abrir sin login).
+-- Lectura pública de fotos normales (las URLs de getPublicUrl deben abrir sin login).
+-- Las selfies de verificación NO son públicas.
 drop policy if exists "profile_photos_lectura_publica" on storage.objects;
 create policy "profile_photos_lectura_publica"
   on storage.objects for select
-  using (bucket_id = 'profile-photos');
+  using (bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] <> 'verificacion');
+
+drop policy if exists "verificacion_admin_lectura" on storage.objects;
+create policy "verificacion_admin_lectura"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] = 'verificacion'
+    and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
 
 -- Subida: SOLO archivos propios ({mi_uuid}_* o verificacion/{mi_uuid}_*).
 -- starts_with (no LIKE): el '_' de LIKE es comodín y permitiría prefijos
