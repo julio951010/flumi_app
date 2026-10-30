@@ -14,18 +14,18 @@ returns setof public.perfiles_publicos
 language sql
 stable
 security definer set search_path = public
-as \$\$
+as $$
   select * from public.perfiles_publicos where id = p_user_id;
-\$\$;
+$$;
 
 create or replace function public.obtener_perfiles_publicos(p_ids uuid[])
 returns setof public.perfiles_publicos
 language sql
 stable
 security definer set search_path = public
-as \$\$
+as $$
   select * from public.perfiles_publicos where id = any(p_ids);
-\$\$;
+$$;
 
 revoke all on function public.obtener_perfil_publico(uuid) from public;
 grant execute on function public.obtener_perfil_publico(uuid) to authenticated;
