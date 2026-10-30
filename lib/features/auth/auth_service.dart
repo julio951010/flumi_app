@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../config/env.dart';
 import '../../core/base_datos_local/database.dart';
+import '../../core/servicios/analytics_servicio.dart';
 import '../../core/servicios/connectivity_service.dart';
 
 // ---------------------------------------------------------------
@@ -191,6 +192,8 @@ class AuthService {
         email: email,
         password: password,
       );
+      unawaited(AnalyticsServicio.logLogin('email'));
+      unawaited(AnalyticsServicio.setUserId(r.user?.id));
       return {'user': r.user?.toJson(), 'token': ''};
     });
   }
@@ -231,6 +234,8 @@ class AuthService {
         password: password,
         data: nombre != null ? {'nombre': nombre} : null,
       );
+      unawaited(AnalyticsServicio.logSignUp('email'));
+      unawaited(AnalyticsServicio.setUserId(r.user?.id));
       // Enviar mensaje de bienvenida desde el perfil "Flumi" al nuevo usuario.
       // Usa fire-and-forget para no bloquear el registro si falla.
       if (r.user != null) {
@@ -253,6 +258,7 @@ class AuthService {
       _localStreamCtrl!.add(const AuthState('SIGNED_OUT'));
       return;
     }
+    unawaited(AnalyticsServicio.setUserId(null));
     return sb.Supabase.instance.client.auth.signOut();
   }
 

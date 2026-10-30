@@ -12,8 +12,10 @@ import 'config/env.dart';
 import 'core/base_datos_local/database.dart';
 import 'core/constantes/constantes.dart';
 import 'core/estilos/tema.dart';
+import 'core/servicios/analytics_servicio.dart';
 import 'core/servicios/connectivity_service.dart';
 import 'core/servicios/estado_servidor_servicio.dart';
+import 'core/servicios/install_ping_servicio.dart';
 import 'core/servicios/notificacion_local_servicio.dart';
 import 'core/servicios/notificacion_servicio.dart';
 import 'core/servicios/preferencias_notificaciones_servicio.dart';
@@ -115,6 +117,14 @@ void main() async {
   }
   // Connectivity debe quedar iniciado aunque el grupo falle.
   unawaited(ConnectivityService.instancia.iniciar());
+
+  // Analítica + Crashlytics (best-effort; no bloquea si no hay Firebase).
+  try {
+    await AnalyticsServicio.inicializar().timeout(const Duration(seconds: 8));
+  } catch (_) {}
+  unawaited(AnalyticsServicio.logAppOpen());
+  // Ping anónimo de instalación (no requiere registro).
+  unawaited(InstallPingServicio.registrar());
 
   authService = AuthService();
   AuthService.initDb(database);
