@@ -363,16 +363,26 @@ begin
   if current_user in ('postgres', 'supabase_admin', 'service_role', 'supabase_auth_admin') then
     return new;
   end if;
-  -- Menores: no se puede marcar el perfil como completo sin fecha de
-  -- nacimiento; así la edad no queda al arbitrio del cliente.
-  if coalesce(new.perfil_completado, false) and new.fecha_nacimiento is null then
-    raise exception 'fecha_nacimiento requerida para completar el perfil';
-  end if;
+
   select coalesce(is_admin, false) into v_admin
     from public.profiles where id = auth.uid();
+
   if v_admin then
+    if new.fecha_nacimiento is not null then
+      new.edad := extract(year from age(current_date, new.fecha_nacimiento))::int;
+    end if;
     return new;
   end if;
+
+  -- Completar el perfil exige fecha de nacimiento (verificacion de mayoria de
+  -- edad). Solo al INSERTAR completo o en el UPDATE que lo completa: los
+  -- perfiles antiguos sin fecha siguen pudiendo actualizarse (presencia, etc.).
+  if coalesce(new.perfil_completado, false)
+     and new.fecha_nacimiento is null
+     and (TG_OP = 'INSERT' or not coalesce(old.perfil_completado, false)) then
+    raise exception 'fecha_nacimiento requerida para completar el perfil';
+  end if;
+
   if TG_OP = 'INSERT' then
     new.is_admin := false;
     new.suspendido := false;
@@ -383,8 +393,12 @@ begin
     new.suspendido := old.suspendido;
     new.verificado_status := old.verificado_status;
     new.score_popularidad := old.score_popularidad;
+    -- La fecha ya registrada no se puede borrar (evita fijar la edad a mano).
+    if new.fecha_nacimiento is null and old.fecha_nacimiento is not null then
+      new.fecha_nacimiento := old.fecha_nacimiento;
+    end if;
   end if;
-  -- Edad derivada de fecha_nacimiento (no confiar en el cliente).
+
   if new.fecha_nacimiento is not null then
     new.edad := extract(year from age(current_date, new.fecha_nacimiento))::int;
   end if;
@@ -1014,6 +1028,8 @@ $$;
 --   generos(text[]), edad_min(int), edad_max(int),
 --   en_linea(bool), verificado(bool), ciudad(text).
 -- ============================================================
+drop function if exists public.perfiles_cercanos(double precision, double precision, integer, jsonb, integer, integer);
+
 create or replace function public.perfiles_cercanos(
   lat double precision default 0,
   lon double precision default 0,
@@ -1075,6 +1091,7 @@ language plpgsql
 stable
 security definer set search_path = public
 as $$
+#variable_conflict use_column
 declare
   yo uuid := auth.uid();
   busca text := 'otro';
@@ -1094,6 +1111,11 @@ begin
   if yo is null then
     return;
   end if;
+
+  -- Tope por llamada: la sincronizacion de la app pide hasta 500 (sincronizarFeedCercano),
+  -- el resto 10. Evita pedir volumenes arbitrarios en una sola llamada.
+  cuantos := least(greatest(coalesce(cuantos, 10), 1), 500);
+  desde := greatest(coalesce(desde, 0), 0);
 
   select coalesce(busca_genero, 'otro'),
          coalesce(preferencia_edad_min, 18),
@@ -1153,7 +1175,7 @@ begin
   end if;
 
    return query execute format(
-     'select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion from public.profiles p
+     'select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion from public.profiles p
       where p.ubicacion is not null
         and p.id <> $1
         and p.ocultar_perfil = false
@@ -1163,7 +1185,7 @@ begin
          and not exists (select 1 from public.blocks b
                          where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
                             or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
-         -- Reportado y pendiente de revisión: no sale en el feed del
+         -- Reportado y pendiente de revision: no sale en el feed del
          -- reportante (si el admin lo desestima, vuelve a salir).
          and not exists (select 1 from public.reports r
                          where r.reportante_id = $1 and r.reportado_id = p.id
@@ -1179,6 +1201,9 @@ begin
     using yo, lat, lon, radio_metros, busca, gen_extra, e_min, e_max, ciudad, cuantos, desde;
 end;
 $$;
+
+revoke execute on function public.perfiles_cercanos(double precision, double precision, integer, jsonb, integer, integer) from public, anon;
+grant execute on function public.perfiles_cercanos(double precision, double precision, integer, jsonb, integer, integer) to authenticated;
 
 -- ============================================================
 -- REALTIME: tablas publicadas para actualizaciones en vivo
@@ -2629,16 +2654,24 @@ begin
   if p_id is null then
     return;
   end if;
+
+  if exists (select 1 from public.instalaciones where id = p_id) then
+    update public.instalaciones
+       set ultima_vez = now(),
+           version = left(coalesce(p_version, ''), 32),
+           plataforma = left(coalesce(p_plataforma, ''), 32)
+     where id = p_id;
+    return;
+  end if;
+
+  if (select count(*) from public.instalaciones
+       where creado_en > now() - interval '1 hour') >= 2000 then
+    return;
+  end if;
+
   insert into public.instalaciones (id, plataforma, version)
-  values (
-    p_id,
-    left(coalesce(p_plataforma, ''), 32),
-    left(coalesce(p_version, ''), 32)
-  )
-  on conflict (id) do update
-    set ultima_vez = now(),
-        version = excluded.version,
-        plataforma = excluded.plataforma;
+  values (p_id, left(coalesce(p_plataforma, ''), 32), left(coalesce(p_version, ''), 32))
+  on conflict (id) do nothing;
 end;
 $$;
 
@@ -2717,3 +2750,82 @@ $$;
 
 revoke all on function public.estadisticas_instalaciones() from public;
 grant execute on function public.estadisticas_instalaciones() to authenticated;
+
+-- ============================================================
+-- SEGURIDAD FASE 8 (ver supabase_migration_seguridad_fase8.sql)
+-- ============================================================
+-- ------------------------------------------------------------
+-- 2. Vista perfiles_publicos: SOLO para las RPC (no accesible desde la API)
+-- ------------------------------------------------------------
+create or replace view public.perfiles_publicos as
+select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion
+from public.profiles p;
+
+revoke all on public.perfiles_publicos from public, anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 3. RPC de perfiles ajenos
+-- ------------------------------------------------------------
+create or replace function public.obtener_perfiles_publicos(p_ids uuid[])
+returns setof public.perfiles_publicos
+language sql
+stable
+security definer set search_path = public
+as $$
+  select v.*
+    from public.perfiles_publicos v
+   where auth.uid() is not null
+     and v.id = any (p_ids[1:200])
+     and exists (select 1 from public.profiles p
+                  where p.id = v.id and not coalesce(p.suspendido, false))
+     and not exists (select 1 from public.blocks b
+                      where (b.bloqueador_id = auth.uid() and b.bloqueado_id = v.id)
+                         or (b.bloqueador_id = v.id and b.bloqueado_id = auth.uid()));
+$$;
+
+create or replace function public.obtener_perfil_publico(p_user_id uuid)
+returns setof public.perfiles_publicos
+language sql
+stable
+security definer set search_path = public
+as $$
+  select * from public.obtener_perfiles_publicos(array[p_user_id]);
+$$;
+
+revoke all on function public.obtener_perfiles_publicos(uuid[]) from public, anon;
+grant execute on function public.obtener_perfiles_publicos(uuid[]) to authenticated;
+revoke all on function public.obtener_perfil_publico(uuid) from public, anon;
+grant execute on function public.obtener_perfil_publico(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- Lectura de profiles: solo el propio (los admins siguen leyendo todo con
+-- admin_lee_todos_perfiles, de admin_setup.sql de admin_flumi).
+-- ------------------------------------------------------------
+drop policy if exists "perfiles_visibles_para_autenticados" on public.profiles;
+drop policy if exists "usuario_lee_su_propio_perfil" on public.profiles;
+create policy "usuario_lee_su_propio_perfil"
+  on public.profiles for select
+  using (auth.uid() = id);
+
+-- ------------------------------------------------------------
+-- 4. Storage: selfies de verificacion no listables; fotos normales SI
+-- ------------------------------------------------------------
+drop policy if exists "profile_photos_lectura_publica" on storage.objects;
+create policy "profile_photos_lectura_publica"
+  on storage.objects for select
+  using (bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] is distinct from 'verificacion');
+
+drop policy if exists "verificacion_admin_lectura" on storage.objects;
+create policy "verificacion_admin_lectura"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] = 'verificacion'
+    and exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+
+-- ------------------------------------------------------------
+-- 5. historial_likes: solo leido_hasta es actualizable por el cliente
+-- ------------------------------------------------------------
+revoke update on public.historial_likes from anon, authenticated;
+grant update (leido_hasta) on public.historial_likes to authenticated;

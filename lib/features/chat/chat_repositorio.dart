@@ -1366,10 +1366,10 @@ class ChatRepositorio {
       for (var i = 0; i < lista.length; i += tamLote) {
         final lote = lista.sublist(
             i, (i + tamLote).clamp(0, lista.length));
+        // La lectura directa de profiles solo devuelve el perfil propio: la
+        // presencia de los demás se pide por RPC (perfiles enmascarados).
         final remoto = await Supabase.instance.client
-            .from(tablaProfiles)
-            .select('id,ultima_conexion,ocultar_en_linea')
-            .inFilter('id', lote)
+            .rpc('obtener_perfiles_publicos', params: {'p_ids': lote})
             .timeout(const Duration(seconds: 8));
         final filas = (remoto as List).map((f) => f as Map<String, dynamic>);
         await _db.batch((batch) {
