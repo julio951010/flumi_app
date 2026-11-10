@@ -5,6 +5,7 @@ import '../core/estilos/tema.dart';
 /// (quita distancia/edad y pide más perfiles al servidor) y "Recargar".
 class EstadoVacioEncuentros extends StatelessWidget {
   final String mensaje;
+  final String? detalle;
   final IconData icono;
   final Future<void> Function()? onAmpliarBusqueda;
   final Future<void> Function()? onRecargar;
@@ -12,6 +13,7 @@ class EstadoVacioEncuentros extends StatelessWidget {
   const EstadoVacioEncuentros({
     super.key,
     required this.mensaje,
+    this.detalle,
     this.icono = Icons.person_search,
     this.onAmpliarBusqueda,
     this.onRecargar,
@@ -30,6 +32,17 @@ class EstadoVacioEncuentros extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 18, color: Colors.grey[500]),
           ),
+          if (detalle != null) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                detalle!,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey[500], height: 1.4),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           if (onAmpliarBusqueda != null) ...[
             ElevatedButton.icon(

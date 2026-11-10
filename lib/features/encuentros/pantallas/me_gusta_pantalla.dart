@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/connectivity_service.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../core/servicios/visitas_historial_servicio.dart';
 import '../../../core/servicios/votos_servicio.dart';
@@ -555,6 +556,21 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
         await _historialLikesServicio.registrarLike(usuario.uuid);
     if (resultado?.limite == true) {
       _mostrarBloqueoMeGusta();
+      return false;
+    }
+    if (resultado?.noReciproco == true) {
+      if (mounted) {
+        setState(() {
+          for (final lista in [_likes, _visitas, _misLikes, _matches]) {
+            lista.removeWhere((i) => i.usuario?.uuid == usuario.uuid);
+          }
+        });
+        NotificacionServicio.advertencia(
+          context,
+          'Ese perfil no busca a personas como tú, así que el Me Gusta no '
+          'se envió.',
+        );
+      }
       return false;
     }
     // El feed en vivo no persiste perfiles ajenos: los cacheamos aquí para

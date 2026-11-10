@@ -806,9 +806,41 @@ declare
   limite int := 0;
   usado int := 0;
   hay_match boolean := false;
+  -- Reciprocidad: no se permite gastar un Me Gusta en alguien que no busca
+  -- mi género ni mi edad (el feed ya lo oculta; esto protege datos viejos).
+  mi_genero text := '';
+  mi_edad int := 18;
+  reciproco boolean := true;
 begin
   if yo is null or perfil_id is null or perfil_id = yo then
     return jsonb_build_object('match', false, 'likeado', false, 'limite', false, 'error', 'destino_invalido');
+  end if;
+
+  select coalesce(genero, ''), coalesce(edad, 18)
+    into mi_genero, mi_edad
+    from public.profiles
+   where id = yo;
+
+  select exists (
+    select 1
+      from public.profiles p
+     where p.id = perfil_id
+       and (
+         coalesce(mi_genero, '') = ''
+         or coalesce(p.busca_genero, '') in ('', 'todos', 'ambos', 'otro', 'prefiero_no_decirlo')
+         or exists (
+           select 1
+             from unnest(string_to_array(coalesce(p.busca_genero, ''), ',')) as op(opcion)
+            where public.cumple_genero(op.opcion, mi_genero)
+         )
+       )
+       and coalesce(p.preferencia_edad_min, 18) <= mi_edad
+       and coalesce(p.preferencia_edad_max, 99) >= mi_edad
+  ) into reciproco;
+
+  if not reciproco then
+    return jsonb_build_object(
+      'match', false, 'likeado', false, 'limite', false, 'no_reciproco', true);
   end if;
 
   -- Fuente canónica (admin / kill-switch / suscripción vigente).
@@ -1090,6 +1122,9 @@ declare
   orden text := 'distancia';
   clausulas text := '';
   ordenar text := '';
+  -- Datos propios para exigir reciprocidad (como Tinder/Bumble).
+  mi_genero text := '';
+  mi_edad int := 18;
 begin
   if yo is null then
     return;
@@ -1097,8 +1132,10 @@ begin
 
   select coalesce(busca_genero, 'otro'),
          coalesce(preferencia_edad_min, 18),
-         coalesce(preferencia_edad_max, 99)
-    into busca, p_min, p_max
+         coalesce(preferencia_edad_max, 99),
+         coalesce(genero, ''),
+         coalesce(edad, 18)
+    into busca, p_min, p_max, mi_genero, mi_edad
     from public.profiles
    where id = yo;
 
@@ -1112,17 +1149,35 @@ begin
   ampliar := coalesce((filtros ->> 'ampliar')::boolean, false);
   orden := coalesce(filtros ->> 'orden', 'distancia');
 
+  -- Reciprocidad: el perfil solo aparece si YO también cumplo lo que esa
+  -- persona busca. No se relaja con "ampliar" (ampliar solo suelta
+  -- distancia/ciudad/edad propios): nadie debe ver ni gastar un Me Gusta
+  -- en alguien que declaró no buscar su género.
+  if coalesce(mi_genero, '') <> '' then
+    clausulas := clausulas || format(
+      $f$and (coalesce(p.busca_genero, '') in ('', 'todos', 'ambos', 'otro', 'prefiero_no_decirlo')
+              or exists (
+                select 1
+                  from unnest(string_to_array(coalesce(p.busca_genero, ''), ',')) as op(opcion)
+                 where public.cumple_genero(op.opcion, %L)
+              )) $f$, mi_genero);
+  end if;
+
+  clausulas := clausulas || format(
+    $f$and coalesce(p.preferencia_edad_min, 18) <= %s
+        and coalesce(p.preferencia_edad_max, 99) >= %s $f$, mi_edad, mi_edad);
+
   if radio_metros >= 0 then
     clausulas := clausulas || format(
       'and ST_DWithin(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4) ');
   end if;
 
-  if not ampliar and coalesce(busca, '') not in ('', 'todos', 'ambos', 'prefiero_no_decirlo', 'otro') then
+  if coalesce(busca, '') not in ('', 'todos', 'ambos', 'prefiero_no_decirlo', 'otro') then
     clausulas := clausulas ||
       'and exists (select 1 from unnest(string_to_array($5, '','')) as opciones(opcion) where public.cumple_genero(opciones.opcion, p.genero)) ';
   end if;
 
-  if not ampliar and gen_extra is not null and cardinality(gen_extra) > 0 then
+  if gen_extra is not null and cardinality(gen_extra) > 0 then
     clausulas := clausulas ||
       'and exists (select 1 from unnest($6::text[]) as opciones(opcion) where public.cumple_genero(opciones.opcion, p.genero)) ';
   end if;

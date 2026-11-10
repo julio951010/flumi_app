@@ -827,6 +827,7 @@ return widget.syncService.consultarFeedRemoto(
         mensaje: _filtrados.isEmpty
             ? 'No hay perfiles que coincidan con tus filtros'
             : 'No hay m\u00e1s perfiles por ahora',
+        detalle: 'Solo ves personas que tambi\u00e9n buscan tu g\u00e9nero y edad.',
         icono: Icons.person_search,
         onAmpliarBusqueda: widget.onAmpliarBusqueda != null
             ? () async => _ampliarBusqueda()
@@ -1037,6 +1038,21 @@ return widget.syncService.consultarFeedRemoto(
     if (resultado?.limite == true) {
       _rebobinarCarta();
       if (mounted) _mostrarBloqueoMeGusta();
+      return;
+    }
+    if (resultado?.noReciproco == true) {
+      // El perfil ya no busca mi género/edad (dato viejo del feed): el like
+      // no se guardó ni consumió cupo, así que se descarta del mazo.
+      setState(() {
+        _filtrados.removeWhere((u) => u.uuid == usuario.uuid);
+      });
+      if (mounted) {
+        NotificacionServicio.advertencia(
+          context,
+          'Ese perfil no busca a personas como tú. Solo te mostraremos '
+          'perfiles compatibles.',
+        );
+      }
       return;
     }
     if (resultado == null && ConnectivityService.instancia.hayConexion) {

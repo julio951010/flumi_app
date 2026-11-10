@@ -27,10 +27,15 @@ class ResultadoMeGusta {
   final bool likeado;
   final bool limite;
 
+  /// El destinatario declaró no buscar mi género/edad: el like no se guardó
+  /// y no consumió cupo. Solo puede pasar con datos viejos del feed.
+  final bool noReciproco;
+
   const ResultadoMeGusta({
     required this.match,
     required this.likeado,
     required this.limite,
+    this.noReciproco = false,
   });
 
   factory ResultadoMeGusta.desdeJson(Map<String, dynamic> json) {
@@ -38,6 +43,7 @@ class ResultadoMeGusta {
       match: json['match'] == true,
       likeado: json['likeado'] == true,
       limite: json['limite'] == true,
+      noReciproco: json['no_reciproco'] == true,
     );
   }
 }

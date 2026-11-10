@@ -383,6 +383,7 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       }
       return EstadoVacioEncuentros(
         mensaje: 'No hay usuarios cerca con tus filtros',
+        detalle: 'Solo ves personas que tambi\u00e9n buscan tu g\u00e9nero y edad.',
         icono: Icons.people_outline,
         onAmpliarBusqueda: widget.onAmpliarBusqueda != null
             ? () async => _ampliarBusqueda()
@@ -600,6 +601,20 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
     final resultado = await _historialLikes.registrarLike(usuario.uuid);
     if (resultado?.limite == true) {
       _mostrarBloqueoMeGusta();
+      return false;
+    }
+    if (resultado?.noReciproco == true) {
+      if (mounted) {
+        setState(() {
+          _usuarios.removeWhere((u) => u.uuid == usuario.uuid);
+        });
+        _aplicarFiltros();
+        NotificacionServicio.advertencia(
+          context,
+          'Ese perfil no busca a personas como tú. Solo te mostraremos '
+          'perfiles compatibles.',
+        );
+      }
       return false;
     }
     if (resultado == null && ConnectivityService.instancia.hayConexion) {

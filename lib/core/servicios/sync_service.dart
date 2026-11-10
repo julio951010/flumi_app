@@ -1771,6 +1771,14 @@ class SyncService {
     if (data?['limite'] == true) {
       throw Exception('limite diario de likes alcanzado');
     }
+    if (data?['no_reciproco'] == true) {
+      // Datos viejos: el perfil ya no busca mi género/edad. Se descarta el
+      // like local para no reintentarlo en cada sincronización.
+      await (_db.delete(_db.historialLikes)
+            ..where((h) => h.uuid.equals(like.uuid)))
+          .go();
+      return;
+    }
   }
 
   Future<void> _subirRechazo(Rechazo rechazo) async {
