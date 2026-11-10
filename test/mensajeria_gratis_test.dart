@@ -48,20 +48,32 @@ void main() {
       expect(sql, contains('No hay match'));
     });
 
-    test('no se promete chatear sin match (el servidor lo exige)', () {
-      for (final ruta in [
-        'lib/features/encuentros/pantallas/me_gusta_pantalla.dart',
-        'lib/features/encuentros/pantallas/encuentros_pantalla.dart',
-        'lib/features/encuentros/pantallas/cerca_de_ti_pantalla.dart',
-        'lib/features/perfiles/pantallas/detalle_plan_pantalla.dart',
-        'lib/features/configuracion/pantallas/administrar_suscripcion_pantalla.dart',
-      ]) {
-        expect(
-          File(ruta).readAsStringSync().contains('sin necesidad de match'),
-          isFalse,
-          reason: 'Promesa falsa en $ruta',
-        );
-      }
+    test('Premium puede escribir sin match (excepción del servidor)', () {
+      expect(
+        schema,
+        contains("public.plan_efectivo(new.emisor_id) <> 'premium'"),
+      );
+      expect(schema, contains("raise exception 'No hay match'"));
+    });
+
+    test('el receptor puede responder aunque no sea Premium', () {
+      expect(schema, contains('from public.messages prev'));
+      expect(schema, contains('prev.emisor_id = new.receptor_id'));
+      expect(schema, contains('prev.receptor_id = new.emisor_id'));
+    });
+
+    test('los planes anuncian el chat sin match de Premium', () {
+      expect(
+        File('lib/features/perfiles/pantallas/detalle_plan_pantalla.dart')
+            .readAsStringSync(),
+        contains('sin necesidad de match'),
+      );
+      expect(
+        File(
+                'lib/features/configuracion/pantallas/administrar_suscripcion_pantalla.dart')
+            .readAsStringSync(),
+        contains('sin necesidad de match'),
+      );
     });
   });
 }

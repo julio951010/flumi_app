@@ -69,6 +69,7 @@ class _DetallePlanPantallaState extends State<DetallePlanPantalla> {
             'Ocultar tu ubicaci\u00f3n',
             'Visibilidad selectiva',
             'Modo invisible: oculta tu perfil y tus visitas',
+            'Chatea con cualquiera sin necesidad de match',
             '4 Boosts al mes',
           ],
         _ => const ['Acceso completo a Flumi'],

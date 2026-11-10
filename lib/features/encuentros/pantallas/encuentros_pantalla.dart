@@ -1089,13 +1089,29 @@ return widget.syncService.consultarFeedRemoto(
   }
 
   void _abrirChat(Usuario usuario) {
-    // El servidor exige match para chatear (sin excepción de plan).
     final hayMatch = _idsGustados.contains(usuario.uuid) &&
         _idsRecibidos.contains(usuario.uuid);
-    if (!hayMatch) {
-      NotificacionServicio.advertencia(
+    // Premium puede abrir el chat sin match (el servidor lo permite).
+    if (!hayMatch && !_suscripcion.tienePremium) {
+      mostrarBloqueoSuscripcion(
         context,
-        'Solo puedes chatear con tus matches.',
+        funcionalidad: 'Enviar mensaje',
+        planMinimo: PlanTipo.premium,
+        descripcion:
+            'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
+        onSuscribir: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const DetallePlanPantalla(
+              nombre: 'Flumi Premium',
+              periodo: 'mensual',
+              precio: '500 cup',
+              icono: Icons.workspace_premium,
+              detalle: 'Acceso total',
+              destacado: false,
+            ),
+          ),
+        ),
       );
       return;
     }

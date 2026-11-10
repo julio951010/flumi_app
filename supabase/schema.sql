@@ -2580,12 +2580,20 @@ begin
       raise exception 'Plan insuficiente para enviar mensajes';
     end if;
   end if;
-  -- Entre usuarios regulares se requiere match previo.
+  -- Entre usuarios regulares se requiere match previo, salvo que:
+  --   * el emisor sea Premium (puede iniciar conversación sin match), o
+  --   * el receptor ya le haya escrito antes (respuesta a una conversación
+  --     iniciada por un Premium sin match; sin esto el receptor gratis
+  --     nunca podría contestar y el beneficio quedaría roto).
   if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f')
      and new.receptor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
-    if not exists (select 1 from public.matches m
-                    where (m.usuario_a_id = new.emisor_id and m.usuario_b_id = new.receptor_id)
-                       or (m.usuario_a_id = new.receptor_id and m.usuario_b_id = new.emisor_id)) then
+    if public.plan_efectivo(new.emisor_id) <> 'premium'
+       and not exists (select 1 from public.matches m
+                        where (m.usuario_a_id = new.emisor_id and m.usuario_b_id = new.receptor_id)
+                           or (m.usuario_a_id = new.receptor_id and m.usuario_b_id = new.emisor_id))
+       and not exists (select 1 from public.messages prev
+                        where prev.emisor_id = new.receptor_id
+                          and prev.receptor_id = new.emisor_id) then
       raise exception 'No hay match';
     end if;
   end if;
