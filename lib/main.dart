@@ -871,12 +871,24 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
   /// Conversaciones con mensajes sin leer. Notifier propio para que el punto
   /// de la pestaña Chats se repinte solo (cuenta conversaciones, no mensajes).
   final ValueNotifier<int> _chatsNoLeidosConversaciones = ValueNotifier<int>(0);
+
+  /// Solicitudes de chat sin match pendientes y conversaciones con no leídos:
+  /// se suman en el badge de Chats porque una solicitud también es un mensaje
+  /// nuevo que el usuario aún no ha visto.
+  int _solicitudesPendientesBadge = 0;
+  int _conversacionesNoLeidasBadge = 0;
+
+  void _refrescarBadgeChats() {
+    _chatsNoLeidosConversaciones.value =
+        _conversacionesNoLeidasBadge + _solicitudesPendientesBadge;
+  }
   final ValueNotifier<int> _meGustaNoLeidas = ValueNotifier<int>(0);
   /// Respuestas de soporte nuevas sin leer: campana + badge de
   /// Configuración + indicador de Ayuda y soporte.
   final ValueNotifier<int> _soporteNoLeidas = ValueNotifier<int>(0);
   final ContadorMeGusta _contadorMeGusta = ContadorMeGusta(db: database);
   StreamSubscription? _convSub;
+  StreamSubscription<List<SolicitudChatVista>>? _solicitudesSub;
   StreamSubscription? _likesRealtimeSub;
   StreamSubscription? _visitasRealtimeSub;
   StreamSubscription? _soporteRealtimeSub;
@@ -925,6 +937,11 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
       _mensajesNoLeidas.value =
           await _contarNotificacionesMensajes(miId, resumenes);
       _actualizarBadgeNotificaciones();
+    });
+    _solicitudesSub =
+        chatRepositorio.observarSolicitudesPendientes(miId).listen((s) {
+      _solicitudesPendientesBadge = s.length;
+      _refrescarBadgeChats();
     });
     // Fase 5: los badges de Me Gusta se derivan de la BD local (dedupe por
     // uuid), así funcionan aunque el socket de Realtime de este navegador se
@@ -1410,8 +1427,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // _recalcularBadgesSociales ya calculó y puso los badges correctos.
     // Seed de chats + notificaciones de mensajes (réplica bandeja).
     final resumenes = await chatRepositorio.observarConversaciones(miId).first;
-    _chatsNoLeidosConversaciones.value =
+    _conversacionesNoLeidasBadge =
         resumenes.where((r) => r.noLeidos > 0).length;
+    _refrescarBadgeChats();
     _mensajesNoLeidas.value =
         await _contarNotificacionesMensajes(miId, resumenes);
     _actualizarBadgeNotificaciones();
@@ -1451,8 +1469,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     // 1) Chats: conversaciones con no leídos. Campana: notificaciones de
     // la bandeja (réplica exacta del conteo de ítems).
     final resumenes = await chatRepositorio.observarConversaciones(miId).first;
-    _chatsNoLeidosConversaciones.value =
+    _conversacionesNoLeidasBadge =
         resumenes.where((r) => r.noLeidos > 0).length;
+    _refrescarBadgeChats();
     _mensajesNoLeidas.value =
         await _contarNotificacionesMensajes(miId, resumenes);
 
@@ -1548,6 +1567,7 @@ final visitas = await (database.select(database.visitas)
     WidgetsBinding.instance.removeObserver(this);
     chatRepositorio.cancelarRealtime();
     _convSub?.cancel();
+    _solicitudesSub?.cancel();
     _convSub = null;
     _likesRealtimeSub?.cancel();
     _likesRealtimeSub = null;

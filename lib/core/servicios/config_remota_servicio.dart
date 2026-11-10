@@ -19,6 +19,8 @@ class ConfigRemotaServicio extends ChangeNotifier {
   final SupabaseClient? _client;
   bool _suscripcionesHabilitadas = true;
   bool _mensajesRequierenPlus = false;
+  /// Tope diario de solicitudes de chat sin match (beneficio de Premium).
+  int _limiteSolicitudesChat = 5;
   bool _enMantenimiento = false;
   String _mensajeMantenimiento = '';
   int _versionMinimaBuild = 1;
@@ -43,6 +45,8 @@ class ConfigRemotaServicio extends ChangeNotifier {
   /// Independiente del kill-switch de suscripciones: si es `true`, el chat
   /// exige Plus/Premium; si es `false`, el chat es gratis para todos.
   bool get mensajesRequierenPlus => _mensajesRequierenPlus;
+  /// Solicitudes diarias para escribir sin match (Premium).
+  int get limiteSolicitudesChat => _limiteSolicitudesChat;
   bool get enMantenimiento => _enMantenimiento;
   String get mensajeMantenimiento => _mensajeMantenimiento;
   String get actualizarUrl => _actualizarUrl;
@@ -122,6 +126,7 @@ class ConfigRemotaServicio extends ChangeNotifier {
             const [
               'suscripciones_habilitadas',
               'mensajes_requieren_plus',
+              'limite_solicitudes_chat_diarias',
               'mantenimiento',
               'mantenimiento_mensaje',
               'version_minima_build',
@@ -159,6 +164,12 @@ class ConfigRemotaServicio extends ChangeNotifier {
             final nuevo = valor.toLowerCase() == 'true';
             if (_mensajesRequierenPlus != nuevo) {
               _mensajesRequierenPlus = nuevo;
+              cambio = true;
+            }
+          case 'limite_solicitudes_chat_diarias':
+            final nuevo = int.tryParse(valor.trim());
+            if (nuevo != null && nuevo >= 0 && _limiteSolicitudesChat != nuevo) {
+              _limiteSolicitudesChat = nuevo;
               cambio = true;
             }
           case 'mantenimiento':

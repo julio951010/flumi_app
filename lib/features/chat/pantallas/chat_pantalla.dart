@@ -70,6 +70,9 @@ class _ChatPantallaState extends State<ChatPantalla> {
   StreamSubscription<Usuario?>? _usuarioSub;
   bool _otroEscribiendo = false;
   StreamSubscription<bool>? _escribiendoSub;
+  /// Estado de la solicitud de chat sin match entre ambos (si existe).
+  ({String estado, bool enviada})? _solicitud;
+  StreamSubscription<({String estado, bool enviada})?>? _solicitudSub;
   Timer? _timerEscribiendo;
   bool _enviandoEscribiendo = false;
   bool _panelEmojisAbierto = false;
@@ -111,6 +114,11 @@ class _ChatPantallaState extends State<ChatPantalla> {
         .observarEscribiendo(widget.otroUsuarioId, widget.miId)
         .listen((escribiendo) {
       if (mounted) setState(() => _otroEscribiendo = escribiendo);
+    });
+    _solicitudSub = widget.repositorio
+        .observarEstadoSolicitud(widget.miId, widget.otroUsuarioId)
+        .listen((solicitud) {
+      if (mounted) setState(() => _solicitud = solicitud);
     });
   }
 
@@ -342,6 +350,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
     _leidoSub?.cancel();
     _usuarioSub?.cancel();
     _escribiendoSub?.cancel();
+    _solicitudSub?.cancel();
     widget.repositorio.cerrarEscribiendo(widget.otroUsuarioId, widget.miId);
     _mensajeCtrl.dispose();
     _scrollCtrl.dispose();
@@ -374,6 +383,13 @@ class _ChatPantallaState extends State<ChatPantalla> {
 
   Future<void> _enviar() async {
     final suscripcion = widget.suscripcionServicio;
+    final bloqueoSolicitud = _bloqueoSolicitud;
+    if (bloqueoSolicitud != null) {
+      if (mounted) {
+        NotificacionServicio.advertencia(context, bloqueoSolicitud);
+      }
+      return;
+    }
     if (suscripcion.cargando) {
       if (mounted) {
         NotificacionServicio.advertencia(
@@ -1153,6 +1169,16 @@ class _ChatPantallaState extends State<ChatPantalla> {
     );
   }
 
+  /// Motivo por el que una solicitud sin match me impide escribir, o null si
+  /// ya está aceptada o no hay solicitud.
+  String? get _bloqueoSolicitud {
+    final s = _solicitud;
+    if (s == null || s.estado == 'aceptada') return null;
+    if (s.estado == 'rechazada') return 'Solicitud descartada';
+    if (s.enviada) return 'Esperando a que acepte tu solicitud';
+    return 'Acepta la solicitud en Chats para responder';
+  }
+
   Widget _campoEntrada() {
     if (_idsConversacionOficial.contains(widget.otroUsuarioId)) {
       return Padding(
@@ -1173,13 +1199,19 @@ class _ChatPantallaState extends State<ChatPantalla> {
       );
     }
     final bool bloqueado = widget.suscripcionServicio.chatBloqueado;
+    final String? bloqueoSolicitud = _bloqueoSolicitud;
+    final bool sinEscribir = bloqueado || bloqueoSolicitud != null;
+    final String hint = bloqueoSolicitud ??
+        (bloqueado
+            ? 'Actualiza a Plus/Premium para enviar mensajes'
+            : 'Escribe un mensaje...');
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           GestureDetector(
-            onTap: bloqueado
+            onTap: sinEscribir
                 ? null
                 : () => setState(() {
                       _panelEmojisAbierto = !_panelEmojisAbierto;
@@ -1188,7 +1220,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: bloqueado
+                color: sinEscribir
                     ? Colors.grey[100]
                     : (_panelEmojisAbierto
                         ? FlumiTema.colorPrimario.withValues(alpha: 0.12)
@@ -1199,7 +1231,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 _panelEmojisAbierto
                     ? Icons.keyboard_alt_outlined
                     : Icons.emoji_emotions_outlined,
-                color: bloqueado
+                color: sinEscribir
                     ? Colors.grey[400]
                     : (_panelEmojisAbierto
                         ? FlumiTema.colorPrimario
@@ -1222,11 +1254,9 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 textInputAction: TextInputAction.send,
                 onChanged: _alCambiarTexto,
                 onSubmitted: (_) => _enviar(),
-                enabled: !bloqueado,
+                enabled: !sinEscribir,
                 decoration: InputDecoration(
-                  hintText: bloqueado
-                      ? 'Actualiza a Plus/Premium para enviar mensajes'
-                      : 'Escribe un mensaje...',
+                  hintText: hint,
                   hintStyle: TextStyle(color: Colors.grey[400], fontSize: 15),
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 18, vertical: 12),
@@ -1237,17 +1267,17 @@ class _ChatPantallaState extends State<ChatPantalla> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: bloqueado ? null : _enviar,
+            onTap: sinEscribir ? null : _enviar,
             child: Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: bloqueado ? Colors.grey[300] : FlumiTema.colorPrimario,
+                color: sinEscribir ? Colors.grey[300] : FlumiTema.colorPrimario,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.send,
-                color: bloqueado ? Colors.grey[500] : Colors.white,
+                color: sinEscribir ? Colors.grey[500] : Colors.white,
                 size: 20,
               ),
             ),

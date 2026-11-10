@@ -507,7 +507,7 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
         funcionalidad: 'Enviar mensaje',
         planMinimo: PlanTipo.premium,
         descripcion:
-            'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
+            'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar hasta ${widget.suscripcionServicio.limiteSolicitudesChat} solicitudes al día a quien quieras, sin match.',
         onSuscribir: () => Navigator.push(
           context,
           MaterialPageRoute(

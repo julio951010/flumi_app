@@ -173,6 +173,10 @@ class SuscripcionServicio with ChangeNotifier {
   bool get mensajesRequierenPlus =>
       _configRemota?.mensajesRequierenPlus ?? false;
 
+  /// Solicitudes diarias sin match que incluye Premium.
+  int get limiteSolicitudesChat =>
+      _configRemota?.limiteSolicitudesChat ?? 5;
+
   /// true si este usuario no puede enviar mensajes por su plan actual.
   /// Tener en cuenta que `esGratis` ya contempla admin y kill-switch.
   bool get chatBloqueado => esGratis && mensajesRequierenPlus;

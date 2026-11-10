@@ -38,6 +38,10 @@ class ResumenConversacion {
   final bool online;
   final bool esMeGusta;
   final bool esMatch;
+  /// Estado de la solicitud de chat sin match entre ambos, si existe.
+  /// Solo se usa para las conversaciones que YO inicié sin match
+  /// ('pendiente' = esperando respuesta; 'rechazada' = la descartaron).
+  final String? estadoSolicitud;
 
   const ResumenConversacion({
     required this.otroUsuarioId,
@@ -52,6 +56,20 @@ class ResumenConversacion {
     this.online = false,
     this.esMeGusta = false,
     this.esMatch = false,
+    this.estadoSolicitud,
+  });
+}
+
+/// Solicitud de chat sin match recibida y aún sin responder.
+class SolicitudChatVista {
+  final Usuario usuario;
+  final String mensaje;
+  final DateTime timestamp;
+
+  const SolicitudChatVista({
+    required this.usuario,
+    required this.mensaje,
+    required this.timestamp,
   });
 }
 
@@ -81,6 +99,7 @@ class ChatRepositorio {
   final SyncService? _sync;
   StreamSubscription? _realtimeSub;
   StreamSubscription? _realtimeMatchesSub;
+  StreamSubscription? _realtimeSolicitudesSub;
   StreamSubscription? _realtimeProfilesSub;
   StreamSubscription? _connectivitySub;
   String? _userId;
@@ -113,6 +132,9 @@ class ChatRepositorio {
   /// mensajes/matches remotos. Sin red o sin sync, no hace nada.
   Future<void> sincronizarAhora() async {
     try {
+      // Primero las decisiones de solicitudes (aceptar/descartar): el
+      // servidor debe conocerlas antes de que se reintenten mis respuestas.
+      await _sync?.sincronizarSolicitudesChat();
       await _sync?.sincronizarMensajesPendientes();
       await _sync?.sincronizarMatchesPendientes();
     } catch (_) {}
@@ -125,6 +147,7 @@ class ChatRepositorio {
     StreamSubscription? subUsuarios;
     StreamSubscription? subEliminadas;
     StreamSubscription? subLeidas;
+    StreamSubscription? subSolicitudes;
 
     Future<void> recalcular() async {
       if (ctrl.isClosed) return;
@@ -158,6 +181,11 @@ class ChatRepositorio {
             .select(_db.conversacionesLeidas)
             .watch()
             .listen((_) => recalcular());
+        // Aceptar/descartar una solicitud mueve la conversación de sección.
+        subSolicitudes = _db
+            .select(_db.solicitudesChat)
+            .watch()
+            .listen((_) => recalcular());
         recalcular();
       },
       onCancel: () {
@@ -171,6 +199,8 @@ class ChatRepositorio {
         subEliminadas = null;
         subLeidas?.cancel();
         subLeidas = null;
+        subSolicitudes?.cancel();
+        subSolicitudes = null;
       },
     );
     return ctrl.stream;
@@ -248,6 +278,115 @@ class ChatRepositorio {
     return ctrl.stream;
   }
 
+  /// Estado de la solicitud de chat sin match entre ambos, si existe.
+  /// `enviada` indica si la solicitud la mandé yo (esperando respuesta) o me
+  /// la mandaron a mí (pendiente de aceptar).
+  Stream<({String estado, bool enviada})?> observarEstadoSolicitud(
+      String miId, String otroId) {
+    return (_db.select(_db.solicitudesChat)
+          ..where((s) =>
+              (s.emisorId.equals(miId) & s.receptorId.equals(otroId)) |
+              (s.emisorId.equals(otroId) & s.receptorId.equals(miId))))
+        .watchSingleOrNull()
+        .map((s) =>
+            s == null ? null : (estado: s.estado, enviada: s.emisorId == miId));
+  }
+
+  /// Solicitudes de chat sin match que me enviaron y aún no respondo.
+  /// Incluye el primer mensaje del emisor como vista previa.
+  Stream<List<SolicitudChatVista>> observarSolicitudesPendientes(String miId) {
+    late final StreamController<List<SolicitudChatVista>> ctrl;
+    StreamSubscription? subSolicitudes;
+    StreamSubscription? subUsuarios;
+    StreamSubscription? subMsgs;
+
+    Future<void> recalcular() async {
+      if (ctrl.isClosed) return;
+      final pendientes = await (_db.select(_db.solicitudesChat)
+            ..where((s) =>
+                s.receptorId.equals(miId) & s.estado.equals('pendiente')))
+          .get();
+      final usuarios = {
+        for (final u in await _db.select(_db.usuarios).get()) u.uuid: u
+      };
+      final vistas = <SolicitudChatVista>[];
+      for (final s in pendientes) {
+        final usuario = usuarios[s.emisorId];
+        if (usuario == null) {
+          // Perfil aún no descargado: se pide y subUsuarios recalcula al llegar.
+          if (_refrescandoPerfiles.add(s.emisorId)) {
+            unawaited(_sync?.refrescarPerfilRemoto(s.emisorId).whenComplete(
+                  () => _refrescandoPerfiles.remove(s.emisorId),
+                ));
+          }
+          continue;
+        }
+        final intro = await (_db.select(_db.mensajes)
+              ..where((m) =>
+                  m.emisorId.equals(s.emisorId) &
+                  m.receptorId.equals(miId))
+              ..orderBy([(m) => OrderingTerm.asc(m.timestamp)])
+              ..limit(1))
+            .getSingleOrNull();
+        vistas.add(SolicitudChatVista(
+          usuario: usuario,
+          mensaje: intro?.contenido ?? '',
+          timestamp: intro?.timestamp ?? s.creadoEn,
+        ));
+      }
+      vistas.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      ctrl.add(vistas);
+    }
+
+    ctrl = StreamController<List<SolicitudChatVista>>(
+      onListen: () {
+        subSolicitudes = _db
+            .select(_db.solicitudesChat)
+            .watch()
+            .listen((_) => recalcular());
+        subUsuarios =
+            _db.select(_db.usuarios).watch().listen((_) => recalcular());
+        subMsgs = _db.select(_db.mensajes).watch().listen((_) => recalcular());
+        recalcular();
+      },
+      onCancel: () {
+        subSolicitudes?.cancel();
+        subSolicitudes = null;
+        subUsuarios?.cancel();
+        subUsuarios = null;
+        subMsgs?.cancel();
+        subMsgs = null;
+      },
+    );
+    return ctrl.stream;
+  }
+
+  /// Acepta o descarta una solicitud recibida. Se aplica en local al instante
+  /// (la UI reacciona) y se sube al servidor sin bloquear la interacción; el
+  /// trigger es quien impide responder hasta que esté aceptada.
+  Future<void> responderSolicitud({
+    required String emisorId,
+    required String miId,
+    required bool aceptar,
+  }) async {
+    final estado = aceptar ? 'aceptada' : 'rechazada';
+    final ahora = DateTime.now();
+    await (_db.update(_db.solicitudesChat)
+          ..where((s) =>
+              s.emisorId.equals(emisorId) & s.receptorId.equals(miId)))
+        .write(SolicitudesChatCompanion(
+      estado: Value(estado),
+      resueltoEn: Value(ahora),
+      pendienteDeSincronizar: const Value(true),
+    ));
+    await _sync?.sincronizarSolicitudesChat(miId);
+    if (aceptar) {
+      // La conversación ya existe (el mensaje de intro se descargó con el
+      // sync): basta con refrescar por si faltaba algún perfil o mensaje.
+      unawaited(_sync?.sincronizarMensajesPendientes());
+    }
+  }
+
   Future<List<ResumenConversacion>> _resumir(
       String miId, List<Mensaje> msgs, List<Matche> matches, List<Usuario> usuarios) async {
     final nombres = {for (final u in usuarios) u.uuid: u.nombre};
@@ -304,6 +443,21 @@ class ChatRepositorio {
       leidosHasta[r.otroUsuarioId] = r.leidoHasta;
     }
 
+    // Solicitudes de chat sin match entre mí y cada contacto. Solo afectan a
+    // las conversaciones SIN match (con match el chat es libre):
+    //   * recibida y aún sin aceptar → va a la sección Solicitudes, no a la
+    //     lista de conversaciones (y no puede responderse todavía).
+    //   * recibida y descartada → se oculta.
+    //   * enviada por mí → se mantiene, con su estado visible.
+    final solicitudes = <String, ({String estado, bool enviada})>{};
+    for (final s in await _db.select(_db.solicitudesChat).get()) {
+      if (s.emisorId == miId) {
+        solicitudes[s.receptorId] = (estado: s.estado, enviada: true);
+      } else if (s.receptorId == miId) {
+        solicitudes[s.emisorId] = (estado: s.estado, enviada: false);
+      }
+    }
+
     for (final m in msgs) {
       final otro = m.emisorId == miId ? m.receptorId : m.emisorId;
       if (otro.isEmpty) continue;
@@ -336,6 +490,13 @@ class ChatRepositorio {
     for (final entry in porOtro.entries) {
       final otro = entry.key;
       if (ocultas.contains(otro)) continue;
+      final conMatch = tiemposMatch.containsKey(otro);
+      final sol = solicitudes[otro];
+      if (!conMatch && sol != null) {
+        // Solicitud recibida: solo aparece cuando la acepto. Pendiente vive en
+        // la sección Solicitudes; rechazada desaparece de mi lista.
+        if (!sol.enviada && sol.estado != 'aceptada') continue;
+      }
       final conv = entry.value
         ..sort((a, b) {
           final c = a.timestamp.compareTo(b.timestamp);
@@ -354,7 +515,9 @@ class ChatRepositorio {
         noLeidos: _noLeidos(miId, conv, leidosHasta[otro]),
         online: onlinePorUsuario[otro] ?? false,
         esMeGusta: misLikes.contains(otro),
-        esMatch: tiemposMatch.containsKey(otro),
+        esMatch: conMatch,
+        estadoSolicitud:
+            !conMatch && sol != null && sol.enviada ? sol.estado : null,
       ));
     }
 
@@ -647,9 +810,14 @@ class ChatRepositorio {
     appLog('[ChatRepo] mensaje insertado localmente');
     // Escribir yo reactiva la conversación si la había borrado solo para mí.
     await _reactivarConversacion(receptorId, emisorId);
-    // Write-through: intenta subir el mensaje a Supabase de inmediato;
-    // si falla queda pendiente para el siguiente sync.
-    unawaited(_sync?.sincronizarMensajesPendientes());
+    // Write-through: sube el mensaje y, justo después, la solicitud que creó
+    // el trigger (así el emisor ve "Solicitud enviada" sin esperar al sync).
+    final sync = _sync;
+    if (sync != null) {
+      unawaited(sync
+          .sincronizarMensajesPendientes()
+          .then((_) => sync.sincronizarSolicitudesChat(emisorId)));
+    }
 
     // NO mostramos notificación local al emisor: ya ve su mensaje en el chat.
     // El push al destinatario lo dispara el trigger de la BD (schema.sql).
@@ -1045,6 +1213,8 @@ class ChatRepositorio {
     _realtimeSub = null;
     _realtimeMatchesSub?.cancel();
     _realtimeMatchesSub = null;
+    _realtimeSolicitudesSub?.cancel();
+    _realtimeSolicitudesSub = null;
     _realtimeProfilesSub?.cancel();
     _realtimeProfilesSub = null;
     if (kUsarServidorLocal) return;
@@ -1080,6 +1250,18 @@ class ChatRepositorio {
       }
     });
 
+    // Solicitudes de chat sin match: llegan al receptor en vivo (y al emisor
+    // los cambios de estado) sin esperar al siguiente sync.
+    _realtimeSolicitudesSub = Supabase.instance.client
+        .from('chat_solicitudes')
+        .stream(primaryKey: ['emisor_id', 'receptor_id'])
+        .handleError((_) {})
+        .listen((cambios) async {
+      for (final cambio in cambios) {
+        await _aplicarSolicitudRemota(cambio);
+      }
+    });
+
     // Presencia en vivo: los latidos de ultima_conexion de otros usuarios
     // llegan por Realtime (profiles está publicado) y actualizan el
     // indicador de en línea sin esperar al sondeo de 30 s.
@@ -1094,8 +1276,32 @@ class ChatRepositorio {
     });
   }
 
-  Future<void> _aplicarMensajeRemoto(Map<String, dynamic> cambio) async {
-    final dbId = cambio['id'] as String?;
+  /// Guarda una solicitud que llegó por Realtime, sin pisar una decisión local
+  /// (aceptar/descartar) que aún no se ha subido.
+  Future<void> _aplicarSolicitudRemota(Map<String, dynamic> cambio) async {
+    final emisor = cambio['emisor_id'] as String?;
+    final receptor = cambio['receptor_id'] as String?;
+    if (emisor == null || receptor == null) return;
+    final local = await (_db.select(_db.solicitudesChat)
+          ..where((s) =>
+              s.emisorId.equals(emisor) & s.receptorId.equals(receptor))
+          ..limit(1))
+        .getSingleOrNull();
+    if (local != null && local.pendienteDeSincronizar) return;
+    await _db.into(_db.solicitudesChat).insertOnConflictUpdate(
+          SolicitudesChatCompanion.insert(
+            emisorId: emisor,
+            receptorId: receptor,
+            estado: Value((cambio['estado'] as String?) ?? 'pendiente'),
+            creadoEn: Value(
+                PerfilMapeo.parsearFecha(cambio['creado_en']) ??
+                    DateTime.now()),
+            resueltoEn: Value(PerfilMapeo.parsearFecha(cambio['resuelto_en'])),
+          ),
+        );
+  }
+
+  Future<void> _aplicarMensajeRemoto(Map<String, dynamic> cambio) async {    final dbId = cambio['id'] as String?;
     appLog('[ChatRepo] _aplicarMensajeRemoto: id=$dbId cambio=$cambio');
     if (dbId == null) return;
     final emisorId = cambio['emisor_id'] as String?;
@@ -1396,6 +1602,8 @@ class ChatRepositorio {
     _realtimeSub = null;
     _realtimeMatchesSub?.cancel();
     _realtimeMatchesSub = null;
+    _realtimeSolicitudesSub?.cancel();
+    _realtimeSolicitudesSub = null;
     _realtimeProfilesSub?.cancel();
     _realtimeProfilesSub = null;
     _connectivitySub?.cancel();

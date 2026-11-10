@@ -5,12 +5,12 @@ import 'tables.dart';
 
 part 'database.g.dart';
 
-@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes, Rechazos, NotificacionesVistas, ConversacionesEliminadas, ConversacionesLeidas])
+@DriftDatabase(tables: [Usuarios, Mensajes, Matches, Reportes, Bloqueos, Suscripciones, UsosDiarios, Visitas, HistorialLikes, Rechazos, NotificacionesVistas, ConversacionesEliminadas, ConversacionesLeidas, SolicitudesChat])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 26;
+  int get schemaVersion => 27;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -181,6 +181,10 @@ class AppDatabase extends _$AppDatabase {
       if (from < 26) {
         // Columna ocultarUbicacion ("Mostrar mi ubicación" en Privacidad).
         await m.addColumn(usuarios, usuarios.ocultarUbicacion);
+      }
+      if (from < 27) {
+        // Solicitudes de chat sin match (beneficio de Premium).
+        await m.createTable(solicitudesChat);
       }
     },
   );

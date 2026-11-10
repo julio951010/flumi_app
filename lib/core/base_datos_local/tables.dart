@@ -309,3 +309,23 @@ class NotificacionesVistas extends Table {
   @override
   Set<Column> get primaryKey => {usuarioId, notificacionId};
 }
+
+/// Solicitud de chat sin match (beneficio de Premium): el primer mensaje de
+/// una conversación sin match crea una solicitud que el receptor debe aceptar
+/// o descartar. Mientras está pendiente no se puede seguir escribiendo.
+///
+/// La fila la crea el trigger de Supabase: aquí solo se descarga y se guarda
+/// la decisión del receptor. `pendienteDeSincronizar` = mi aceptación/descarte
+/// aún no llegó al servidor.
+class SolicitudesChat extends Table {
+  TextColumn get emisorId => text()();
+  TextColumn get receptorId => text()();
+  TextColumn get estado => text().withDefault(const Constant('pendiente'))();
+  DateTimeColumn get creadoEn => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get resueltoEn => dateTime().nullable()();
+  BoolColumn get pendienteDeSincronizar =>
+      boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {emisorId, receptorId};
+}

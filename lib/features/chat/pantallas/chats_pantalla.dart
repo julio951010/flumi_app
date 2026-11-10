@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/base_datos_local/database.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
+import '../../../core/servicios/notificacion_servicio.dart';
 import '../../../widgets_comunes/avatar_usuario.dart';
 import '../../../widgets_comunes/shimmer_caja.dart';
 import '../chat_repositorio.dart';
@@ -103,13 +104,18 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
         return StreamBuilder<List<PerfilChat>>(
           stream: widget.repositorio.observarPerfiles(widget.miId),
           builder: (context, snapPerf) {
+            return StreamBuilder<List<SolicitudChatVista>>(
+              stream:
+                  widget.repositorio.observarSolicitudesPendientes(widget.miId),
+              builder: (context, snapSol) {
             final perfiles = snapPerf.data ?? const <PerfilChat>[];
-            // El vacío solo se muestra cuando no hay conversaciones NI
-            // perfiles: la sección "Personas" sigue visible con matches,
-            // aunque hayas borrado la última conversación.
+            final solicitudes = snapSol.data ?? const <SolicitudChatVista>[];
+            // El vacío solo se muestra cuando no hay conversaciones, ni
+            // perfiles, ni solicitudes pendientes.
             if (conversaciones.isEmpty &&
-                snapPerf.hasData &&
-                perfiles.isEmpty) {
+                perfiles.isEmpty &&
+                solicitudes.isEmpty &&
+                snapPerf.hasData) {
               return _vacio();
             }
             final noLeidos = conversaciones.fold<int>(
@@ -147,6 +153,13 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
                       },
                     ),
                   const SizedBox(height: 4),
+                  if (solicitudes.isNotEmpty) ...[
+                    _encabezadoSolicitudes(solicitudes.length),
+                    const SizedBox(height: 6),
+                    for (final solicitud in solicitudes)
+                      _tarjetaSolicitud(solicitud),
+                    const SizedBox(height: 10),
+                  ],
                   if (perfiles.isNotEmpty) ...[
                     _encabezadoSeccion('Personas'),
                     const SizedBox(height: 4),
@@ -165,10 +178,148 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
                 ],
               ),
             );
+              },
+            );
           },
         );
       },
     );
+  }
+
+  Widget _encabezadoSolicitudes(int total) {
+    return Row(
+      children: [
+        const Icon(Icons.mark_email_unread_outlined,
+            color: Color(0xFF6C63FF), size: 20),
+        const SizedBox(width: 6),
+        Text(
+          'Solicitudes ($total)',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF6C63FF),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Tarjeta de una solicitud de chat sin match: muestra quién escribe y su
+  /// primer mensaje, y deja aceptarla o descartarla. Aceptar la convierte en
+  /// una conversación normal; descartarla la bloquea para siempre.
+  Widget _tarjetaSolicitud(SolicitudChatVista solicitud) {
+    final usuario = solicitud.usuario;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F1FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF6C63FF).withValues(alpha: 0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              AvatarUsuario(
+                nombre: usuario.nombre,
+                fotoUrl: usuario.fotosUrls.isNotEmpty
+                    ? usuario.fotosUrls.first
+                    : null,
+                size: 44,
+                online: ChatRepositorio.estaEnLinea(usuario),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (usuario.verificadoStatus) ...[
+                          const Icon(Icons.verified,
+                              color: Colors.blueAccent, size: 14),
+                          const SizedBox(width: 3),
+                        ],
+                        Flexible(
+                          child: Text(
+                            '${usuario.nombre}, ${usuario.edad}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      solicitud.mensaje.isEmpty
+                          ? 'Quiere escribirte'
+                          : solicitud.mensaje,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _responderSolicitud(solicitud, false),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                    side: const BorderSide(color: Color(0xFFDADCE0)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: const Text('Descartar'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => _responderSolicitud(solicitud, true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6C63FF),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: const Text('Aceptar'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _responderSolicitud(
+      SolicitudChatVista solicitud, bool aceptar) async {
+    await widget.repositorio.responderSolicitud(
+      emisorId: solicitud.usuario.uuid,
+      miId: widget.miId,
+      aceptar: aceptar,
+    );
+    if (!mounted) return;
+    if (aceptar) {
+      NotificacionServicio.exito(
+        context,
+        'Solicitud aceptada. Ya puedes responder.',
+      );
+    } else {
+      NotificacionServicio.advertencia(context, 'Solicitud descartada.');
+    }
   }
 
   Widget _encabezadoSeccion(String titulo) {
@@ -337,9 +488,13 @@ class _ChatsPantallaState extends State<ChatsPantalla> {
   }
 
   Widget _fila(ResumenConversacion conv) {
-    final preview = conv.ultimoEsMio
-        ? 'T\u00fa: ${conv.ultimoMensaje}'
-        : conv.ultimoMensaje;
+    final preview = switch (conv.estadoSolicitud) {
+      'pendiente' => 'Solicitud enviada \u00b7 esperando respuesta',
+      'rechazada' => 'Solicitud descartada',
+      _ => conv.ultimoEsMio
+          ? 'T\u00fa: ${conv.ultimoMensaje}'
+          : conv.ultimoMensaje,
+    };
     return Material(
       color: const Color(0xFFF5F7FA),
       borderRadius: BorderRadius.circular(16),

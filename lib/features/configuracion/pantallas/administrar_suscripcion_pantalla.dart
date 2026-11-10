@@ -216,7 +216,7 @@ class _AdministrarSuscripcionPantallaState
           'Todo lo de Flumi Plus',
           'Perfiles ilimitados en Cerca de ti',
           'Superlikes ilimitados',
-          'Chatea sin necesidad de match',
+          'Solicitudes de chat sin match',
           'Modo invisible y filtros avanzados',
         ];
       case PlanTipo.plus:

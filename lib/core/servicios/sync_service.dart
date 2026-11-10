@@ -34,6 +34,10 @@ class SyncService {
       // El perfil primero (es la base del resto), luego el resto en paralelo
       // para que login y arranque no esperen 8 idas y vueltas en cadena.
       await _sincronizarPerfilPropio(userId, alIniciarSesion);
+      // Las decisiones de solicitudes van ANTES de subir mensajes: si acepté
+      // una solicitud y respondo sin conexión, el mensaje no debe rechazarse
+      // en el servidor por seguir la solicitud como pendiente.
+      await sincronizarSolicitudesChat(userId);
       await Future.wait([
         sincronizarSuscripciones(userId),
         sincronizarUsosDiarios(userId),
@@ -611,6 +615,77 @@ class SyncService {
     if (aBorrar.isNotEmpty) {
       await (_db.delete(_db.matches)..where((m) => m.uuid.isIn(aBorrar))).go();
     }
+  }
+
+  // ------------------------------------------------------------
+  // Solicitudes de chat (Premium sin match)
+  // ------------------------------------------------------------
+  /// Sube las decisiones locales (aceptar / descartar) y descarga las
+  /// solicitudes en las que participo. Las filas las crea el trigger del
+  /// servidor al enviar el primer mensaje sin match: RLS no permite insertarlas
+  /// desde el cliente, así que el tope diario no se puede saltar desde la API.
+  Future<void> sincronizarSolicitudesChat([String? userId]) async {
+    final miId = userId ?? _obtenerUserId();
+    if (miId == null) return;
+
+    final pendientes = await (_db.select(_db.solicitudesChat)
+          ..where((s) => s.pendienteDeSincronizar.equals(true)))
+        .get();
+    for (final s in pendientes) {
+      try {
+        await sb.Supabase.instance.client
+            .from('chat_solicitudes')
+            .update({
+              'estado': s.estado,
+              'resuelto_en': (s.resueltoEn ?? DateTime.now())
+                  .toUtc()
+                  .toIso8601String(),
+            })
+            .eq('emisor_id', s.emisorId)
+            .eq('receptor_id', s.receptorId)
+            .timeout(const Duration(seconds: 8));
+        await (_db.update(_db.solicitudesChat)
+              ..where((x) =>
+                  x.emisorId.equals(s.emisorId) &
+                  x.receptorId.equals(s.receptorId)))
+            .write(const SolicitudesChatCompanion(
+                pendienteDeSincronizar: Value(false)));
+      } catch (_) {}
+    }
+
+    if (kUsarServidorLocal) return;
+    try {
+      final remoto = await sb.Supabase.instance.client
+          .from('chat_solicitudes')
+          .select()
+          .or('emisor_id.eq.$miId,receptor_id.eq.$miId')
+          .timeout(const Duration(seconds: 10));
+      final locales = {
+        for (final s in await _db.select(_db.solicitudesChat).get())
+          '${s.emisorId}|${s.receptorId}': s
+      };
+      final filas = <SolicitudesChatCompanion>[];
+      for (final fila in (remoto as List)) {
+        final f = fila as Map<String, dynamic>;
+        final emisor = f['emisor_id'] as String;
+        final receptor = f['receptor_id'] as String;
+        // Una decisión local aún sin subir manda sobre el estado remoto.
+        final local = locales['$emisor|$receptor'];
+        if (local != null && local.pendienteDeSincronizar) continue;
+        filas.add(SolicitudesChatCompanion.insert(
+          emisorId: emisor,
+          receptorId: receptor,
+          estado: Value((f['estado'] as String?) ?? 'pendiente'),
+          creadoEn:
+              Value(PerfilMapeo.parsearFecha(f['creado_en']) ?? DateTime.now()),
+          resueltoEn: Value(PerfilMapeo.parsearFecha(f['resuelto_en'])),
+        ));
+      }
+      if (filas.isNotEmpty) {
+        await _db.batch((batch) =>
+            batch.insertAllOnConflictUpdate(_db.solicitudesChat, filas));
+      }
+    } catch (_) {}
   }
 
   // ------------------------------------------------------------
