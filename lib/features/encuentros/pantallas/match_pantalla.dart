@@ -68,7 +68,7 @@ class _MatchPantallaState extends State<MatchPantalla>
       _toast('Escribe un mensaje para empezar a hablar');
       return;
     }
-    if (widget.suscripcionServicio.esGratis) {
+    if (widget.suscripcionServicio.chatBloqueado) {
       if (!mounted) return;
       mostrarBloqueoSuscripcion(
         context,

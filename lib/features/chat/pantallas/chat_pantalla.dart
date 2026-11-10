@@ -383,7 +383,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
       }
       return;
     }
-    if (!suscripcion.esGratis) {
+    if (!suscripcion.chatBloqueado) {
       final texto = _mensajeCtrl.text.trim();
       if (texto.isEmpty) return;
       final replyTo = _respondiendoA?.uuid;
@@ -1172,14 +1172,14 @@ class _ChatPantallaState extends State<ChatPantalla> {
         ),
       );
     }
-    final bool esGratis = widget.suscripcionServicio.esGratis;
+    final bool bloqueado = widget.suscripcionServicio.chatBloqueado;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           GestureDetector(
-            onTap: esGratis
+            onTap: bloqueado
                 ? null
                 : () => setState(() {
                       _panelEmojisAbierto = !_panelEmojisAbierto;
@@ -1188,7 +1188,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: esGratis
+                color: bloqueado
                     ? Colors.grey[100]
                     : (_panelEmojisAbierto
                         ? FlumiTema.colorPrimario.withValues(alpha: 0.12)
@@ -1199,7 +1199,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 _panelEmojisAbierto
                     ? Icons.keyboard_alt_outlined
                     : Icons.emoji_emotions_outlined,
-                color: esGratis
+                color: bloqueado
                     ? Colors.grey[400]
                     : (_panelEmojisAbierto
                         ? FlumiTema.colorPrimario
@@ -1222,9 +1222,9 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 textInputAction: TextInputAction.send,
                 onChanged: _alCambiarTexto,
                 onSubmitted: (_) => _enviar(),
-                enabled: !esGratis,
+                enabled: !bloqueado,
                 decoration: InputDecoration(
-                  hintText: esGratis
+                  hintText: bloqueado
                       ? 'Actualiza a Plus/Premium para enviar mensajes'
                       : 'Escribe un mensaje...',
                   hintStyle: TextStyle(color: Colors.grey[400], fontSize: 15),
@@ -1237,17 +1237,17 @@ class _ChatPantallaState extends State<ChatPantalla> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: esGratis ? null : _enviar,
+            onTap: bloqueado ? null : _enviar,
             child: Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: esGratis ? Colors.grey[300] : FlumiTema.colorPrimario,
+                color: bloqueado ? Colors.grey[300] : FlumiTema.colorPrimario,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.send,
-                color: esGratis ? Colors.grey[500] : Colors.white,
+                color: bloqueado ? Colors.grey[500] : Colors.white,
                 size: 20,
               ),
             ),

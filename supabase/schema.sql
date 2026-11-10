@@ -1456,6 +1456,7 @@ values
   ('push_url', 'https://gzozmebdrsdcupgvxuiv.supabase.co/functions/v1/enviar-push', 'push'),
   ('push_secret', 'HdSAjqJCMFko7DvLUblIigVBmx1eGNX8', 'push'),
   ('suscripciones_habilitadas', 'true', 'feature'),
+  ('mensajes_requieren_plus', 'false', 'feature'),
   ('mantenimiento', 'false', 'feature'),
   ('mantenimiento_mensaje', 'Estamos mejorando Flumi para ti. Vuelve en unos minutos.', 'feature'),
   ('version_minima_build', '1', 'feature'),
@@ -2563,11 +2564,19 @@ begin
                  or (b.bloqueador_id = new.emisor_id and b.bloqueado_id = new.receptor_id)) then
     raise exception 'No puedes enviar mensajes a este usuario';
   end if;
-  -- Solo Plus/Premium envian mensajes a otros usuarios regulares (gratis no).
+  -- Cobro del chat: se controla en caliente con
+  -- app_config.mensajes_requieren_plus. Por defecto false: el chat es gratis
+  -- y se monetiza el descubrimiento (ver likes/visitas, filtros, boosts).
+  -- Con 'true', un plan gratis no puede enviar ni responder (Plus/Premium sí).
   -- Responder a cuentas oficiales/sistema queda permitido para cualquier plan.
   if new.emisor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f')
      and new.receptor_id not in ('00000000-0000-0000-0000-00000000000a','00000000-0000-0000-0000-00000000000f') then
-    if public.plan_efectivo(new.emisor_id) = 'gratis' then
+    if coalesce(
+         (select lower(valor) = 'true'
+            from public.app_config
+           where clave = 'mensajes_requieren_plus'),
+         false)
+       and public.plan_efectivo(new.emisor_id) = 'gratis' then
       raise exception 'Plan insuficiente para enviar mensajes';
     end if;
   end if;

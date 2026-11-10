@@ -29,7 +29,6 @@ class LimitesPlan {
   final bool ocultarEnLinea;
   final bool ocultarPerfilFueraEdad;
   final bool visibilidadSelectiva;
-  final bool filtrosMensajes;
 
   const LimitesPlan({
     required this.meGustasPorDia,
@@ -47,7 +46,6 @@ class LimitesPlan {
     required this.ocultarEnLinea,
     required this.ocultarPerfilFueraEdad,
     required this.visibilidadSelectiva,
-    required this.filtrosMensajes,
   });
 
   factory LimitesPlan.gratis() => const LimitesPlan(
@@ -66,7 +64,6 @@ class LimitesPlan {
         ocultarEnLinea: false,
         ocultarPerfilFueraEdad: false,
         visibilidadSelectiva: false,
-        filtrosMensajes: false,
       );
 
   factory LimitesPlan.plus() => const LimitesPlan(
@@ -85,7 +82,6 @@ class LimitesPlan {
         ocultarEnLinea: false,
         ocultarPerfilFueraEdad: true,
         visibilidadSelectiva: false,
-        filtrosMensajes: false,
       );
 
   factory LimitesPlan.premium() => const LimitesPlan(
@@ -104,7 +100,6 @@ class LimitesPlan {
         ocultarEnLinea: true,
         ocultarPerfilFueraEdad: true,
         visibilidadSelectiva: true,
-        filtrosMensajes: true,
       );
 }
 
@@ -172,6 +167,15 @@ class SuscripcionServicio with ChangeNotifier {
   UsosDiario? get usosHoy => _usosHoy;
 
   bool get suscripcionesHabilitadas => _suscripcionesHabilitadas;
+
+  /// Independiente del kill-switch: si es `true`, el chat exige Plus/Premium.
+  /// Si es `false`, el chat es gratis para todos (regla de match aparte).
+  bool get mensajesRequierenPlus =>
+      _configRemota?.mensajesRequierenPlus ?? false;
+
+  /// true si este usuario no puede enviar mensajes por su plan actual.
+  /// Tener en cuenta que `esGratis` ya contempla admin y kill-switch.
+  bool get chatBloqueado => esGratis && mensajesRequierenPlus;
 
   LimitesPlan get limites {
     if (!_suscripcionesHabilitadas) return LimitesPlan.premium();

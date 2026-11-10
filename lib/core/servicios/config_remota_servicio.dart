@@ -18,6 +18,7 @@ class ConfigRemotaServicio extends ChangeNotifier {
 
   final SupabaseClient? _client;
   bool _suscripcionesHabilitadas = true;
+  bool _mensajesRequierenPlus = false;
   bool _enMantenimiento = false;
   String _mensajeMantenimiento = '';
   int _versionMinimaBuild = 1;
@@ -39,6 +40,9 @@ class ConfigRemotaServicio extends ChangeNotifier {
   RealtimeChannel? _channel;
 
   bool get suscripcionesHabilitadas => _suscripcionesHabilitadas;
+  /// Independiente del kill-switch de suscripciones: si es `true`, el chat
+  /// exige Plus/Premium; si es `false`, el chat es gratis para todos.
+  bool get mensajesRequierenPlus => _mensajesRequierenPlus;
   bool get enMantenimiento => _enMantenimiento;
   String get mensajeMantenimiento => _mensajeMantenimiento;
   String get actualizarUrl => _actualizarUrl;
@@ -117,6 +121,7 @@ class ConfigRemotaServicio extends ChangeNotifier {
             'clave',
             const [
               'suscripciones_habilitadas',
+              'mensajes_requieren_plus',
               'mantenimiento',
               'mantenimiento_mensaje',
               'version_minima_build',
@@ -148,6 +153,12 @@ class ConfigRemotaServicio extends ChangeNotifier {
             final nuevo = valor.toLowerCase() == 'true';
             if (_suscripcionesHabilitadas != nuevo) {
               _suscripcionesHabilitadas = nuevo;
+              cambio = true;
+            }
+          case 'mensajes_requieren_plus':
+            final nuevo = valor.toLowerCase() == 'true';
+            if (_mensajesRequierenPlus != nuevo) {
+              _mensajesRequierenPlus = nuevo;
               cambio = true;
             }
           case 'mantenimiento':

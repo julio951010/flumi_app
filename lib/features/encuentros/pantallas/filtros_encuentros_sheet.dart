@@ -1577,6 +1577,10 @@ class SuscripcionServicioMock with ChangeNotifier implements SuscripcionServicio
   @override
   bool get suscripcionesHabilitadas => true;
   @override
+  bool get mensajesRequierenPlus => false;
+  @override
+  bool get chatBloqueado => false;
+  @override
   bool get meGustasDisponiblesHoy => true;
   @override
   bool get superlikesDisponiblesHoy => true;
