@@ -689,26 +689,11 @@ class _CercaDeTiPantallaState extends State<CercaDeTiPantalla> {
       _idsRecibidos.contains(usuario.uuid);
 
   void _abrirChat(Usuario usuario) {
-    if (!_suscripcion.tienePremium && !_tieneMatch(usuario)) {
-      mostrarBloqueoSuscripcion(
+    // El servidor exige match para chatear (sin excepción de plan).
+    if (!_tieneMatch(usuario)) {
+      NotificacionServicio.advertencia(
         context,
-        funcionalidad: 'Enviar mensaje',
-        planMinimo: PlanTipo.premium,
-        descripcion:
-            'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
-        onSuscribir: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const DetallePlanPantalla(
-              nombre: 'Flumi Premium',
-              periodo: 'mensual',
-              precio: '500 cup',
-              icono: Icons.workspace_premium,
-              detalle: 'Acceso total',
-              destacado: false,
-            ),
-          ),
-        ),
+        'Solo puedes chatear con tus matches.',
       );
       return;
     }

@@ -47,5 +47,21 @@ void main() {
       expect(sql, contains('function public.validar_envio_mensaje('));
       expect(sql, contains('No hay match'));
     });
+
+    test('no se promete chatear sin match (el servidor lo exige)', () {
+      for (final ruta in [
+        'lib/features/encuentros/pantallas/me_gusta_pantalla.dart',
+        'lib/features/encuentros/pantallas/encuentros_pantalla.dart',
+        'lib/features/encuentros/pantallas/cerca_de_ti_pantalla.dart',
+        'lib/features/perfiles/pantallas/detalle_plan_pantalla.dart',
+        'lib/features/configuracion/pantallas/administrar_suscripcion_pantalla.dart',
+      ]) {
+        expect(
+          File(ruta).readAsStringSync().contains('sin necesidad de match'),
+          isFalse,
+          reason: 'Promesa falsa en $ruta',
+        );
+      }
+    });
   });
 }

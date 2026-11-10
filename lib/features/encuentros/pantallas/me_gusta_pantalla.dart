@@ -497,29 +497,15 @@ class _MeGustaPantallaState extends State<MeGustaPantalla>
   }
 
   void _abrirChat(Usuario usuario) {
-    if (!widget.suscripcionServicio.tienePremium &&
-        !(_idsMatchTabla.contains(usuario.uuid) ||
-            (_idsGustados.contains(usuario.uuid) &&
-                _idsRecibidos.contains(usuario.uuid)))) {
-      mostrarBloqueoSuscripcion(
+    // El servidor exige match para chatear (sin excepción de plan). Si no
+    // hay match, no se abre el chat en vez de prometer algo que fallará.
+    final hayMatch = _idsMatchTabla.contains(usuario.uuid) ||
+        (_idsGustados.contains(usuario.uuid) &&
+            _idsRecibidos.contains(usuario.uuid));
+    if (!hayMatch) {
+      NotificacionServicio.advertencia(
         context,
-        funcionalidad: 'Enviar mensaje',
-        planMinimo: PlanTipo.premium,
-        descripcion:
-            'Solo puedes chatear con personas con las que tengas match. Con Flumi Premium puedes enviar mensajes sin necesidad de match.',
-        onSuscribir: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const DetallePlanPantalla(
-              nombre: 'Flumi Premium',
-              periodo: 'mensual',
-              precio: '500 cup',
-              icono: Icons.workspace_premium,
-              detalle: 'Acceso total',
-              destacado: false,
-            ),
-          ),
-        ),
+        'Solo puedes chatear con tus matches.',
       );
       return;
     }
