@@ -583,6 +583,7 @@ create policy "usuario_registra_sus_visitas"
 -- Lectura propia de los likes que yo di (escritura solo por RPC
 -- registrar_me_gusta; el cliente ya no inserta/actualiza directo).
 drop policy if exists "usuario_gestiona_sus_likes" on public.historial_likes;
+drop policy if exists "usuario_lee_sus_likes" on public.historial_likes;
 create policy "usuario_lee_sus_likes"
   on public.historial_likes for select
   using (auth.uid() = usuario_id);
