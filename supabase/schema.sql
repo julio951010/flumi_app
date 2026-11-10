@@ -2651,9 +2651,9 @@ returns setof public.profiles
 language sql
 stable
 security definer set search_path = public
-as 
+as $$
   select * from public.profiles where id = auth.uid();
-;
+$$;
 
 revoke all on function public.obtener_mi_perfil() from public;
 grant execute on function public.obtener_mi_perfil() to authenticated;
