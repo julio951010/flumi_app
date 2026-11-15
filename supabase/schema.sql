@@ -1212,14 +1212,14 @@ begin
     return;
   end if;
 
-  select coalesce(busca_genero, 'otro'),
-         coalesce(preferencia_edad_min, 18),
-         coalesce(preferencia_edad_max, 99),
-         coalesce(genero, ''),
-         coalesce(edad, 18)
+  select coalesce(p.busca_genero, 'otro'),
+         coalesce(p.preferencia_edad_min, 18),
+         coalesce(p.preferencia_edad_max, 99),
+         coalesce(p.genero, ''),
+         coalesce(p.edad, 18)
     into busca, p_min, p_max, mi_genero, mi_edad
-    from public.profiles
-   where id = yo;
+    from public.profiles p
+   where p.id = yo;
 
   gen_extra := (select array_agg(e)
                   from jsonb_array_elements_text(filtros -> 'generos') as e);
