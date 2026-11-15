@@ -17,7 +17,7 @@ class ActualizadorShorebirdServicio {
       ActualizadorShorebirdServicio._();
 
   final _updater = ShorebirdUpdater();
-  bool habilitado = false;
+  bool habilitado = true;
 
   /// Comprueba y descarga un parche en segundo plano. Al reiniciar la app
   /// se aplica automáticamente.

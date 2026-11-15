@@ -1,0 +1,7 @@
+{
+  "version": "1.0.2",
+  "build": 3,
+  "apk_url": "https://TU_SERVIDOR/flumi_1.0.2+3.apk",
+  "changelog": "Mejoras de ubicación por defecto, permisos y actualizador in-app.",
+  "obligatoria": false
+}
