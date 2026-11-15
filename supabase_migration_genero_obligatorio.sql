@@ -17,7 +17,7 @@
 -- ============================================================
 
 -- Perfiles que hoy están sin género (hay que pedirles que lo completen).
-select id, nombre, created_at
+select id, nombre, genero, creado_en
   from public.profiles
  where coalesce(trim(genero), '') = '';
 
