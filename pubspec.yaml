@@ -29,6 +29,9 @@ dependencies:
 
   # --- HTTP para servidor local ---
   http: ^1.2.0
+  in_app_update: ^4.2.3
+  open_filex: ^4.7.0
+  shorebird_code_push: ^2.0.5
 
   # --- Abrir URL de descarga (actualización obligatoria) ---
   url_launcher: ^6.3.1

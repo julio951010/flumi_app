@@ -24,6 +24,9 @@ import 'core/servicios/ubicacion_auto_servicio.dart';
 import 'core/utilidades/app_log.dart';
 import 'core/utilidades/notificacion_navegador.dart';
 import 'widgets_comunes/shimmer_caja.dart';
+import 'core/servicios/actualizador_app_servicio.dart';
+import 'core/servicios/actualizador_play_servicio.dart';
+import 'core/servicios/actualizador_shorebird_servicio.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/pantallas/codigo_verificacion_pantalla.dart';
 import 'features/auth/pantallas/login_pantalla.dart';
@@ -354,6 +357,30 @@ bool _esperandoSincronizacion = false;
     setState(() {});
   }
 
+  void _comprobarActualizacion() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = rootNavigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      // 1. Actualizador in-app por APK (reutiliza config remota).
+      try {
+        if (configRemota.necesitaActualizar &&
+            configRemota.actualizarUrl.isNotEmpty) {
+          unawaited(
+            ActualizadorAppServicio.instancia.comprobarYMostrarUrl(
+              ctx,
+              apkUrl: configRemota.actualizarUrl,
+              mensaje: configRemota.mensajeActualizar,
+            ),
+          );
+        }
+      } catch (_) {}
+      // 2. Play In-App Update (solo si está en Play Store).
+      unawaited(ActualizadorPlayServicio.instancia.comprobarYActualizar(ctx));
+      // 3. Shorebird code push (solo si está configurado).
+      unawaited(ActualizadorShorebirdServicio.instancia.comprobarYParchear());
+    });
+  }
+
   void _iniciar() {
     _autenticado = authService.estaAutenticado;
     authService.estadoStream.listen((estado) async {
@@ -376,6 +403,7 @@ bool _esperandoSincronizacion = false;
               _esperandoSincronizacion = false;
             });
             _formCtrl.forward();
+            _comprobarActualizacion();
             return;
           }
           _syncArranqueHecho = true;
@@ -387,12 +415,14 @@ bool _esperandoSincronizacion = false;
           await _sincronizarArranqueConTope(idSesion);
           await _verificarPerfilCompletado(idSesion);
           unawaited(registrarTokenPush());
+          _comprobarActualizacion();
           _terminarEsperaSincronizacion();
           return;
         }
         await _sincronizarArranqueConTope(idSesion);
         await _verificarPerfilCompletado(idSesion);
         unawaited(registrarTokenPush());
+        _comprobarActualizacion();
       }
       if (estado.event == 'SIGNED_OUT') {
         unawaited(eliminarTokenPush());

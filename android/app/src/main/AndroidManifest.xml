@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.READ_SMS"/>
     <!-- Cámara frontal embebida (verificación) -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
     <application
