@@ -101,6 +101,30 @@ create trigger profiles_sync_ubicacion
   for each row execute function public.sync_ubicacion();
 
 -- ------------------------------------------------------------
+-- El GÉNERO es obligatorio. La fila del perfil nace con el registro (aún sin
+-- género), así que no se puede exigir en el INSERT; lo que se impide es
+-- BORRARLO después. Sin género, `cumple_genero` nunca coincide y el perfil
+-- se vuelve invisible para quien busca un género concreto, sin aviso.
+-- ------------------------------------------------------------
+create or replace function public.validar_genero_perfil()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(trim(new.genero), '') = ''
+     and coalesce(trim(old.genero), '') <> '' then
+    raise exception 'El genero no puede quedar vacio';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_genero_obligatorio on public.profiles;
+create trigger profiles_genero_obligatorio
+  before update on public.profiles
+  for each row execute function public.validar_genero_perfil();
+
+-- ------------------------------------------------------------
 -- MATCHES
 -- ------------------------------------------------------------
 create table if not exists public.matches (

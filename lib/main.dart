@@ -36,6 +36,7 @@ import 'features/onboarding/onboarding_servicio.dart';
 import 'features/onboarding/pantallas/onboarding_pantalla.dart';
 import 'features/onboarding/pantallas/onboarding_perfil_pantalla.dart';
 import 'features/onboarding/pantallas/cuestionario_perfil_pantalla.dart';
+import 'features/onboarding/pantallas/genero_obligatorio_pantalla.dart';
 import 'features/encuentros/pantallas/cerca_de_ti_pantalla.dart';
 import 'features/encuentros/pantallas/encuentros_pantalla.dart';
 import 'features/encuentros/pantallas/filtros_encuentros_sheet.dart';
@@ -278,6 +279,9 @@ class _InicioRouterState extends State<_InicioRouter>
   bool _recoveryMode = false;
   bool _perfilCompletado = true;
   bool _mostrarCuestionario = false;
+
+  /// Perfil sin género: se bloquea el acceso al feed hasta completarlo.
+  bool _requiereGenero = false;
   bool _syncArranqueHecho = false;
 
   /// True mientras el usuario ya tiene sesión (login OK o sesión restaurada)
@@ -601,7 +605,10 @@ bool _esperandoSincronizacion = false;
       );
       final propio = await perfilRepositorio.obtenerPerfilPropio();
       if (mounted) {
-        setState(() => _perfilCompletado = propio?.perfilCompletado ?? false);
+        setState(() {
+          _perfilCompletado = propio?.perfilCompletado ?? false;
+          _requiereGenero = _sinGenero(propio);
+        });
       }
     } catch (e) {
       // Antes, cualquier falla/timeout de red acá (muy común con la
@@ -615,13 +622,22 @@ bool _esperandoSincronizacion = false;
       try {
         final propio = await perfilRepositorio.obtenerPerfilPropio();
         if (mounted) {
-          setState(() => _perfilCompletado = propio?.perfilCompletado ?? false);
+          setState(() {
+            _perfilCompletado = propio?.perfilCompletado ?? false;
+            _requiereGenero = _sinGenero(propio);
+          });
         }
       } catch (_) {
         if (mounted) setState(() => _perfilCompletado = false);
       }
     }
   }
+
+  /// `true` si el perfil existe pero no tiene género. Sin género el perfil es
+  /// invisible para quien busca un género concreto, así que se bloquea el
+  /// acceso al feed hasta completarlo.
+  bool _sinGenero(Usuario? propio) =>
+      propio != null && propio.genero.trim().isEmpty;
 
   Widget _buildPaginaAuth() {
     // Gates remotos (admin_flumi): mantenimiento bloquea todo; versión
@@ -698,6 +714,18 @@ bool _esperandoSincronizacion = false;
                   pendienteDeSincronizar: Value(true)));
           setState(() => _mostrarCuestionario = true);
           _verificarPerfilCompletado(uuid);
+        },
+      );
+    }
+    // El género es obligatorio: sin él el perfil no aparece en el feed de
+    // quien busca un género concreto. Se pide antes de dejar entrar.
+    if (_requiereGenero) {
+      return GeneroObligatorioPantalla(
+        repositorio: perfilRepositorio,
+        onListo: () {
+          setState(() => _requiereGenero = false);
+          unawaited(_verificarPerfilCompletado());
+          unawaited(syncService.sincronizarPerfil());
         },
       );
     }

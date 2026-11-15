@@ -125,4 +125,54 @@ void main() {
       );
     });
   });
+
+  group('Género obligatorio', () {
+    final schema = File('supabase/schema.sql').readAsStringSync();
+
+    test('el servidor no deja borrar un género ya definido', () {
+      expect(schema, contains('function public.validar_genero_perfil('));
+      expect(schema, contains("raise exception 'El genero no puede quedar vacio'"));
+      expect(schema, contains('before update on public.profiles'));
+    });
+
+    test('sin género el perfil es invisible (motivo del bloqueo)', () {
+      // cumple_genero nunca coincide con un género vacío: no es un bug, es la
+      // razón por la que el dato pasa a ser obligatorio.
+      expect(
+        schema,
+        contains("then normalizar_genero(genero) in ('mujer', 'mujertrans')"),
+      );
+    });
+
+    test('la app bloquea el acceso hasta completar el género', () {
+      expect(
+        File('lib/features/onboarding/pantallas/genero_obligatorio_pantalla.dart')
+            .existsSync(),
+        isTrue,
+      );
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main, contains('_requiereGenero'));
+      expect(main, contains('GeneroObligatorioPantalla('));
+      expect(main, contains('_sinGenero'));
+    });
+
+    test('el porcentaje de perfil cuenta el género', () {
+      expect(
+        File('lib/features/perfiles/perfil_completado.dart').readAsStringSync(),
+        contains('p.genero.trim().isNotEmpty'),
+      );
+    });
+
+    test('la migración y el diagnóstico existen', () {
+      final migracion = File('supabase_migration_genero_obligatorio.sql');
+      expect(migracion.existsSync(), isTrue);
+      expect(
+        migracion.readAsStringSync(),
+        contains('function public.validar_genero_perfil('),
+      );
+      final diagnostico = File('supabase_diagnostico_feed.sql');
+      expect(diagnostico.existsSync(), isTrue);
+      expect(diagnostico.readAsStringSync(), contains('public.perfiles_cercanos('));
+    });
+  });
 }
