@@ -1161,7 +1161,7 @@ create or replace function public.perfiles_cercanos(
   radio_metros int default 20000,
   filtros jsonb default '{}'::jsonb,
   desde int default 0,
-  cuantos int default 10
+  cuantos int default 50
 )
 returns table (
   id uuid,
@@ -1231,7 +1231,6 @@ declare
   orden text := 'distancia';
   clausulas text := '';
   ordenar text := '';
-  -- Datos propios para exigir reciprocidad (como Tinder/Bumble).
   mi_genero text := '';
   mi_edad int := 18;
 begin
@@ -1258,35 +1257,25 @@ begin
   ampliar := coalesce((filtros ->> 'ampliar')::boolean, false);
   orden := coalesce(filtros ->> 'orden', 'distancia');
 
-  -- Reciprocidad: el perfil solo aparece si YO también cumplo lo que esa
-  -- persona busca. No se relaja con "ampliar" (ampliar solo suelta
-  -- distancia/ciudad/edad propios): nadie debe ver ni gastar un Me Gusta
-  -- en alguien que declaró no buscar su género.
-  -- 'otro' y 'prefiero_no_decirlo' se siguen tolerando aquí solo por filas
-  -- antiguas o versiones viejas del APK; la app ya no los ofrece y la
-  -- migración de datos los convierte a 'todos'.
   if coalesce(mi_genero, '') <> '' then
     clausulas := clausulas || format(
-      $f$and (coalesce(p.busca_genero, '') in ('', 'todos', 'ambos', 'otro', 'prefiero_no_decirlo')
+      'and (coalesce(p.busca_genero, '''') in ('''', ''todos'', ''ambos'', ''otro'', ''prefiero_no_decirlo'')
               or exists (
                 select 1
-                  from unnest(string_to_array(coalesce(p.busca_genero, ''), ',')) as op(opcion)
+                  from unnest(string_to_array(coalesce(p.busca_genero, ''''), '','')) as op(opcion)
                  where public.cumple_genero(op.opcion, %L)
-              )) $f$, mi_genero);
+              )) ',
+      mi_genero);
   end if;
 
   clausulas := clausulas || format(
-    $f$and coalesce(p.preferencia_edad_min, 18) <= %s
-        and coalesce(p.preferencia_edad_max, 99) >= %s $f$, mi_edad, mi_edad);
+    'and coalesce(p.preferencia_edad_min, 18) <= %s
+        and coalesce(p.preferencia_edad_max, 99) >= %s ',
+    mi_edad, mi_edad);
 
   if radio_metros >= 0 then
-    clausulas := clausulas || format(
-      'and ST_DWithin(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4) ');
-  end if;
-
-  if coalesce(busca, '') not in ('', 'todos', 'ambos', 'prefiero_no_decirlo', 'otro') then
     clausulas := clausulas ||
-      'and exists (select 1 from unnest(string_to_array($5, '','')) as opciones(opcion) where public.cumple_genero(opciones.opcion, p.genero)) ';
+      'and ST_DWithin(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, $4) ';
   end if;
 
   if gen_extra is not null and cardinality(gen_extra) > 0 then
@@ -1300,8 +1289,7 @@ begin
   end if;
 
   if not ampliar and en_linea then
-    clausulas := clausulas ||
-      'and p.ocultar_en_linea = false and p.ultima_conexion > now() - interval ''5 minutes'' ';
+    clausulas := clausulas || 'and p.ocultar_en_linea = false and p.ultima_conexion > now() - interval ''5 minutes'' ';
   end if;
 
   if not ampliar and verificado then
@@ -1319,33 +1307,29 @@ begin
     ordenar := 'order by ST_Distance(p.ubicacion, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography) asc, p.id asc';
   end if;
 
-   return query execute format(
-     'select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion from public.profiles p
+  return query execute format(
+    $q$select p.id, p.nombre, p.edad, null::date as fecha_nacimiento, p.biografia, p.fotos_urls, p.preferencia_edad_min, p.preferencia_edad_max, p.genero, p.busca_genero, p.que_busca, p.ciudad, 0::double precision as ubicacion_lat, 0::double precision as ubicacion_lon, null::geography as ubicacion, p.verificado_status, 0::int as score_popularidad, p.ocultar_en_linea, p.ocultar_edad, p.perfil_completado, ''::text as orientacion_sexual, p.situacion_sentimental, p.intereses, p.altura, p.educacion, p.trabajo, p.profesion, p.preferencia_relacion, p.bebe, p.fuma, p.hijos, p.personalidad, p.signo_zodiaco, p.mascotas, ''::text as religion, p.idiomas, p.tatuajes, p.preguntas_perfil, ''::text as foto_verificacion, p.gesto_verificacion, case when p.ocultar_en_linea then null else p.ultima_conexion end as ultima_conexion, p.creado_en, p.ocultar_perfil, p.ocultar_visitas, false as is_admin, false as suspendido, p.ocultar_ubicacion from public.profiles p
       where p.ubicacion is not null
         and p.id <> $1
         and p.ocultar_perfil = false
         and coalesce(p.suspendido, false) = false
-        and p.id not in (''00000000-0000-0000-0000-00000000000a'', ''00000000-0000-0000-0000-00000000000f'')
+        and p.id not in ('00000000-0000-0000-0000-00000000000a'::uuid, '00000000-0000-0000-0000-00000000000f'::uuid)
         %s
          and not exists (select 1 from public.blocks b
                          where (b.bloqueador_id = $1 and b.bloqueado_id = p.id)
                             or (b.bloqueador_id = p.id and b.bloqueado_id = $1))
-         -- Reportado y pendiente de revisión: no sale en el feed del
-         -- reportante (si el admin lo desestima, vuelve a salir).
          and not exists (select 1 from public.reports r
                          where r.reportante_id = $1 and r.reportado_id = p.id
                            and coalesce(r.revisado, false) = false)
-        -- Sin veto permanente por nopes: el rechazo solo ordena/recicla en
-        -- el cliente (VotosServicio.componerDeck) y el Deshacer borra la fila.
-        -- El abuso por ciclado nope/deshacer ya lo frena el cupo de Deshacer.
-        and not exists (select 1 from public.historial_likes h
+         and not exists (select 1 from public.historial_likes h
                         where h.usuario_id = $1 and h.usuario_likeado_id = p.id)
      %s
-     limit $10 offset $11',
+     limit $10 offset $11$q$,
     clausulas, ordenar)
     using yo, lat, lon, radio_metros, busca, gen_extra, e_min, e_max, ciudad, cuantos, desde;
 end;
 $$;
+
 
 -- ============================================================
 -- REALTIME: tablas publicadas para actualizaciones en vivo
