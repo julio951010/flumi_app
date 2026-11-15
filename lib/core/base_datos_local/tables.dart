@@ -64,14 +64,16 @@ class Usuarios extends Table {
   IntColumn get preferenciaEdadMax => integer().withDefault(const Constant(99))();
 
   TextColumn get genero => text()();
-  TextColumn get buscaGenero => text()();
-  TextColumn get queBusca => text().withDefault(const Constant(''))();
+  TextColumn get buscaGenero => text().withDefault(const Constant('todos'))();
+  TextColumn get queBusca => text().withDefault(const Constant('abierto_a_lo_que_surja'))();
 
   DateTimeColumn get fechaNacimiento => dateTime().nullable()();
   TextColumn get ciudad => text().withDefault(const Constant(''))();
 
-  RealColumn get ubicacionLat => real().withDefault(const Constant(0.0))();
-  RealColumn get ubicacionLon => real().withDefault(const Constant(0.0))();
+  RealColumn get ubicacionLat => real().withDefault(const Constant(23.1136))();
+  RealColumn get ubicacionLon => real().withDefault(const Constant(-82.3666))();
+  /// true si las coordenadas son las de La Habana por defecto (no GPS real).
+  BoolColumn get ubicacionPorDefecto => boolean().withDefault(const Constant(true))();
 
   DateTimeColumn get ultimaSincronizacionTimestamp => dateTime().nullable()();
 

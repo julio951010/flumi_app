@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' hide Column, isNull;
 
 import 'package:Flumi/core/base_datos_local/database.dart';
 import 'package:Flumi/core/servicios/sync_service.dart';
@@ -108,7 +109,7 @@ void main() {
             nombre: 'Ana',
             edad: 30,
             genero: 'Mujer',
-            buscaGenero: 'Hombre',
+            buscaGenero: const Value('Hombre'),
           ));
       await _ponerTamano(tester, size);
 

@@ -28,15 +28,28 @@ class PerfilMapeo {
       nombre: (p['nombre'] as String?) ?? '',
       edad: edad,
       genero: (p['genero'] as String?) ?? 'otro',
-      buscaGenero: (p['busca_genero'] as String?) ?? 'otro',
+      buscaGenero: Value((p['busca_genero'] as String?) ?? 'todos'),
       biografia: Value((p['biografia'] as String?) ?? ''),
-      queBusca: Value((p['que_busca'] as String?) ?? ''),
+      queBusca: Value((p['que_busca'] as String?) ?? 'abierto_a_lo_que_surja'),
       preferenciaEdadMin: Value(aInt(p['preferencia_edad_min'], 18)),
       preferenciaEdadMax: Value(aInt(p['preferencia_edad_max'], 99)),
       fechaNacimiento: Value(fechaNac),
       ciudad: Value((p['ciudad'] as String?) ?? ''),
-      ubicacionLat: Value(aDouble(p['ubicacion_lat'], 0.0)),
-      ubicacionLon: Value(aDouble(p['ubicacion_lon'], 0.0)),
+      ubicacionLat: Value(esPropio
+          ? (aDouble(p['ubicacion_lat'], 0.0) == 0
+              ? 23.1136
+              : aDouble(p['ubicacion_lat'], 0.0))
+          : aDouble(p['ubicacion_lat'], 0.0)),
+      ubicacionLon: Value(esPropio
+          ? (aDouble(p['ubicacion_lon'], 0.0) == 0
+              ? -82.3666
+              : aDouble(p['ubicacion_lon'], 0.0))
+          : aDouble(p['ubicacion_lon'], 0.0)),
+      ubicacionPorDefecto: Value(esPropio
+          ? aBool(p['ubicacion_por_defecto'],
+              aDouble(p['ubicacion_lat'], 0.0) == 0 &&
+                  aDouble(p['ubicacion_lon'], 0.0) == 0)
+          : false),
       ultimaConexion: Value(parsearFecha(p['ultima_conexion'])),
       ocultarEnLinea: Value(aBool(p['ocultar_en_linea'], false)),
       ocultarEdad: Value(aBool(p['ocultar_edad'], false)),
@@ -98,12 +111,17 @@ class PerfilMapeo {
       preferenciaEdadMin: aInt(p['preferencia_edad_min'], 18),
       preferenciaEdadMax: aInt(p['preferencia_edad_max'], 99),
       genero: (p['genero'] as String?) ?? 'otro',
-      buscaGenero: (p['busca_genero'] as String?) ?? 'otro',
-      queBusca: (p['que_busca'] as String?) ?? '',
+      buscaGenero: (p['busca_genero'] as String?) ?? 'todos',
+      queBusca: (p['que_busca'] as String?) ?? 'abierto_a_lo_que_surja',
       fechaNacimiento: fechaNac,
       ciudad: (p['ciudad'] as String?) ?? '',
       ubicacionLat: aDouble(p['ubicacion_lat'], 0.0),
       ubicacionLon: aDouble(p['ubicacion_lon'], 0.0),
+      ubicacionPorDefecto: aBool(
+        p['ubicacion_por_defecto'],
+        aDouble(p['ubicacion_lat'], 0.0) == 0 &&
+            aDouble(p['ubicacion_lon'], 0.0) == 0,
+      ),
       ultimaConexion: parsearFecha(p['ultima_conexion']),
       ocultarEnLinea: aBool(p['ocultar_en_linea'], false),
       ocultarEdad: aBool(p['ocultar_edad'], false),
@@ -157,6 +175,7 @@ class PerfilMapeo {
       'ciudad': perfil.ciudad,
       'ubicacion_lat': perfil.ubicacionLat,
       'ubicacion_lon': perfil.ubicacionLon,
+      'ubicacion_por_defecto': perfil.ubicacionPorDefecto,
       'ultima_conexion': perfil.ultimaConexion?.toIso8601String(),
       'ocultar_en_linea': perfil.ocultarEnLinea,
       'ocultar_edad': perfil.ocultarEdad,
@@ -207,8 +226,8 @@ class PerfilMapeo {
       'biografia': o(c.biografia, base?.biografia ?? ''),
       'genero': o(c.genero, base?.genero ?? 'otro').toLowerCase(),
       'busca_genero':
-          o(c.buscaGenero, base?.buscaGenero ?? 'otro').toLowerCase(),
-      'que_busca': o(c.queBusca, base?.queBusca ?? ''),
+          o(c.buscaGenero, base?.buscaGenero ?? 'todos').toLowerCase(),
+      'que_busca': o(c.queBusca, base?.queBusca ?? 'abierto_a_lo_que_surja'),
       'preferencia_edad_min':
           o(c.preferenciaEdadMin, base?.preferenciaEdadMin ?? 18),
       'preferencia_edad_max':
@@ -216,8 +235,14 @@ class PerfilMapeo {
       'fecha_nacimiento':
           _isoFecha(o(c.fechaNacimiento, base?.fechaNacimiento)),
       'ciudad': o(c.ciudad, base?.ciudad ?? ''),
-      'ubicacion_lat': o(c.ubicacionLat, base?.ubicacionLat ?? 0.0),
-      'ubicacion_lon': o(c.ubicacionLon, base?.ubicacionLon ?? 0.0),
+      'ubicacion_lat': (o(c.ubicacionLat, base?.ubicacionLat ?? 23.1136) == 0
+          ? 23.1136
+          : o(c.ubicacionLat, base?.ubicacionLat ?? 23.1136)),
+      'ubicacion_lon': (o(c.ubicacionLon, base?.ubicacionLon ?? -82.3666) == 0
+          ? -82.3666
+          : o(c.ubicacionLon, base?.ubicacionLon ?? -82.3666)),
+      'ubicacion_por_defecto':
+          o(c.ubicacionPorDefecto, base?.ubicacionPorDefecto ?? true),
       'ultima_conexion':
           o(c.ultimaConexion, base?.ultimaConexion)?.toIso8601String(),
       'ocultar_en_linea': o(c.ocultarEnLinea, base?.ocultarEnLinea ?? false),

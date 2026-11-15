@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../../config/env.dart';
@@ -99,7 +100,12 @@ class _PushMovil {
   /// Inicializa Firebase y los handlers de FCM. Nunca lanza: si Firebase no
   /// está configurado la app sigue funcionando sin push. Idempotente: una
   /// segunda llamada (p. ej. desde solicitarPermiso) no duplica listeners.
-  Future<void> inicializar() async {
+  ///
+  /// [solicitarPermiso] = false en el arranque: pedir el permiso de
+  /// notificaciones al abrir la app (sin contexto) es mala práctica y hace
+  /// que mucha gente lo deniegue. Se pide just-in-time al terminar el
+  /// onboarding o cuando el usuario lo activa desde Perfil.
+  Future<void> inicializar({bool solicitarPermiso = true}) async {
     await inicializarCritico();
     if (_completoOk) return;
     final fcm = _fcm;
@@ -126,28 +132,32 @@ class _PushMovil {
         },
       );
 
-      // Permiso runtime POST_NOTIFICATIONS (Android 13+), pedido por la vía
-      // del plugin que realmente muestra la notificación local
-      // (flutter_local_notifications), no solo por firebase_messaging.
-      // Antes solo se pedía vía FCM y nunca se revisaba el resultado de
-      // ninguno de los dos: si Android negaba el permiso (o el diálogo de
-      // FCM no lo cubría en algún dispositivo/versión), la notificación se
-      // descartaba en silencio sin ningún error ni log — parecía "no
-      // funciona" sin ninguna pista de por qué.
-      final permisoLocal = await _locales
+      // Permiso runtime POST_NOTIFICATIONS (Android 13+). En el arranque solo
+      // se CONSULTA el estado; el diálogo se pide por acción explícita del
+      // usuario (onboarding o Perfil).
+      final androidLocal = _locales
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
+              AndroidFlutterLocalNotificationsPlugin>();
+      bool? permisoLocal;
+      if (solicitarPermiso) {
+        permisoLocal = await androidLocal?.requestNotificationsPermission();
+      } else {
+        try {
+          permisoLocal = await androidLocal?.areNotificationsEnabled();
+        } catch (_) {}
+      }
       appLog('[Push] permiso POST_NOTIFICATIONS (flutter_local_notifications): $permisoLocal');
       _mostrarLocales = true;
       _permisoConcedido = permisoLocal;
 
-      final ajustesFcm = await fcm.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      appLog('[Push] permiso FCM: ${ajustesFcm.authorizationStatus}');
+      if (solicitarPermiso) {
+        final ajustesFcm = await fcm.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+        appLog('[Push] permiso FCM: ${ajustesFcm.authorizationStatus}');
+      }
       if (permisoLocal == false) {
         appLog(
             '[Push] AVISO: notificaciones denegadas por el usuario/sistema. '
@@ -215,10 +225,31 @@ class _PushMovil {
   }
 
   /// Pide permiso para notificaciones (Android 13+ muestra el diálogo).
+  /// Es idempotente y se puede llamar aunque la inicialización ya se haya
+  /// hecho: en ese caso solo vuelve a pedir el permiso.
   Future<bool> solicitarPermiso() async {
     try {
-      await inicializar();
-      return _disponible;
+      await inicializar(solicitarPermiso: false);
+      try {
+        final androidLocal = _locales
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>();
+        final local = await androidLocal?.requestNotificationsPermission();
+        if (local != null) _permisoConcedido = local;
+        final fcm = _fcm;
+        if (fcm != null) {
+          final ajustes = await fcm.requestPermission(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+          _permisoConcedido = _permisoConcedido ??
+              (ajustes.authorizationStatus == AuthorizationStatus.authorized ||
+                  ajustes.authorizationStatus ==
+                      AuthorizationStatus.provisional);
+        }
+      } catch (_) {}
+      return _permisoConcedido ?? false;
     } catch (_) {
       return false;
     }
@@ -372,6 +403,30 @@ final _push = _PushMovil();
 /// Pide permiso para notificaciones push (móvil).
 Future<bool> solicitarPermisoNotificaciones() => _push.solicitarPermiso();
 
+/// Consulta el estado ACTUAL del permiso (sin mostrarlo). Se usa para los
+/// badges de Perfil.
+Future<bool?> estadoPermisoNotificaciones() async {
+  try {
+    final androidLocal = _push._locales
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    final habilitadas = await androidLocal?.areNotificationsEnabled();
+    if (habilitadas != null) {
+      _push._permisoConcedido = habilitadas;
+      return habilitadas;
+    }
+  } catch (_) {}
+  return _push._permisoConcedido;
+}
+
+/// Abre los ajustes del sistema de la app (para permisos denegados para
+/// siempre, donde ya no se puede mostrar el diálogo).
+Future<void> abrirAjustesApp() async {
+  try {
+    await openAppSettings();
+  } catch (_) {}
+}
+
 /// null = aún no se pidió el permiso; true/false = concedido/denegado.
 /// Útil para avisar en Configuración si quedaron desactivadas.
 bool? get notificacionesPermitidas => _push._permisoConcedido;
@@ -387,7 +442,10 @@ Future<void> notificarNavegador(String titulo, String cuerpo,
 Future<void> inicializarPushCritico() => _push.inicializarCritico();
 
 /// Inicializa Firebase y los handlers de FCM (una sola vez al arrancar).
-Future<void> inicializarPush() => _push.inicializar();
+/// En el arranque se llama con `solicitarPermiso: false`: el permiso se pide
+/// just-in-time (onboarding o Perfil).
+Future<void> inicializarPush({bool solicitarPermiso = true}) =>
+    _push.inicializar(solicitarPermiso: solicitarPermiso);
 
 /// Registra el token FCM en Supabase (al iniciar sesión).
 Future<void> registrarTokenPush() => _push.registrarToken();

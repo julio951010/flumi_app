@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -37,7 +37,6 @@ import 'features/onboarding/pantallas/onboarding_pantalla.dart';
 import 'features/onboarding/pantallas/onboarding_perfil_pantalla.dart';
 import 'features/onboarding/pantallas/cuestionario_perfil_pantalla.dart';
 import 'features/onboarding/pantallas/genero_obligatorio_pantalla.dart';
-import 'features/onboarding/pantallas/ubicacion_obligatoria_pantalla.dart';
 import 'features/encuentros/pantallas/cerca_de_ti_pantalla.dart';
 import 'features/encuentros/pantallas/encuentros_pantalla.dart';
 import 'features/encuentros/pantallas/filtros_encuentros_sheet.dart';
@@ -147,8 +146,9 @@ void main() async {
 
   EstadoServidorServicio.instancia.iniciarSondeo();
   // Resto del push (permisos, canal, listeners, token): en paralelo sin
-  // bloquear el arranque.
-  unawaited(inicializarPush());
+  // bloquear el arranque. El permiso de notificaciones NO se pide aquí:
+  // se pide just-in-time (onboarding o Perfil) para no ser denegado.
+  unawaited(inicializarPush(solicitarPermiso: false));
   // Foreground vs background: necesario para que notificarInteligente y los
   // canales locales sepan si la app está en 2do plano.
   NotificacionLocalServicio.instancia.inicializar();
@@ -283,9 +283,6 @@ class _InicioRouterState extends State<_InicioRouter>
 
   /// Perfil sin género: se bloquea el acceso al feed hasta completarlo.
   bool _requiereGenero = false;
-
-  /// Perfil sin ubicación real (lat/lon = 0,0): se bloquea el acceso al feed.
-  bool _requiereUbicacion = false;
   bool _syncArranqueHecho = false;
 
   /// True mientras el usuario ya tiene sesión (login OK o sesión restaurada)
@@ -612,7 +609,6 @@ bool _esperandoSincronizacion = false;
         setState(() {
           _perfilCompletado = propio?.perfilCompletado ?? false;
           _requiereGenero = _sinGenero(propio);
-          _requiereUbicacion = _sinUbicacion(propio);
         });
       }
     } catch (e) {
@@ -630,7 +626,6 @@ bool _esperandoSincronizacion = false;
           setState(() {
             _perfilCompletado = propio?.perfilCompletado ?? false;
             _requiereGenero = _sinGenero(propio);
-            _requiereUbicacion = _sinUbicacion(propio);
           });
         }
       } catch (_) {
@@ -644,13 +639,6 @@ bool _esperandoSincronizacion = false;
   /// acceso al feed hasta completarlo.
   bool _sinGenero(Usuario? propio) =>
       propio != null && propio.genero.trim().isEmpty;
-
-  /// `true` si el perfil existe pero no tiene ubicación real (lat/lon = 0,0).
-  /// Sin ubicación real el perfil queda a miles de km de cualquier usuario y
-  /// el propio usuario no recibe feed.
-  bool _sinUbicacion(Usuario? propio) =>
-      propio != null &&
-      (propio.ubicacionLat == 0 && propio.ubicacionLon == 0);
 
   Widget _buildPaginaAuth() {
     // Gates remotos (admin_flumi): mantenimiento bloquea todo; versión
@@ -742,18 +730,8 @@ bool _esperandoSincronizacion = false;
         },
       );
     }
-    // La ubicación real es obligatoria: sin ella el perfil cae en (0,0) y no
-    // aparece en el feed de nadie (y el propio usuario no recibe feed).
-    if (_requiereUbicacion) {
-      return UbicacionObligatoriaPantalla(
-        repositorio: perfilRepositorio,
-        onListo: () {
-          setState(() => _requiereUbicacion = false);
-          unawaited(_verificarPerfilCompletado());
-          unawaited(syncService.sincronizarPerfil());
-        },
-      );
-    }
+    // Sin bloqueo por ubicación: si el perfil no tiene GPS se usa La Habana
+    // por defecto (nunca (0,0)). En Perfil se muestra un aviso para mejorarla.
     return IndicadorConexion(child: _NavegacionPrincipal(key: navPrincipalKey));
   }
 }
@@ -1010,12 +988,9 @@ class _NavegacionPrincipalState extends State<_NavegacionPrincipal>
     chatRepositorio.iniciarPresencia(miId);
     unawaited(votosServicio.inicializar());
     unawaited(_inicializarContadoresMeGusta(miId));
-    unawaited(solicitarPermisoNotificaciones().then((_) {
-      // Tras conceder permiso (Android 13+), registra el token FCM para
-      // que el 2do plano funcione para TODAS las categorías (mensajes,
-      // matches, likes, visitas, cerca).
-      registrarTokenPush();
-    }));
+    // El permiso de notificaciones se pide just-in-time (onboarding o Perfil),
+    // así que aquí solo registramos el token si ya estaba concedido.
+    unawaited(registrarTokenPush());
     // Inicializa observer de foreground/background (si no se hizo en main).
     NotificacionLocalServicio.instancia.inicializar();
     // Se restaura el feedback cuando el servidor vuelve a responder.

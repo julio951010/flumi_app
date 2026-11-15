@@ -69,7 +69,7 @@ void setNotificacionLocalTapHandler(void Function(String) cb) =>
 /// No aplica en web: el navegador gestiona sus propias notificaciones.
 Future<void> inicializarPushCritico() async {}
 
-Future<void> inicializarPush() async {}
+Future<void> inicializarPush({bool solicitarPermiso = true}) async {}
 
 Future<void> registrarTokenPush() async {}
 
@@ -88,6 +88,19 @@ bool? get notificacionesPermitidas {
       return null;
   }
 }
+
+Future<bool?> estadoPermisoNotificaciones() async {
+  switch (html.Notification.permission) {
+    case 'granted':
+      return true;
+    case 'denied':
+      return false;
+    default:
+      return null;
+  }
+}
+
+Future<void> abrirAjustesApp() async {}
 
 void setNotificacionTapHandler(void Function(dynamic) _) {}
 void setNotifTapHandler(void Function(dynamic) _) {}

@@ -4,7 +4,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../core/utilidades/ubicacion_util.dart';
+import '../../../core/utilidades/notificacion_navegador.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../perfiles/perfil_etiquetas.dart';
@@ -26,6 +28,9 @@ class InformacionBasicaPantalla extends StatefulWidget {
 class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
   Usuario? _perfil;
   bool _cargando = true;
+  bool _ubicacionPorDefecto = false;
+  bool _notificacionesConcedidas = false;
+  bool _notifDenegadaParaSiempre = false;
 
   @override
   void initState() {
@@ -35,9 +40,24 @@ class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
 
   Future<void> _cargar() async {
     final perfil = await widget.repositorio.obtenerPerfilPropio();
+    bool permisoUbicacion = false;
+    try {
+      final p = await Geolocator.checkPermission();
+      permisoUbicacion =
+          p == LocationPermission.always || p == LocationPermission.whileInUse;
+    } catch (_) {}
+    final notif = await estadoPermisoNotificaciones();
+    bool permanentlyDenied = false;
+    try {
+      final st = await Permission.notification.status;
+      permanentlyDenied = st.isPermanentlyDenied;
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _perfil = perfil;
+      _ubicacionPorDefecto = perfil?.ubicacionPorDefecto ?? true;
+      _notificacionesConcedidas = notif ?? false;
+      _notifDenegadaParaSiempre = permanentlyDenied;
       _cargando = false;
     });
   }
@@ -57,6 +77,21 @@ class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => pagina)).then((_) {
       if (mounted) _cargar();
     });
+  }
+
+  Future<void> _gestionarNotificaciones() async {
+    if (_notifDenegadaParaSiempre) {
+      await abrirAjustesApp();
+      if (mounted) _cargar();
+      return;
+    }
+    try {
+      final concedido = await solicitarPermisoNotificaciones();
+      if (concedido) {
+        unawaited(registrarTokenPush());
+      }
+    } catch (_) {}
+    if (mounted) _cargar();
   }
 
   @override
@@ -122,6 +157,58 @@ class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
                     secundario,
                     () => _abrir(ActualizarUbicacionPantalla(
                         repositorio: widget.repositorio)),
+                  ),
+                  const Divider(height: 1),
+                  // Sección de permisos y ubicación por defecto.
+                  if (_ubicacionPorDefecto) ...[
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.amber[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber[200]!),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, size: 18, color: Colors.amber[800]),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Tu ubicación es aproximada (La Habana). Activa el '
+                              'GPS o elige tu ciudad para ver personas más '
+                              'cercanas.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.amber[900],
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  _item(
+                    context,
+                    Icons.my_location,
+                    'Permiso de ubicación',
+                    _ubicacionPorDefecto
+                        ? 'Aproximada (La Habana)'
+                        : 'Ubicación real guardada',
+                    secundario,
+                    () => _abrir(ActualizarUbicacionPantalla(
+                        repositorio: widget.repositorio)),
+                  ),
+                  const Divider(height: 1),
+                  _item(
+                    context,
+                    Icons.notifications_outlined,
+                    'Notificaciones',
+                    _notificacionesConcedidas ? 'Activadas' : 'Desactivadas',
+                    secundario,
+                    _gestionarNotificaciones,
                   ),
                 ],
               ),
@@ -1081,6 +1168,7 @@ class _ActualizarUbicacionPantallaState
       companion = companion.copyWith(
         ubicacionLat: Value(coords.$1),
         ubicacionLon: Value(coords.$2),
+        ubicacionPorDefecto: const Value(false),
       );
       await widget.repositorio.guardarOCambiarPerfil(companion);
       if (!mounted) return;

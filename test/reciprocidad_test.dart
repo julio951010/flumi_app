@@ -183,23 +183,19 @@ void main() {
       expect(schema, contains('before update on public.profiles'));
     });
 
-    test('la app bloquea el acceso sin ubicación real', () {
-      expect(
-        File('lib/features/onboarding/pantallas/ubicacion_obligatoria_pantalla.dart')
-            .existsSync(),
-        isTrue,
-      );
+    test('la app ya no bloquea: usa La Habana por defecto', () {
       final main = File('lib/main.dart').readAsStringSync();
-      expect(main, contains('_requiereUbicacion'));
-      expect(main, contains('UbicacionObligatoriaPantalla('));
-      expect(main, contains('_sinUbicacion'));
+      // Sin gate de ubicación: el perfil usa La Habana por defecto.
+      expect(main, isNot(contains('_requiereUbicacion')));
+      expect(main, isNot(contains('UbicacionObligatoriaPantalla(')));
     });
 
-    test('el onboarding exige coordenadas, no solo el nombre de la ciudad', () {
+    test('el onboarding prefiere coordenadas pero permite La Habana por defecto', () {
       final onboarding = File(
               'lib/features/onboarding/pantallas/onboarding_perfil_pantalla.dart')
           .readAsStringSync();
-      expect(onboarding, contains('_coordsDesdeTexto(_ubicacionCtrl.text) != null'));
+      expect(onboarding, contains('_latPorDefecto'));
+      expect(onboarding, contains('_ubicacionPorDefectoTexto'));
     });
 
     test('el formulario de ubicación no guarda sin coordenadas', () {

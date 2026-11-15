@@ -10,7 +10,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? abrirConexion());
 
   @override
-  int get schemaVersion => 27;
+  int get schemaVersion => 28;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -185,6 +185,24 @@ class AppDatabase extends _$AppDatabase {
       if (from < 27) {
         // Solicitudes de chat sin match (beneficio de Premium).
         await m.createTable(solicitudesChat);
+      }
+      if (from < 28) {
+        // Ubicación por defecto + campos blandos con valores por defecto.
+        await m.addColumn(usuarios, usuarios.ubicacionPorDefecto);
+        // Normalizar filas existentes con (0,0).
+        await customStatement('''
+          UPDATE usuarios SET ubicacion_lat = 23.1136, ubicacion_lon = -82.3666,
+                 ubicacion_por_defecto = 1
+          WHERE ubicacion_lat = 0 AND ubicacion_lon = 0
+        ''');
+        await customStatement('''
+          UPDATE usuarios SET busca_genero = 'todos'
+          WHERE busca_genero IS NULL OR trim(busca_genero) = '' OR busca_genero IN ('otro','prefiero_no_decirlo')
+        ''');
+        await customStatement('''
+          UPDATE usuarios SET que_busca = 'abierto_a_lo_que_surja'
+          WHERE que_busca IS NULL OR trim(que_busca) = ''
+        ''');
       }
     },
   );

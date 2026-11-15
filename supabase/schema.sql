@@ -26,12 +26,13 @@ alter table public.profiles add column if not exists fotos_urls            text[
 alter table public.profiles add column if not exists preferencia_edad_min   int default 18;
 alter table public.profiles add column if not exists preferencia_edad_max   int default 99;
 alter table public.profiles add column if not exists genero                text check (genero in ('hombre','mujer','otro','mujer trans','hombre trans','no binario','género fluido'));
-alter table public.profiles add column if not exists busca_genero          text default 'otro';
-alter table public.profiles add column if not exists que_busca            text default '';
+alter table public.profiles add column if not exists busca_genero          text default 'todos';
+alter table public.profiles add column if not exists que_busca            text default 'abierto_a_lo_que_surja';
 alter table public.profiles add column if not exists ciudad               text default '';
-alter table public.profiles add column if not exists ubicacion_lat        double precision not null default 0;
-alter table public.profiles add column if not exists ubicacion_lon        double precision not null default 0;
+alter table public.profiles add column if not exists ubicacion_lat        double precision not null default 23.1136;
+alter table public.profiles add column if not exists ubicacion_lon        double precision not null default -82.3666;
 alter table public.profiles add column if not exists ubicacion            geography(Point, 4326);
+alter table public.profiles add column if not exists ubicacion_por_defecto boolean default true;
 alter table public.profiles add column if not exists verificado_status     boolean default false;
 alter table public.profiles add column if not exists score_popularidad     int default 0;
 alter table public.profiles add column if not exists ocultar_en_linea      boolean default false;
@@ -126,6 +127,28 @@ drop trigger if exists profiles_ubicacion_obligatoria on public.profiles;
 create trigger profiles_ubicacion_obligatoria
   before update on public.profiles
   for each row execute function public.validar_ubicacion_perfil();
+
+-- ============================================================
+-- MIGRACIÓN DE DATOS: ubicación por defecto y campos blandos.
+--   * (0,0) -> coords de La Habana + ubicacion_por_defecto = true
+--   * busca_genero 'otro'/'prefiero_no_decirlo' -> 'todos'
+--   * que_busca '' -> 'abierto_a_lo_que_surja'
+-- Idempotente.
+-- ============================================================
+update public.profiles
+   set ubicacion_lat = 23.1136,
+       ubicacion_lon = -82.3666,
+       ubicacion_por_defecto = true
+ where coalesce(ubicacion_lat, 0) = 0
+   and coalesce(ubicacion_lon, 0) = 0;
+
+update public.profiles
+   set busca_genero = 'todos'
+ where lower(trim(coalesce(busca_genero, ''))) in ('', 'otro', 'prefiero_no_decirlo');
+
+update public.profiles
+   set que_busca = 'abierto_a_lo_que_surja'
+ where coalesce(trim(que_busca), '') = '';
 
 -- ------------------------------------------------------------
 -- El GÉNERO es obligatorio. La fila del perfil nace con el registro (aún sin
@@ -774,12 +797,16 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, nombre, ubicacion_lat, ubicacion_lon)
+  insert into public.profiles (id, nombre, ubicacion_lat, ubicacion_lon,
+                              ubicacion_por_defecto, busca_genero, que_busca)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'nombre', split_part(new.email, '@', 1)),
-    0,
-    0
+    23.1136,
+    -82.3666,
+    true,
+    'todos',
+    'abierto_a_lo_que_surja'
   )
   on conflict (id) do nothing;
   return new;

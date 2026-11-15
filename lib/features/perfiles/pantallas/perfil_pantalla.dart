@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../../../config/env.dart';
 import '../../../core/base_datos_local/database.dart';
+import '../../../core/utilidades/perfil_mapeo.dart';
 import '../../../core/servicios/suscripcion_servicio.dart';
 import '../../../widgets_comunes/foto_perfil.dart';
 import '../../../widgets_comunes/placeholder_foto.dart';
@@ -14,6 +16,8 @@ import '../../../widgets_comunes/shimmer_caja.dart';
 import '../../../widgets_comunes/visor_fotos_pantalla.dart';
 import '../../auth/auth_service.dart';
 import '../../configuracion/pantallas/administrar_suscripcion_pantalla.dart';
+import '../../configuracion/pantallas/informacion_basica_pantalla.dart';
+import '../../../core/utilidades/notificacion_navegador.dart';
 import '../perfil_completado.dart';
 import '../perfil_repositorio.dart';
 import 'detalle_plan_pantalla.dart';
@@ -136,8 +140,19 @@ class _PerfilPantallaState extends State<PerfilPantalla> {
           nombre: remoto['nombre'] ?? '',
           edad: edad,
           genero: remoto['genero'] ?? 'otro',
-          buscaGenero: remoto['busca_genero'] ?? 'otro',
+          buscaGenero: remoto['busca_genero'] ?? 'todos',
           biografia: Value(remoto['biografia'] ?? ''),
+          queBusca: Value(remoto['que_busca'] ?? 'abierto_a_lo_que_surja'),
+          ciudad: Value(remoto['ciudad'] ?? ''),
+          ubicacionLat: Value(
+            PerfilMapeo.aDouble(remoto['ubicacion_lat'], 23.1136),
+          ),
+          ubicacionLon: Value(
+            PerfilMapeo.aDouble(remoto['ubicacion_lon'], -82.3666),
+          ),
+          ubicacionPorDefecto: Value(
+            PerfilMapeo.aBool(remoto['ubicacion_por_defecto'], true),
+          ),
           fotosUrls: Value(
             (remoto['fotos_urls'] as List?)?.whereType<String>().toList() ??
                 const [],
@@ -376,6 +391,42 @@ class _PerfilFlumiState extends State<_PerfilFlumi> {
           if (!widget.perfil.verificadoStatus) ...[
             const SizedBox(height: 12),
             _tarjetaVerificacion(context),
+          ],
+          if (widget.perfil.ubicacionPorDefecto) ...[
+            const SizedBox(height: 12),
+            _tarjetaAviso(
+              context,
+              icono: Icons.location_on_outlined,
+              titulo: 'Ubicación aproximada',
+              texto:
+                  'Usamos La Habana por defecto. Activa el GPS o elige tu '
+                  'ciudad para ver personas más cercanas.',
+              accion: 'Mejorar',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ActualizarUbicacionPantalla(
+                    repositorio: widget.repositorio,
+                  ),
+                ),
+              ).then((_) => widget.onActualizar?.call()),
+            ),
+          ],
+          if (notificacionesPermitidas != true) ...[
+            const SizedBox(height: 12),
+            _tarjetaAviso(
+              context,
+              icono: Icons.notifications_none,
+              titulo: 'Notificaciones desactivadas',
+              texto:
+                  'Actívalas para enterarte de matches, mensajes y Me Gusta.',
+              accion: 'Activar',
+              onTap: () async {
+                final concedido = await solicitarPermisoNotificaciones();
+                if (concedido) unawaited(registrarTokenPush());
+                widget.onActualizar?.call();
+              },
+            ),
           ],
           if (widget.suscripcionServicio.suscripcionesHabilitadas) ...[
             const SizedBox(height: 28),
@@ -620,6 +671,73 @@ class _PerfilFlumiState extends State<_PerfilFlumi> {
         );
         if (verificada == true) widget.onActualizar?.call();
       },
+    );
+  }
+
+  Widget _tarjetaAviso(
+    BuildContext context, {
+    required IconData icono,
+    required String titulo,
+    required String texto,
+    required String accion,
+    required VoidCallback onTap,
+  }) {
+    final primario = Theme.of(context).colorScheme.primary;
+    return Card(
+      elevation: 0,
+      color: Colors.amber[50],
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.amber[200]!),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Icon(icono, color: Colors.amber[800], size: 26),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.amber[900],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      texto,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.amber[900],
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                accion,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: primario,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -20,6 +20,7 @@ void main() {
       ciudad: 'La Habana',
       ubicacionLat: 23.1,
       ubicacionLon: -82.3,
+      ubicacionPorDefecto: false,
       verificadoStatus: true,
       scorePopularidad: 0,
       pendienteDeSincronizar: false,

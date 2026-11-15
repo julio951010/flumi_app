@@ -5,6 +5,7 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/utilidades/ubicacion_util.dart';
+import '../../../core/utilidades/notificacion_navegador.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/servicios/perfil_foto_servicio.dart';
 import '../../../core/base_datos_local/database.dart';
@@ -59,6 +60,17 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
   final _ubicacionCtrl = TextEditingController();
   double? _ubicacionLat;
   double? _ubicacionLon;
+
+  /// `true` cuando las coordenadas vienen de GPS o de una opción elegida a
+  /// mano. Si el usuario no toca nada, se usa La Habana por defecto y el
+  /// perfil queda marcado con `ubicacion_por_defecto = true`.
+  bool _coordsElegidas = false;
+
+  /// Coordenadas por defecto (La Habana) para que el perfil NUNCA caiga en
+  /// (0,0) y siempre tenga feed. Ver `supabase_migration_ubicacion_por_defecto.sql`.
+  static const _latPorDefecto = 23.1136;
+  static const _lonPorDefecto = -82.3666;
+  static const _ubicacionPorDefectoTexto = 'La Habana';
   final _formKeyUbicacion = GlobalKey<FormState>();
   final _focusUbicacion = FocusNode();
   String _genero = '';
@@ -91,10 +103,20 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         .getSingleOrNull();
     if (perfil != null && mounted) {
       _nombreCtrl.text = perfil.nombre;
-      _ubicacionCtrl.text = perfil.ciudad;
-      if (perfil.ubicacionLat != 0 || perfil.ubicacionLon != 0) {
+      final porDefecto = perfil.ubicacionPorDefecto ||
+          (perfil.ubicacionLat == 0 && perfil.ubicacionLon == 0);
+      if (porDefecto) {
+        // Sin ubicación real: mostramos La Habana como sugerencia editable,
+        // sin fijar coordenadas (se resuelven al guardar). Así el paso nunca
+        // bloquea y el perfil nunca queda en (0,0).
+        _ubicacionCtrl.text = perfil.ciudad.trim().isEmpty
+            ? _ubicacionPorDefectoTexto
+            : perfil.ciudad;
+      } else {
+        _ubicacionCtrl.text = perfil.ciudad;
         _ubicacionLat = perfil.ubicacionLat;
         _ubicacionLon = perfil.ubicacionLon;
+        _coordsElegidas = true;
       }
     }
   }
@@ -157,9 +179,12 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       case 4:
         return _queBusca.isNotEmpty;
       case 5:
-        return _ubicacionCtrl.text.trim().isNotEmpty &&
-            (_ubicacionLat != null && _ubicacionLon != null ||
-                _coordsDesdeTexto(_ubicacionCtrl.text) != null);
+        // La ubicación no bloquea: si el usuario no la indica, se usa La
+        // Habana por defecto (nunca (0,0)). Solo se valida si escribió algo
+        // que no se puede resolver a coordenadas.
+        final texto = _ubicacionCtrl.text.trim();
+        if (texto.isEmpty || _coordsElegidas) return true;
+        return _coordsDesdeTexto(texto) != null;
       case 6:
         return _fotos.isNotEmpty;
       default:
@@ -212,6 +237,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     }
 
     if (_paso >= _totalPasos - 1) {
+      await _pedirPermisoNotificaciones();
       if (mounted) widget.onCompletado();
       return;
     }
@@ -219,6 +245,42 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
     await _guardarPaso();
     if (!mounted) return;
     _pageCtrl.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+  }
+
+  /// Pide el permiso de notificaciones al terminar el onboarding, con una
+  /// explicación previa (best practice: just-in-time + contexto). Si lo
+  /// deniega, la app funciona igual y en Perfil aparece un aviso para
+  /// activarlo cuando quiera.
+  Future<void> _pedirPermisoNotificaciones() async {
+    if (!mounted) return;
+    final activar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No te pierdas nada'),
+        content: const Text(
+          'Activa las notificaciones para enterarte al instante de nuevos '
+          'matches, mensajes y Me Gusta. Puedes desactivarlas cuando quieras '
+          'desde los ajustes del teléfono.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Ahora no'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Activar'),
+          ),
+        ],
+      ),
+    );
+    if (activar != true) return;
+    try {
+      final concedido = await solicitarPermisoNotificaciones();
+      if (concedido) {
+        unawaited(registrarTokenPush());
+      }
+    } catch (_) {}
   }
 
   Future<void> _asegurarFilaLocal() async {
@@ -232,7 +294,17 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
               nombre: const Value(''),
               edad: const Value(0),
               genero: const Value(''),
-              buscaGenero: const Value(''),
+              // Nunca vacíos: la reciprocidad se rompe si estos campos no
+              // tienen valor (default 'todos' = sin preferencia de género).
+              buscaGenero: const Value('todos'),
+              queBusca: const Value('abierto_a_lo_que_surja'),
+              preferenciaEdadMin: const Value(18),
+              preferenciaEdadMax: const Value(99),
+              // La Habana por defecto: un perfil sin GPS no puede caer en
+              // (0,0), que lo dejaría invisible fuera de todo radio.
+              ubicacionLat: const Value(_latPorDefecto),
+              ubicacionLon: const Value(_lonPorDefecto),
+              ubicacionPorDefecto: const Value(true),
               esPerfilPropio: const Value(true),
             ),
           );
@@ -275,20 +347,22 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           pendienteDeSincronizar: const Value(true),
         );
       case 5:
-        var companion = UsuariosCompanion(
-          ciudad: Value(_ubicacionCtrl.text.trim()),
+        final texto = _ubicacionCtrl.text.trim();
+        final coords = _coordsElegidas && _ubicacionLat != null &&
+                _ubicacionLon != null
+            ? (_ubicacionLat!, _ubicacionLon!)
+            : _coordsDesdeTexto(texto);
+        final porDefecto = !_coordsElegidas &&
+            (texto.isEmpty || texto == _ubicacionPorDefectoTexto);
+        return UsuariosCompanion(
+          ciudad: Value(
+            texto.isEmpty ? _ubicacionPorDefectoTexto : texto,
+          ),
+          ubicacionLat: Value(coords?.$1 ?? _latPorDefecto),
+          ubicacionLon: Value(coords?.$2 ?? _lonPorDefecto),
+          ubicacionPorDefecto: Value(porDefecto),
           pendienteDeSincronizar: const Value(true),
         );
-        final coords = (_ubicacionLat != null && _ubicacionLon != null)
-            ? (_ubicacionLat!, _ubicacionLon!)
-            : _coordsDesdeTexto(_ubicacionCtrl.text);
-        if (coords != null) {
-          companion = companion.copyWith(
-            ubicacionLat: Value(coords.$1),
-            ubicacionLon: Value(coords.$2),
-          );
-        }
-        return companion;
       default:
         return null;
     }
@@ -759,6 +833,17 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _campoUbicacion(primario),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Si no indicas tu ubicación, usaremos La Habana por '
+                      'defecto para que tu perfil no quede invisible. Puedes '
+                      'cambiarla cuando quieras.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: Colors.grey[600],
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
@@ -820,6 +905,11 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
           },
           onChanged: (v) {
             _ubicacionCtrl.text = v;
+            // Al editar a mano, las coordenadas elegidas antes dejan de ser
+            // válidas: se resuelven de nuevo desde el texto al guardar.
+            _coordsElegidas = false;
+            _ubicacionLat = null;
+            _ubicacionLon = null;
             setState(() {});
           },
           onFieldSubmitted: (_) => onFieldSubmitted(),
@@ -893,6 +983,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
         if (coord != null) {
           _ubicacionLat = coord.$1;
           _ubicacionLon = coord.$2;
+          _coordsElegidas = true;
         }
         setState(() {});
       },
@@ -927,6 +1018,7 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       _autocompleteCtrl?.text = nombre;
       _ubicacionLat = posicion.lat;
       _ubicacionLon = posicion.lon;
+      _coordsElegidas = true;
       setState(() {});
       NotificacionServicio.exito(context, 'Ubicación establecida: $nombre');
     } on UbicacionException catch (e) {
