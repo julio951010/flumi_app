@@ -1,11 +1,16 @@
 typedef OpcionEtiqueta = (String, String);
 
+/// Preferencia de género que se busca ("A quién quieres conocer").
+///
+/// Ya no existe "Prefiero no decirlo": era un comodín que abría la
+/// visibilidad al máximo (se veía y te veían todos), justo lo contrario de lo
+/// que sugería la etiqueta. Los perfiles que lo tenían guardado se migran a
+/// 'todos' (ver `supabase_migration_genero_prefiero.sql`).
 const opcionesBuscaGenero = <OpcionEtiqueta>[
   ('\ud83d\udc68 Hombres', 'hombres'),
   ('\ud83d\udc69 Mujeres', 'mujeres'),
   ('\u26a7\ufe0f Personas no binarias', 'no_binarias'),
   ('\ud83c\udf08 Todos/as', 'todos'),
-  ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
 ];
 
 const opcionesGenero = <String>[
@@ -320,7 +325,10 @@ const _buscaGeneroLegacy = {
   'hombre': '\ud83d\udc68 Hombres',
   'mujer': '\ud83d\udc69 Mujeres',
   'ambos': '\ud83c\udf08 Todos/as',
-  'otro': '\ud83d\ude48 Prefiero no decirlo',
+  // Valores retirados: se muestran como "Todos/as" porque así funcionaban
+  // (comodín sin filtro). La migración los convierte a 'todos'.
+  'otro': '\ud83c\udf08 Todos/as',
+  'prefiero_no_decirlo': '\ud83c\udf08 Todos/as',
 };
 
 String buscaGeneroTexto(String valor) {

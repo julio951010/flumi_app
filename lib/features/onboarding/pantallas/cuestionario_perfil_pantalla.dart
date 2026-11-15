@@ -112,9 +112,6 @@ class _CuestionarioPerfilPantallaState extends State<CuestionarioPerfilPantalla>
   }
 
   String _valorBuscaGenero() {
-    if (_buscaGenero.contains('prefiero_no_decirlo')) {
-      return 'prefiero_no_decirlo';
-    }
     if (_buscaGenero.contains('todos')) {
       return 'todos';
     }

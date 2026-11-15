@@ -20,39 +20,30 @@ class BuscaGeneroOpcion extends StatelessWidget {
     'no_binarias',
   ];
   static const String codigoTodos = 'todos';
-  static const String codigoPrefieroNoDecir = 'prefiero_no_decirlo';
 
   void _alternar(String codigo, Set<String> actual) {
     final nuevo = Set<String>.from(actual);
 
-    if (codigo == codigoPrefieroNoDecir) {
-      nuevo
-        ..clear()
-        ..add(codigo);
-    } else {
-      nuevo.remove(codigoPrefieroNoDecir);
-
-      if (codigo == codigoTodos) {
-        if (nuevo.contains(codigoTodos)) {
-          nuevo.remove(codigoTodos);
-          nuevo.removeAll(codigosGeneros);
-        } else {
-          nuevo.add(codigoTodos);
-          nuevo.addAll(codigosGeneros);
-        }
+    if (codigo == codigoTodos) {
+      if (nuevo.contains(codigoTodos)) {
+        nuevo.remove(codigoTodos);
+        nuevo.removeAll(codigosGeneros);
       } else {
-        if (nuevo.contains(codigo)) {
-          nuevo.remove(codigo);
-        } else {
-          nuevo.add(codigo);
-        }
+        nuevo.add(codigoTodos);
+        nuevo.addAll(codigosGeneros);
+      }
+    } else {
+      if (nuevo.contains(codigo)) {
+        nuevo.remove(codigo);
+      } else {
+        nuevo.add(codigo);
+      }
 
-        final todos = codigosGeneros.every(nuevo.contains);
-        if (todos) {
-          nuevo.add(codigoTodos);
-        } else {
-          nuevo.remove(codigoTodos);
-        }
+      final todos = codigosGeneros.every(nuevo.contains);
+      if (todos) {
+        nuevo.add(codigoTodos);
+      } else {
+        nuevo.remove(codigoTodos);
       }
     }
 

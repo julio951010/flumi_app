@@ -4105,19 +4105,18 @@ class QuieroConocerPantalla extends StatefulWidget {
 }
 
 class _QuieroConocerPantallaState extends State<QuieroConocerPantalla> {
-  static const _opciones = <(String, String)>[
-    ('\ud83d\udc68 Hombres', 'hombres'),
-    ('\ud83d\udc69 Mujeres', 'mujeres'),
-    ('\u26a7\ufe0f Personas no binarias', 'no_binarias'),
-    ('\ud83c\udf08 Todos/as', 'todos'),
-    ('\ud83d\ude48 Prefiero no decirlo', 'prefiero_no_decirlo'),
-  ];
+  /// Opciones compartidas con el onboarding (una sola fuente de verdad).
+  static const _opciones = opcionesBuscaGenero;
 
+  /// Valores antiguos que ya no se ofrecen, con la etiqueta que los representa
+  /// ahora. 'otro' y 'prefiero_no_decirlo' se guardaban como comodín, así que
+  /// se muestran como "Todos/as".
   static const _valoresLegacy = {
     'hombre': '\ud83d\udc68 Hombres',
     'mujer': '\ud83d\udc69 Mujeres',
     'ambos': '\ud83c\udf08 Todos/as',
-    'otro': '\ud83d\ude48 Prefiero no decirlo',
+    'otro': '\ud83c\udf08 Todos/as',
+    'prefiero_no_decirlo': '\ud83c\udf08 Todos/as',
   };
   static const _generos = {
     '\ud83d\udc68 Hombres',
@@ -4125,7 +4124,6 @@ class _QuieroConocerPantallaState extends State<QuieroConocerPantalla> {
     '\u26a7\ufe0f Personas no binarias',
   };
   static const _etiquetaTodos = '\ud83c\udf08 Todos/as';
-  static const _etiquetaPrefiero = '\ud83d\ude48 Prefiero no decirlo';
 
   Set<String> _seleccion = {};
   bool _cargando = true;
@@ -4171,13 +4169,6 @@ class _QuieroConocerPantallaState extends State<QuieroConocerPantalla> {
 
   void _alternar(String etiqueta) {
     setState(() {
-      if (etiqueta == _etiquetaPrefiero) {
-        _seleccion = {_etiquetaPrefiero};
-        return;
-      }
-
-      _seleccion.remove(_etiquetaPrefiero);
-
       if (etiqueta == _etiquetaTodos) {
         if (_seleccion.contains(_etiquetaTodos)) {
           _seleccion.remove(_etiquetaTodos);
@@ -4211,9 +4202,7 @@ class _QuieroConocerPantallaState extends State<QuieroConocerPantalla> {
       return;
     }
     String valor;
-    if (_seleccion.contains(_etiquetaPrefiero)) {
-      valor = 'prefiero_no_decirlo';
-    } else if (_seleccion.contains(_etiquetaTodos)) {
+    if (_seleccion.contains(_etiquetaTodos)) {
       valor = 'todos';
     } else {
       valor = _seleccion

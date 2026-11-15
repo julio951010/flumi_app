@@ -1507,6 +1507,9 @@ bool cumpleFiltrosAvanzados(FiltrosEncuentros filtros, Usuario usuario) {
 /// Criterios base de búsqueda del perfil propio: "interesado en"
 /// (busca_genero) y "rango de edad" (preferencia_edad_min/max). Se aplican
 /// SIEMPRE, antes de los filtros que el usuario configure en la app.
+///
+/// `prefiero_no_decirlo` y `otro` ya no se ofrecen en la app: se toleran aquí
+/// solo para filas antiguas o versiones viejas del APK, y equivalen a 'todos'.
 bool cumpleCriteriosPerfil(Usuario propio, Usuario candidato) {
   final busca = propio.buscaGenero.trim().toLowerCase();
   final sinRestriccion = busca.isEmpty ||

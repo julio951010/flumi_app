@@ -1083,6 +1083,17 @@ as $$
 $$;
 
 -- ============================================================
+-- MIGRACIÓN DE DATOS: se retiró "Prefiero no decirlo" de
+-- busca_genero ("¿A quién quieres conocer?"). Era un comodín: el perfil se
+-- mostraba a todo el mundo y veía a todo el mundo, lo contrario de lo que
+-- sugiere la etiqueta. Se normaliza a 'todos', que es el comodín explícito
+-- que sí queda en la app. Idempotente: al repetirla no encuentra filas.
+-- ============================================================
+update public.profiles
+   set busca_genero = 'todos'
+ where lower(trim(coalesce(busca_genero, ''))) in ('prefiero_no_decirlo', 'otro');
+
+-- ============================================================
 -- FUNCIÓN: perfiles cercanos (feed de descubrimiento, online-first)
 -- Aplica en el servidor: distancia, criterios base del perfil propio
 -- (busca_genero + preferencia_edad), filtros del usuario, y exclusiones
@@ -1200,6 +1211,9 @@ begin
   -- persona busca. No se relaja con "ampliar" (ampliar solo suelta
   -- distancia/ciudad/edad propios): nadie debe ver ni gastar un Me Gusta
   -- en alguien que declaró no buscar su género.
+  -- 'otro' y 'prefiero_no_decirlo' se siguen tolerando aquí solo por filas
+  -- antiguas o versiones viejas del APK; la app ya no los ofrece y la
+  -- migración de datos los convierte a 'todos'.
   if coalesce(mi_genero, '') <> '' then
     clausulas := clausulas || format(
       $f$and (coalesce(p.busca_genero, '') in ('', 'todos', 'ambos', 'otro', 'prefiero_no_decirlo')

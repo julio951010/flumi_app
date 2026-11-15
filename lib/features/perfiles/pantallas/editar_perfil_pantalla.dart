@@ -43,7 +43,6 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
   bool _cargando = true;
   final _picker = ImagePicker();
 
-  static const _opcionesBusca = opcionesBuscaGenero;
   static const _opcionesQueBusca = opcionesQueBusca;
   static const _opcionesOrientacionSexual = opcionesOrientacionSexual;
   static const _opcionesSituacion = opcionesSituacion;
@@ -284,23 +283,9 @@ class _EditarPerfilPantallaState extends State<EditarPerfilPantalla> {
     return _tatuajesLegacy[valor] ?? _opcionTexto(_opcionesTatuajes, valor);
   }
 
-  static const _buscaGeneroLegacy = {
-    'hombre': '\ud83d\udc68 Hombres',
-    'mujer': '\ud83d\udc69 Mujeres',
-    'ambos': '\ud83c\udf08 Todos/as',
-    'otro': '\ud83d\ude48 Prefiero no decirlo',
-  };
-
   String _buscaGeneroTexto(String valor) {
     if (valor.isEmpty) return 'Sin definir';
-    final etiquetas = valor
-        .split(',')
-        .map((c) => c.trim())
-        .where((c) => c.isNotEmpty)
-        .map((c) => _buscaGeneroLegacy[c] ??
-            _opcionTexto(_opcionesBusca, c))
-        .toList();
-    return etiquetas.join(' \u00b7 ');
+    return buscaGeneroTexto(valor);
   }
 
   String _rangoEdadTexto(int min, int max) {

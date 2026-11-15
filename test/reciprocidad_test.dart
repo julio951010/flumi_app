@@ -71,4 +71,58 @@ void main() {
       expect(sql, contains('no_reciproco'));
     });
   });
+
+  group('Preferencia de género ("¿A quién quieres conocer?")', () {
+    test('solo se ofrecen opciones con reciprocidad real', () {
+      final etiquetas =
+          File('lib/features/perfiles/perfil_etiquetas.dart').readAsStringSync();
+      final bloque = etiquetas.substring(
+        etiquetas.indexOf('const opcionesBuscaGenero'),
+        etiquetas.indexOf('const opcionesGenero'),
+      );
+      expect(bloque, contains("'hombres'"));
+      expect(bloque, contains("'mujeres'"));
+      expect(bloque, contains("'no_binarias'"));
+      expect(bloque, contains("'todos'"));
+      // El comodín encubierto se retiró: abría la visibilidad al máximo.
+      expect(bloque.contains('prefiero_no_decirlo'), isFalse);
+    });
+
+    test('los valores retirados se muestran como "Todos/as"', () {
+      final etiquetas =
+          File('lib/features/perfiles/perfil_etiquetas.dart').readAsStringSync();
+      final legacy = etiquetas.substring(
+        etiquetas.indexOf('const _buscaGeneroLegacy'),
+        etiquetas.indexOf('String buscaGeneroTexto'),
+      );
+      expect(legacy, contains("'otro': '\\ud83c\\udf08 Todos/as'"));
+      expect(
+        legacy,
+        contains("'prefiero_no_decirlo': '\\ud83c\\udf08 Todos/as'"),
+      );
+    });
+
+    test('la migración de datos normaliza los valores retirados', () {
+      final migracion = File('supabase_migration_genero_prefiero.sql');
+      expect(migracion.existsSync(), isTrue);
+      final sql = migracion.readAsStringSync();
+      expect(sql, contains("set busca_genero = 'todos'"));
+      expect(sql, contains("'prefiero_no_decirlo'"));
+      expect(sql, contains("'otro'"));
+      expect(
+        File('supabase/schema.sql').readAsStringSync(),
+        contains("set busca_genero = 'todos'"),
+      );
+    });
+
+    test('el onboarding ya no ofrece la opción', () {
+      expect(
+        File(
+                'lib/features/onboarding/pantallas/widgets/busca_genero_opcion.dart')
+            .readAsStringSync()
+            .contains('codigoPrefieroNoDecir'),
+        isFalse,
+      );
+    });
+  });
 }
