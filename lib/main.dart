@@ -37,6 +37,7 @@ import 'features/onboarding/pantallas/onboarding_pantalla.dart';
 import 'features/onboarding/pantallas/onboarding_perfil_pantalla.dart';
 import 'features/onboarding/pantallas/cuestionario_perfil_pantalla.dart';
 import 'features/onboarding/pantallas/genero_obligatorio_pantalla.dart';
+import 'features/onboarding/pantallas/ubicacion_obligatoria_pantalla.dart';
 import 'features/encuentros/pantallas/cerca_de_ti_pantalla.dart';
 import 'features/encuentros/pantallas/encuentros_pantalla.dart';
 import 'features/encuentros/pantallas/filtros_encuentros_sheet.dart';
@@ -282,6 +283,9 @@ class _InicioRouterState extends State<_InicioRouter>
 
   /// Perfil sin género: se bloquea el acceso al feed hasta completarlo.
   bool _requiereGenero = false;
+
+  /// Perfil sin ubicación real (lat/lon = 0,0): se bloquea el acceso al feed.
+  bool _requiereUbicacion = false;
   bool _syncArranqueHecho = false;
 
   /// True mientras el usuario ya tiene sesión (login OK o sesión restaurada)
@@ -608,6 +612,7 @@ bool _esperandoSincronizacion = false;
         setState(() {
           _perfilCompletado = propio?.perfilCompletado ?? false;
           _requiereGenero = _sinGenero(propio);
+          _requiereUbicacion = _sinUbicacion(propio);
         });
       }
     } catch (e) {
@@ -625,6 +630,7 @@ bool _esperandoSincronizacion = false;
           setState(() {
             _perfilCompletado = propio?.perfilCompletado ?? false;
             _requiereGenero = _sinGenero(propio);
+            _requiereUbicacion = _sinUbicacion(propio);
           });
         }
       } catch (_) {
@@ -638,6 +644,13 @@ bool _esperandoSincronizacion = false;
   /// acceso al feed hasta completarlo.
   bool _sinGenero(Usuario? propio) =>
       propio != null && propio.genero.trim().isEmpty;
+
+  /// `true` si el perfil existe pero no tiene ubicación real (lat/lon = 0,0).
+  /// Sin ubicación real el perfil queda a miles de km de cualquier usuario y
+  /// el propio usuario no recibe feed.
+  bool _sinUbicacion(Usuario? propio) =>
+      propio != null &&
+      (propio.ubicacionLat == 0 && propio.ubicacionLon == 0);
 
   Widget _buildPaginaAuth() {
     // Gates remotos (admin_flumi): mantenimiento bloquea todo; versión
@@ -724,6 +737,18 @@ bool _esperandoSincronizacion = false;
         repositorio: perfilRepositorio,
         onListo: () {
           setState(() => _requiereGenero = false);
+          unawaited(_verificarPerfilCompletado());
+          unawaited(syncService.sincronizarPerfil());
+        },
+      );
+    }
+    // La ubicación real es obligatoria: sin ella el perfil cae en (0,0) y no
+    // aparece en el feed de nadie (y el propio usuario no recibe feed).
+    if (_requiereUbicacion) {
+      return UbicacionObligatoriaPantalla(
+        repositorio: perfilRepositorio,
+        onListo: () {
+          setState(() => _requiereUbicacion = false);
           unawaited(_verificarPerfilCompletado());
           unawaited(syncService.sincronizarPerfil());
         },

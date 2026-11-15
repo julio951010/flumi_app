@@ -101,6 +101,33 @@ create trigger profiles_sync_ubicacion
   for each row execute function public.sync_ubicacion();
 
 -- ------------------------------------------------------------
+-- La UBICACIÓN REAL es obligatoria. La fila nace con (0,0) en el registro,
+-- así que no se puede exigir en el INSERT; lo que se impide es BORRARLA
+-- después (volver a (0,0) cuando ya tenía coordenadas reales). Sin
+-- ubicación real el perfil cae en el Golfo de Guinea y no aparece en el
+-- feed de nadie (y el propio usuario no recibe feed).
+-- ------------------------------------------------------------
+create or replace function public.validar_ubicacion_perfil()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(new.ubicacion_lat, 0) = 0
+     and coalesce(new.ubicacion_lon, 0) = 0
+     and not (coalesce(old.ubicacion_lat, 0) = 0
+              and coalesce(old.ubicacion_lon, 0) = 0) then
+    raise exception 'La ubicacion no puede quedar vacia';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_ubicacion_obligatoria on public.profiles;
+create trigger profiles_ubicacion_obligatoria
+  before update on public.profiles
+  for each row execute function public.validar_ubicacion_perfil();
+
+-- ------------------------------------------------------------
 -- El GÉNERO es obligatorio. La fila del perfil nace con el registro (aún sin
 -- género), así que no se puede exigir en el INSERT; lo que se impide es
 -- BORRARLO después. Sin género, `cumple_genero` nunca coincide y el perfil

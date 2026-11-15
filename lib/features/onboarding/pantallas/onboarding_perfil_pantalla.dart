@@ -157,7 +157,9 @@ class _OnboardingPerfilPantallaState extends State<OnboardingPerfilPantalla> {
       case 4:
         return _queBusca.isNotEmpty;
       case 5:
-        return _ubicacionCtrl.text.trim().isNotEmpty;
+        return _ubicacionCtrl.text.trim().isNotEmpty &&
+            (_ubicacionLat != null && _ubicacionLon != null ||
+                _coordsDesdeTexto(_ubicacionCtrl.text) != null);
       case 6:
         return _fotos.isNotEmpty;
       default:

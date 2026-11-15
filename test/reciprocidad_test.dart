@@ -136,8 +136,6 @@ void main() {
     });
 
     test('sin género el perfil es invisible (motivo del bloqueo)', () {
-      // cumple_genero nunca coincide con un género vacío: no es un bug, es la
-      // razón por la que el dato pasa a ser obligatorio.
       expect(
         schema,
         contains("then normalizar_genero(genero) in ('mujer', 'mujertrans')"),
@@ -163,13 +161,71 @@ void main() {
       );
     });
 
-    test('la migración y el diagnóstico existen', () {
+    test('la migración existe', () {
       final migracion = File('supabase_migration_genero_obligatorio.sql');
       expect(migracion.existsSync(), isTrue);
       expect(
         migracion.readAsStringSync(),
         contains('function public.validar_genero_perfil('),
       );
+    });
+  });
+
+  group('Ubicación real obligatoria', () {
+    final schema = File('supabase/schema.sql').readAsStringSync();
+
+    test('el servidor no deja borrar una ubicación real', () {
+      expect(schema, contains('function public.validar_ubicacion_perfil('));
+      expect(
+        schema,
+        contains("raise exception 'La ubicacion no puede quedar vacia'"),
+      );
+      expect(schema, contains('before update on public.profiles'));
+    });
+
+    test('la app bloquea el acceso sin ubicación real', () {
+      expect(
+        File('lib/features/onboarding/pantallas/ubicacion_obligatoria_pantalla.dart')
+            .existsSync(),
+        isTrue,
+      );
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main, contains('_requiereUbicacion'));
+      expect(main, contains('UbicacionObligatoriaPantalla('));
+      expect(main, contains('_sinUbicacion'));
+    });
+
+    test('el onboarding exige coordenadas, no solo el nombre de la ciudad', () {
+      final onboarding = File(
+              'lib/features/onboarding/pantallas/onboarding_perfil_pantalla.dart')
+          .readAsStringSync();
+      expect(onboarding, contains('_coordsDesdeTexto(_ubicacionCtrl.text) != null'));
+    });
+
+    test('el formulario de ubicación no guarda sin coordenadas', () {
+      final info = File(
+              'lib/features/configuracion/pantallas/informacion_basica_pantalla.dart')
+          .readAsStringSync();
+      expect(info, contains('Indica una ubicación válida o usa el GPS'));
+    });
+
+    test('el porcentaje de perfil cuenta la ubicación', () {
+      expect(
+        File('lib/features/perfiles/perfil_completado.dart').readAsStringSync(),
+        contains('p.ubicacionLat != 0 || p.ubicacionLon != 0'),
+      );
+    });
+
+    test('la migración existe', () {
+      final migracion = File('supabase_migration_ubicacion_obligatoria.sql');
+      expect(migracion.existsSync(), isTrue);
+      expect(
+        migracion.readAsStringSync(),
+        contains('function public.validar_ubicacion_perfil('),
+      );
+    });
+
+    test('el diagnóstico del feed existe', () {
       final diagnostico = File('supabase_diagnostico_feed.sql');
       expect(diagnostico.existsSync(), isTrue);
       expect(diagnostico.readAsStringSync(), contains('public.perfiles_cercanos('));

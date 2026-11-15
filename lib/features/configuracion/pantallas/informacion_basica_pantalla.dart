@@ -1061,20 +1061,27 @@ class _ActualizarUbicacionPantallaState
         NotificacionServicio.alerta(context, 'No se encontró tu perfil.');
         return;
       }
+      final coords = (_ubicacionLat != null && _ubicacionLon != null)
+          ? (_ubicacionLat!, _ubicacionLon!)
+          : _coordsDesdeTexto(_ubicacionCtrl.text);
+      if (coords == null) {
+        if (!mounted) return;
+        NotificacionServicio.alerta(
+          context,
+          'Indica una ubicación válida o usa el GPS para continuar.',
+        );
+        setState(() => _guardando = false);
+        return;
+      }
       var companion = UsuariosCompanion(
         uuid: Value(perfil.uuid),
         ciudad: Value(_ubicacionCtrl.text.trim()),
         pendienteDeSincronizar: const Value(true),
       );
-      final coords = (_ubicacionLat != null && _ubicacionLon != null)
-          ? (_ubicacionLat!, _ubicacionLon!)
-          : _coordsDesdeTexto(_ubicacionCtrl.text);
-      if (coords != null) {
-        companion = companion.copyWith(
-          ubicacionLat: Value(coords.$1),
-          ubicacionLon: Value(coords.$2),
-        );
-      }
+      companion = companion.copyWith(
+        ubicacionLat: Value(coords.$1),
+        ubicacionLon: Value(coords.$2),
+      );
       await widget.repositorio.guardarOCambiarPerfil(companion);
       if (!mounted) return;
       NotificacionServicio.exito(context, 'Ubicación actualizada correctamente.');

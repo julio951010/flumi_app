@@ -12,9 +12,10 @@ bool estaCompletadoCampo(String? v) {
 
 int calcularCompletadoPerfil(Usuario p) {
   final checks = <bool>[
-    // El género es obligatorio: sin él el perfil no aparece en el feed de
-    // quien busca un género concreto (reciprocidad). Aquí basta con que no
-    // esté vacío: 'otro' es un valor válido, no un "prefiero no decirlo".
+    // La ubicación real es obligatoria: sin ella el perfil cae en (0,0) y no
+    // aparece en el feed de nadie.
+    p.ubicacionLat != 0 || p.ubicacionLon != 0,
+    // El género es obligatorio...
     p.genero.trim().isNotEmpty,
     estaCompletadoCampo(p.biografia),
     p.fotosLocalesRutas.isNotEmpty || p.fotosUrls.isNotEmpty,
