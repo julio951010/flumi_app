@@ -2949,3 +2949,69 @@ $$;
 
 revoke all on function public.estadisticas_instalaciones() from public;
 grant execute on function public.estadisticas_instalaciones() to authenticated;
+
+-- ============================================================
+-- HARDENING DE PERMISOS (2026-11-18)
+-- La base se ajustó a mano con el editor SQL; este bloque deja el mismo
+-- resultado reproducible si algún día se reconstruye el proyecto desde
+-- este archivo. Sin él, un `schema.sql` limpio vuelve a conceder todo.
+--
+--   · Funciones de trigger: nadie las ejecuta como RPC. Postgres solo
+--     comprueba EXECUTE en la invocación directa, nunca al disparar el
+--     trigger, así que los triggers siguen funcionando igual.
+--   · RPC que la app solo llama con sesión: sin acceso para `anon`.
+--   · `anon` CONSERVA a propósito:
+--       - email_existe         (pantalla de registro, antes de la sesión)
+--       - registrar_instalacion (ping anónimo al arrancar)
+--       - es_admin             (aparece dentro de políticas RLS; para
+--                               anon devuelve false, es inocua)
+-- ============================================================
+do $$
+declare
+  r record;
+  v_n int := 0;
+begin
+  for r in
+    select distinct p.oid::regprocedure as sig
+      from pg_trigger t
+      join pg_proc p on p.oid = t.tgfoid
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and not t.tgisinternal
+  loop
+    execute format(
+      'revoke execute on function %s from public, anon, authenticated', r.sig);
+    v_n := v_n + 1;
+  end loop;
+  raise notice 'funciones de trigger sin acceso por RPC: %', v_n;
+end $$;
+
+do $$
+declare
+  r record;
+  v_n int := 0;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prokind = 'f'
+       and p.proname not in ('email_existe', 'registrar_instalacion', 'es_admin')
+       and not exists (
+         select 1 from pg_depend d
+          where d.objid = p.oid and d.deptype = 'e'
+       )
+       and has_function_privilege('anon', p.oid, 'execute')
+  loop
+    -- `public` además de `anon`: algunas funciones nacen con el grant
+    -- implícito a PUBLIC, y anon lo hereda. `authenticated` y
+    -- `service_role` conservan el permiso explícito.
+    execute format('revoke execute on function %s from public, anon', r.sig);
+    execute format('grant execute on function %s to authenticated, service_role', r.sig);
+    v_n := v_n + 1;
+  end loop;
+  raise notice 'RPC sin acceso para anon: %', v_n;
+end $$;
+
+notify pgrst, 'reload schema';
