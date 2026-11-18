@@ -7,6 +7,13 @@ build/
 .pub-cache/
 .pub/
 
+# Despliegue web (Cloudflare Pages / wrangler): cache local, nunca a git
+.wrangler/
+
+# Logs de build
+build_log.txt
+*.log
+
 # Archivos generados (Isar, build_runner)
 *.g.dart
 *.freezed.dart

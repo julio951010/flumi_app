@@ -1,46 +1,133 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    Si la app se sirve en una ruta distinta de la raíz, cambia el href de abajo
+    (o pasa --base-href a `flutter build web`). Debe empezar y terminar en "/".
   -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Flumi: conoce gente cerca de ti. Pareja, amistad o conversación, con perfiles reales y chat.">
+  <meta name="theme-color" content="#6C63FF">
 
-  <!-- iOS meta tags & icons -->
+  <!-- iOS / navegador móvil -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="flumi">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Flumi">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Vista previa al compartir el enlace (WhatsApp, Telegram, Facebook) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Flumi">
+  <meta property="og:title" content="Flumi — Conoce gente cerca de ti">
+  <meta property="og:description" content="Pareja, amistad o conversación. Perfiles reales, chat y matches cerca de ti.">
+  <meta property="og:image" content="icons/Icon-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Flumi — Conoce gente cerca de ti">
+  <meta name="twitter:description" content="Pareja, amistad o conversación. Perfiles reales, chat y matches cerca de ti.">
+  <meta name="twitter:image" content="icons/Icon-512.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>flumi</title>
+  <title>Flumi — Conoce gente cerca de ti</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #FFFFFF;
+      overscroll-behavior: none;
+    }
+    /* Pantalla de carga: se oculta en el primer frame de Flutter. */
+    #carga-flumi {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: #FFFFFF;
+      z-index: 9999;
+      transition: opacity 220ms ease;
+    }
+    #carga-flumi.oculto {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #carga-flumi img {
+      width: 104px;
+      height: 104px;
+      border-radius: 24px;
+      animation: latido 1.6s ease-in-out infinite;
+    }
+    #carga-flumi .barra {
+      width: 120px;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(108, 99, 255, 0.18);
+      overflow: hidden;
+    }
+    #carga-flumi .barra::after {
+      content: "";
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #6C63FF, #FF6584);
+      animation: deslizar 1.1s ease-in-out infinite;
+    }
+    @keyframes latido {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
+    @keyframes deslizar {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(250%); }
+    }
+    @media (prefers-color-scheme: dark) {
+      html, body, #carga-flumi { background: #121212; }
+      #carga-flumi img { background: #FFFFFF; }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <!-- Pantalla de carga. Evita el rectángulo blanco mientras baja el bundle. -->
+  <div id="carga-flumi" role="status" aria-label="Cargando Flumi">
+    <img src="icons/Icon-192.png" alt="Flumi">
+    <div class="barra"></div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
+  <!--
+    Puedes personalizar flutter_bootstrap.js para configurar el loader o
+    mostrar feedback durante la inicialización:
+    https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <script>
+    (function () {
+      var el = document.getElementById('carga-flumi');
+      if (!el) return;
+      var oculto = false;
+      function ocultar() {
+        if (oculto) return;
+        oculto = true;
+        el.classList.add('oculto');
+        setTimeout(function () {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        }, 260);
+      }
+      // Flutter avisa en el primer frame; el temporizador es la red de
+      // seguridad para que la capa nunca tape la app en redes lentas.
+      window.addEventListener('flutter-first-frame', ocultar);
+      setTimeout(ocultar, 12000);
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

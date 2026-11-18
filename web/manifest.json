@@ -1,13 +1,15 @@
 {
-    "name": "flumi",
-    "short_name": "flumi",
+    "name": "Flumi",
+    "short_name": "Flumi",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#6C63FF",
+    "description": "Conoce gente cerca de ti: pareja, amistad o conversación.",
+    "lang": "es",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": ["social", "dating"],
     "icons": [
         {
             "src": "icons/Icon-192.png",
