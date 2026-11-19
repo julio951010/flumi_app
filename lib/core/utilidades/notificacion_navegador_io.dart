@@ -51,7 +51,6 @@ class _PushMovil {
   final FlutterLocalNotificationsPlugin _locales =
       FlutterLocalNotificationsPlugin();
   FirebaseMessaging? _fcm;
-  bool _disponible = false;
   String? _token;
   /// Usuario para el que quedó registrado [_token] en device_tokens. El token
   /// FCM es por dispositivo (igual para todas las cuentas que lo usen): si
@@ -109,10 +108,7 @@ class _PushMovil {
     await inicializarCritico();
     if (_completoOk) return;
     final fcm = _fcm;
-    if (fcm == null) {
-      _disponible = false;
-      return;
-    }
+    if (fcm == null) return;
     try {
 
       // Canal Android 8+ (obligatorio para background). Sin esto, los push en
@@ -185,11 +181,9 @@ class _PushMovil {
         registrarToken();
       });
 
-      _disponible = true;
       _completoOk = true;
     } catch (e) {
       appLog('[Push] inicializar falló: $e');
-      _disponible = false;
     }
   }
 

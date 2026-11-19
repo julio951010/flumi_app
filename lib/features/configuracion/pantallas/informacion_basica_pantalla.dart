@@ -40,12 +40,6 @@ class _InformacionBasicaPantallaState extends State<InformacionBasicaPantalla> {
 
   Future<void> _cargar() async {
     final perfil = await widget.repositorio.obtenerPerfilPropio();
-    bool permisoUbicacion = false;
-    try {
-      final p = await Geolocator.checkPermission();
-      permisoUbicacion =
-          p == LocationPermission.always || p == LocationPermission.whileInUse;
-    } catch (_) {}
     final notif = await estadoPermisoNotificaciones();
     bool permanentlyDenied = false;
     try {
