@@ -4,7 +4,7 @@
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",
-    "theme_color": "#6C63FF",
+    "theme_color": "#3AA5ED",
     "description": "Conoce gente cerca de ti: pareja, amistad o conversación.",
     "lang": "es",
     "orientation": "portrait-primary",

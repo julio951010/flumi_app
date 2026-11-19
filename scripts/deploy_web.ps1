@@ -14,7 +14,10 @@ param(
   [string]$Proyecto = 'flumi'
 )
 
-$ErrorActionPreference = 'Stop'
+# Los comandos nativos (flutter, npx) escriben avisos por stderr y con
+# 'Stop' PowerShell los trata como fallo del script. Se decide por el codigo
+# de salida de cada comando.
+$ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -86,3 +89,6 @@ if (-not $Preview) {
   Write-Host "Listo: $url" -ForegroundColor Green
   Write-Host "Recuerda: si cambias de subdominio, los usuarios web tendran que iniciar sesion de nuevo." -ForegroundColor DarkGray
 }
+
+# Cierra con exito aunque wrangler/flutter hayan escrito avisos por stderr.
+exit 0

@@ -10,7 +10,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Flumi: conoce gente cerca de ti. Pareja, amistad o conversación, con perfiles reales y chat.">
-  <meta name="theme-color" content="#6C63FF">
+  <meta name="theme-color" content="#3AA5ED">
 
   <!-- iOS / navegador móvil -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -95,6 +95,98 @@
       html, body, #carga-flumi { background: #121212; }
       #carga-flumi img { background: #FFFFFF; }
     }
+
+    /* ------------------------------------------------------------------
+       Aviso de descarga de la APK.
+       En pantallas anchas la app queda centrada (430 px) y a los lados se
+       ve el fondo oscuro del marco web; ahi va este aviso. En movil la app
+       ocupa todo, asi que se oculta y se usa el enlace "Descargar" de
+       Configuracion > Sobre nosotros.
+       ------------------------------------------------------------------ */
+    #cta-apk { display: none; }
+
+    @media (min-width: 1080px) {
+      #cta-apk {
+        display: block;
+        position: fixed;
+        right: 28px;
+        bottom: 32px;
+        z-index: 9998;
+        width: 288px;
+        box-sizing: border-box;
+        padding: 16px 16px 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+        color: #FFFFFF;
+        font-family: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        text-align: left;
+      }
+      #cta-apk.oculto { display: none; }
+    }
+
+    #cta-apk .cabecera {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-right: 18px;
+    }
+    #cta-apk .cabecera img {
+      width: 44px;
+      height: 44px;
+      border-radius: 11px;
+      flex: 0 0 auto;
+      background: #FFFFFF;
+    }
+    #cta-apk strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    #cta-apk .nota {
+      display: block;
+      margin-top: 3px;
+      font-size: 11.5px;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.72);
+    }
+    #cta-apk .boton {
+      display: block;
+      padding: 11px 12px;
+      border-radius: 11px;
+      background: linear-gradient(135deg, #3AA5ED, #7B2CBF);
+      color: #FFFFFF;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      text-decoration: none;
+    }
+    #cta-apk .boton:hover { filter: brightness(1.07); }
+    #cta-apk .alt {
+      display: block;
+      margin-top: 9px;
+      font-size: 11.5px;
+      text-align: center;
+      color: rgba(255, 255, 255, 0.7);
+      text-decoration: none;
+    }
+    #cta-apk .alt:hover { color: #FFFFFF; text-decoration: underline; }
+    #cta-apk .cerrar {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      padding: 4px 6px;
+      border: 0;
+      background: none;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #cta-apk .cerrar:hover { color: #FFFFFF; }
   </style>
 </head>
 <body>
@@ -103,6 +195,25 @@
     <img src="icons/Icon-192.png" alt="Flumi">
     <div class="barra"></div>
   </div>
+
+  <!--
+    Descarga de la APK. El CSS lo muestra solo en pantallas anchas, donde la
+    app queda centrada y el fondo oscuro de los lados queda libre.
+    El enlace usa "latest": siempre apunta a la ultima release publicada,
+    siempre que el asset se siga llamando app-release.apk.
+  -->
+  <aside id="cta-apk" aria-label="Descargar Flumi para Android">
+    <button class="cerrar" type="button" aria-label="Ocultar este aviso">&times;</button>
+    <div class="cabecera">
+      <img src="icons/Icon-192.png" alt="" aria-hidden="true">
+      <div>
+        <strong>Flumi para Android</strong>
+        <span class="nota">Con la app instalada los avisos llegan aunque cierres el navegador.</span>
+      </div>
+    </div>
+    <a class="boton" href="https://github.com/julio951010/flumi_app/releases/latest/download/app-release.apk">Descargar APK</a>
+    <a class="alt" href="https://www.apklis.cu/application/com.jchd.flumi" target="_blank" rel="noopener">o inst&aacute;lala desde Apklis</a>
+  </aside>
 
   <!--
     Puedes personalizar flutter_bootstrap.js para configurar el loader o
@@ -126,6 +237,25 @@
       // seguridad para que la capa nunca tape la app en redes lentas.
       window.addEventListener('flutter-first-frame', ocultar);
       setTimeout(ocultar, 12000);
+    })();
+
+    // Aviso de descarga de la APK: se recuerda si el usuario lo cerro para
+    // no volver a insistirle en este navegador.
+    (function () {
+      var cta = document.getElementById('cta-apk');
+      if (!cta) return;
+      try {
+        if (localStorage.getItem('flumi_cta_apk') === 'oculta') {
+          cta.classList.add('oculto');
+        }
+      } catch (e) {}
+      var boton = cta.querySelector('.cerrar');
+      if (boton) {
+        boton.addEventListener('click', function () {
+          cta.classList.add('oculto');
+          try { localStorage.setItem('flumi_cta_apk', 'oculta'); } catch (e) {}
+        });
+      }
     })();
   </script>
   <script src="flutter_bootstrap.js" async></script>
